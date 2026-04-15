@@ -11,6 +11,16 @@ from routes.notes import router as notes_router
 from config import settings
 
 
+def validate_config() -> None:
+    """本番環境の必須設定を起動時に検証する"""
+    if settings.app_env != "local":
+        frontend_url = os.getenv("FRONTEND_URL", "")
+        if not frontend_url:
+            raise RuntimeError(
+                "FRONTEND_URL must be set in non-local environments"
+            )
+
+
 def init_firebase():
     """Firebase Admin SDKを初期化する"""
     if firebase_admin._apps:
@@ -34,6 +44,7 @@ def init_firebase():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_config()
     init_firebase()
     yield
 
@@ -48,8 +59,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(chat_router, prefix="/api")

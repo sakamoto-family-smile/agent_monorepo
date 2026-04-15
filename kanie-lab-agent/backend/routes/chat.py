@@ -103,11 +103,13 @@ async def chat(
 
         except TimeoutError as e:
             logger.warning("chat stream timeout: %s", e)
+            # タイムアウトメッセージはユーザー向けに表示して良い
             data = {"type": "error", "message": str(e)}
             yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
         except Exception as e:
+            # 内部エラーの詳細はサーバーログのみ（クライアントには汎用メッセージ）
             logger.exception("chat stream error: %s", e)
-            data = {"type": "error", "message": f"エラーが発生しました: {e}"}
+            data = {"type": "error", "message": "エラーが発生しました。もう一度お試しください。"}
             yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")

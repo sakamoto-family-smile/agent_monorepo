@@ -56,4 +56,10 @@ async def google_search_ja(query: str) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    import sys
+    transport = sys.argv[1] if len(sys.argv) > 1 else "stdio"
+    if transport == "streamable-http":
+        port = int(sys.argv[2]) if len(sys.argv) > 2 else 3001
+        mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+    else:
+        mcp.run(transport="stdio")

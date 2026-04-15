@@ -4,6 +4,8 @@ from fastapi import UploadFile
 
 # 1 ファイルあたりの最大サイズ (5 MB)
 MAX_FILE_SIZE = 5 * 1024 * 1024
+# チャンク読み込みサイズ
+_CHUNK_SIZE = 64 * 1024  # 64 KB
 
 SUPPORTED_TYPES = {
     ".txt": "テキスト",
@@ -13,9 +15,37 @@ SUPPORTED_TYPES = {
     ".pdf": "PDF",
 }
 
+# 許可する MIME タイプ（拡張子と組み合わせて検証）
+_ALLOWED_MIME_TYPES = {
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/pdf",
+    # ブラウザによっては .md を octet-stream で送ることがある
+    "application/octet-stream",
+}
+
 
 def _ext(filename: str) -> str:
     return ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
+
+
+async def _read_with_size_limit(file: UploadFile) -> bytes:
+    """チャンク読み込みでサイズ上限を超えたら即 ValueError を送出する。"""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_FILE_SIZE:
+            raise ValueError(
+                f"ファイルサイズが上限 (5 MB) を超えています: {file.filename}"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 async def extract_text(file: UploadFile) -> str:
@@ -29,11 +59,15 @@ async def extract_text(file: UploadFile) -> str:
             f"(対応形式: {', '.join(SUPPORTED_TYPES)})"
         )
 
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
+    # Content-Type 検証（拡張子との不一致を検出）
+    content_type = (file.content_type or "").split(";")[0].strip().lower()
+    if content_type and content_type not in _ALLOWED_MIME_TYPES:
         raise ValueError(
-            f"ファイルサイズが上限 (5 MB) を超えています: {filename}"
+            f"非対応の Content-Type です: {content_type}"
         )
+
+    # サイズ制限付きチャンク読み込み（全バッファより先に超過を検出）
+    content = await _read_with_size_limit(file)
 
     if ext in (".txt", ".md", ".csv"):
         return content.decode("utf-8", errors="replace")

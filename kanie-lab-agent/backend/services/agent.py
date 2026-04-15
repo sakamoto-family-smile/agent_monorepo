@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import json
 import os
 import logging
 from typing import AsyncIterator, Optional
@@ -24,6 +25,26 @@ def build_system_prompt(mode: str) -> str:
     return prompts.get(mode, prompts["research"])
 
 
+def _write_mcp_config(workspace_dir: str, proxy_url: str) -> None:
+    """プロキシ経由のMCP設定をワークスペースに書き込む。
+
+    security-platform proxy が有効な場合、google-search MCPの通信を
+    プロキシ経由に切り替える（レート制限・DLP・ツールピニングを適用）。
+    """
+    config = {
+        "mcpServers": {
+            "google-search": {
+                "transport": "http",
+                "url": proxy_url,
+            }
+        }
+    }
+    mcp_config_path = os.path.join(workspace_dir, ".mcp.json")
+    with open(mcp_config_path, "w") as f:
+        json.dump(config, f, indent=2)
+    logger.debug("MCP config written to %s (proxy=%s)", mcp_config_path, proxy_url)
+
+
 async def run_agent(
     message: str,
     uid: str,
@@ -39,6 +60,18 @@ async def run_agent(
     workspace_base = os.getenv("WORKSPACE_BASE", "/tmp/workspace/users")
     user_workspace = os.path.join(workspace_base, uid)
     os.makedirs(user_workspace, exist_ok=True)
+
+    # パストラバーサル対策: 解決済みパスが workspace_base 内に収まることを確認
+    resolved_base = os.path.realpath(workspace_base)
+    resolved_workspace = os.path.realpath(user_workspace)
+    if not resolved_workspace.startswith(resolved_base + os.sep):
+        raise ValueError(f"Invalid workspace path for uid={uid!r}")
+
+    # Route google-search MCP through security-platform proxy if configured
+    from config import settings
+    if settings.mcp_proxy_url:
+        _write_mcp_config(user_workspace, settings.mcp_proxy_url)
+        logger.info("MCP proxy enabled: %s", settings.mcp_proxy_url)
 
     options = ClaudeAgentOptions(
         model="claude-sonnet-4-6",

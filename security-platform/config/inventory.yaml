@@ -2,6 +2,28 @@
 # Update this file when adding/removing components
 
 mcp_servers:
+  # kanie-lab-agent
+  - name: "google-search-mcp"
+    version: "0.1.0"
+    source: "local"
+    config_path: "kanie-lab-agent/.mcp.json"
+    server_key: "google-search"
+    tags: ["search", "web", "gemini", "kanie-lab"]
+
+  - name: "@modelcontextprotocol/server-brave-search"
+    version: "latest"
+    source: "npm"
+    config_path: "kanie-lab-agent/.mcp.json"
+    server_key: "brave-search"
+    tags: ["search", "web", "kanie-lab"]
+
+  - name: "@modelcontextprotocol/server-fetch"
+    version: "latest"
+    source: "npm"
+    config_path: "kanie-lab-agent/.mcp.json"
+    server_key: "fetch"
+    tags: ["http", "web", "kanie-lab"]
+
   - name: "@modelcontextprotocol/server-brave-search"
     version: "latest"
     source: "npm"
@@ -31,6 +53,23 @@ mcp_servers:
     tags: ["database", "sql"]
 
 skills:
+  # kanie-lab-agent
+  - name: "research-design"
+    path: "kanie-lab-agent/.claude/skills/research-design.md"
+    agent_system: "kanie-lab-agent"
+
+  - name: "paper-survey"
+    path: "kanie-lab-agent/.claude/skills/paper-survey.md"
+    agent_system: "kanie-lab-agent"
+
+  - name: "interview-practice"
+    path: "kanie-lab-agent/.claude/skills/interview-practice.md"
+    agent_system: "kanie-lab-agent"
+
+  - name: "research-review"
+    path: "kanie-lab-agent/.claude/skills/research-review.md"
+    agent_system: "kanie-lab-agent"
+
   - name: "research-assistant"
     path: "agent-system-1/skills/research-assistant/"
     agent_system: "agent-system-1"
@@ -57,6 +96,19 @@ npm_packages:
     ecosystem: "npm"
 
 python_packages:
+  # kanie-lab-agent backend
+  - name: "fastmcp"
+    version: "2.0.0"
+    ecosystem: "pip"
+
+  - name: "firebase-admin"
+    version: "6.0.0"
+    ecosystem: "pip"
+
+  - name: "claude-agent-sdk"
+    version: "latest"
+    ecosystem: "pip"
+
   - name: "fastapi"
     version: "0.115.0"
     ecosystem: "pip"

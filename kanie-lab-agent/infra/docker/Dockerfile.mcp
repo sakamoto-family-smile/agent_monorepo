@@ -10,4 +10,6 @@ RUN pip install --no-cache-dir \
 
 COPY . .
 
-CMD ["python", "server.py"]
+# HTTP transport mode: python server.py streamable-http 3001
+# stdio mode (default): python server.py
+CMD ["python", "server.py", "streamable-http", "3001"]

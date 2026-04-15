@@ -11,6 +11,8 @@ class Settings:
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
     firebase_project_id: str = os.getenv("FIREBASE_PROJECT_ID", "demo-kanie-lab")
     workspace_base: str = os.getenv("WORKSPACE_BASE", "/app/workspace/users")
+    # Security Platform MCP Proxy URL (empty = bypass proxy, direct MCP)
+    mcp_proxy_url: str = os.getenv("MCP_PROXY_URL", "")
 
     @property
     def cors_origins(self) -> List[str]:

@@ -6,8 +6,8 @@ services:
     volumes:
       - ./infra/firebase:/firebase
     ports:
-      - "4000:4000"  # Emulator UI
-      - "9099:9099"  # Auth
+      - "127.0.0.1:4000:4000"  # Emulator UI (localhost only)
+      - "127.0.0.1:9099:9099"  # Auth (localhost only)
     environment:
       - FIREBASE_PROJECT_ID=demo-kanie-lab
     # Auth エミュレーターのみ起動（Firestore は Java が必要なため除外）
@@ -15,13 +15,33 @@ services:
       sh -c "npm install -g firebase-tools &&
              firebase emulators:start --only auth --project demo-kanie-lab"
 
-  # MCP サーバー (Google検索)
+  # MCP サーバー (Google検索) — HTTP transport on port 3001
   mcp-google-search:
     build:
       context: ./tools/google-search-mcp
       dockerfile: ../../infra/docker/Dockerfile.mcp
     environment:
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+    # ポートはDockerネットワーク内のみ（security-proxyから直接アクセス）
+    # ホスト側には公開しない
+    expose:
+      - "3001"
+    restart: unless-stopped
+
+  # Security Platform MCP Proxy — rate limiting, DLP, tool pinning
+  security-proxy:
+    build:
+      context: ../security-platform
+      dockerfile: infra/Dockerfile.proxy
+    environment:
+      - MCP_TARGET_URL=http://mcp-google-search:3001
+      - VERTEX_AI_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - VERTEX_AI_LOCATION=us-central1
+      - LLM_PROVIDER=gemini
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mcp-google-search
     restart: unless-stopped
 
   # バックエンド API
@@ -43,6 +63,8 @@ services:
       - ESTAT_APP_ID=${ESTAT_APP_ID:-}
       - SEMANTIC_SCHOLAR_API_KEY=${SEMANTIC_SCHOLAR_API_KEY:-}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      # Security Platform MCP Proxy (routes google-search through gateway)
+      - MCP_PROXY_URL=http://security-proxy:8080
     volumes:
       - workspace_data:/app/workspace
       - ./backend:/app
@@ -50,6 +72,7 @@ services:
       - ./.claude_credentials/credentials.json:/tmp/claude_credentials.json:ro
     depends_on:
       - firebase-emulator
+      - security-proxy
     restart: unless-stopped
 
   # フロントエンド
