@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Security Platform</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface-2: #21262d;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --text-dim: #484f58;
+      --accent: #58a6ff;
+      --critical: #f85149;
+      --high: #ff8c42;
+      --medium: #e3b341;
+      --low: #3fb950;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    /* ── Layout ───────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    .logo-icon {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, #58a6ff, #f85149);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+
+    .header-meta {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    #refresh-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--low);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    main {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    /* ── Section headers ──────────────────────── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .section-count {
+      font-size: 12px;
+      color: var(--text-muted);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2px 10px;
+    }
+
+    /* ── Stat cards ───────────────────────────── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    @media (max-width: 900px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 500px) {
+      .stats-grid { grid-template-columns: 1fr; }
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+    }
+
+    .stat-card.critical::before { background: var(--critical); }
+    .stat-card.high::before     { background: var(--high); }
+    .stat-card.medium::before   { background: var(--medium); }
+    .stat-card.info::before     { background: var(--accent); }
+
+    .stat-label {
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+
+    .stat-value {
+      font-size: 36px;
+      font-weight: 700;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat-card.critical .stat-value { color: var(--critical); }
+    .stat-card.high .stat-value     { color: var(--high); }
+    .stat-card.medium .stat-value   { color: var(--medium); }
+    .stat-card.info .stat-value     { color: var(--accent); }
+
+    .stat-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+
+    /* ── Action bar ───────────────────────────── */
+    .action-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      transition: all 0.15s;
+    }
+
+    .btn:hover {
+      background: var(--border);
+      border-color: var(--text-muted);
+    }
+
+    .btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #0d1117;
+    }
+
+    .btn.primary:hover {
+      opacity: 0.88;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* ── Filters ──────────────────────────────── */
+    .filter-bar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .filter-bar label {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .filter-bar select,
+    .filter-bar input {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 13px;
+    }
+
+    .filter-bar select:focus,
+    .filter-bar input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    /* ── Table ────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 28px;
+    }
+
+    .card-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      padding: 10px 16px;
+      text-align: left;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      font-size: 13px;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    tr:hover td { background: rgba(88, 166, 255, 0.04); }
+
+    /* ── Severity badges ──────────────────────── */
+    .badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .badge-critical { background: rgba(248, 81, 73, 0.2); color: var(--critical); border: 1px solid rgba(248, 81, 73, 0.35); }
+    .badge-high     { background: rgba(255, 140, 66, 0.2); color: var(--high);     border: 1px solid rgba(255, 140, 66, 0.35); }
+    .badge-medium   { background: rgba(227, 179, 65, 0.2); color: var(--medium);   border: 1px solid rgba(227, 179, 65, 0.35); }
+    .badge-low      { background: rgba(63, 185, 80, 0.2);  color: var(--low);      border: 1px solid rgba(63, 185, 80, 0.35); }
+
+    .badge-source {
+      background: rgba(88, 166, 255, 0.12);
+      color: var(--accent);
+      border: 1px solid rgba(88, 166, 255, 0.25);
+    }
+
+    .badge-match {
+      background: rgba(63, 185, 80, 0.15);
+      color: var(--low);
+      border: 1px solid rgba(63, 185, 80, 0.3);
+    }
+
+    /* ── CVE ID ───────────────────────────────── */
+    .cve-id {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    .vuln-title {
+      font-weight: 500;
+      color: var(--text);
+      max-width: 380px;
+    }
+
+    .vuln-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .owasp-tag {
+      display: inline-block;
+      font-size: 10px;
+      font-family: var(--mono);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 1px 5px;
+      color: var(--text-muted);
+      margin-right: 3px;
+    }
+
+    /* ── Inventory table ──────────────────────── */
+    .type-badge {
+      font-size: 10px;
+      font-family: var(--mono);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 2px 6px;
+      color: var(--text-muted);
+    }
+
+    .vuln-count-0 { color: var(--low); }
+    .vuln-count-pos { color: var(--high); font-weight: 600; }
+
+    /* ── Empty state ──────────────────────────── */
+    .empty-state {
+      padding: 48px;
+      text-align: center;
+      color: var(--text-muted);
+    }
+
+    .empty-state p { margin-top: 8px; font-size: 13px; }
+
+    /* ── Loading spinner ──────────────────────── */
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Toast ────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 18px;
+      font-size: 13px;
+      max-width: 340px;
+      z-index: 1000;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    #toast.success { border-color: var(--low); }
+    #toast.error   { border-color: var(--critical); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🛡</div>
+    Agent Security Platform
+  </div>
+  <div class="header-meta">
+    <div id="refresh-indicator">
+      <div class="dot"></div>
+      <span id="last-updated">Loading...</span>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- Stats grid -->
+  <div class="stats-grid" id="stats-grid">
+    <div class="stat-card critical">
+      <div class="stat-label">Critical Unresolved</div>
+      <div class="stat-value" id="stat-critical">—</div>
+      <div class="stat-sub">Requires immediate action</div>
+    </div>
+    <div class="stat-card high">
+      <div class="stat-label">High Unresolved</div>
+      <div class="stat-value" id="stat-high">—</div>
+      <div class="stat-sub">Should be addressed soon</div>
+    </div>
+    <div class="stat-card medium">
+      <div class="stat-label">New (Last 7 Days)</div>
+      <div class="stat-value" id="stat-new">—</div>
+      <div class="stat-sub">Across all sources</div>
+    </div>
+    <div class="stat-card info">
+      <div class="stat-label">Systems Affected</div>
+      <div class="stat-value" id="stat-affected">—</div>
+      <div class="stat-sub">Inventory matches (30d)</div>
+    </div>
+  </div>
+
+  <!-- Action bar -->
+  <div class="action-bar">
+    <button class="btn primary" onclick="runScan()" id="btn-scan">
+      ⚡ Run Scan
+    </button>
+    <button class="btn" onclick="runAnalyze()" id="btn-analyze">
+      🔍 Analyze
+    </button>
+    <button class="btn" onclick="runDigest()" id="btn-digest">
+      📨 Generate Digest
+    </button>
+    <button class="btn" onclick="loadAll()">
+      ↺ Refresh
+    </button>
+  </div>
+
+  <!-- Vulnerabilities table -->
+  <div class="card">
+    <div class="card-header section-header">
+      <span class="section-title">Recent Vulnerabilities</span>
+      <span class="section-count" id="vuln-count">—</span>
+    </div>
+    <div class="filter-bar" style="padding: 12px 16px; border-bottom: 1px solid var(--border);">
+      <label>Severity:</label>
+      <select id="filter-severity" onchange="loadVulnerabilities()">
+        <option value="">All</option>
+        <option value="CRITICAL">CRITICAL</option>
+        <option value="HIGH">HIGH</option>
+        <option value="MEDIUM">MEDIUM</option>
+        <option value="LOW">LOW</option>
+      </select>
+      <label>Days:</label>
+      <select id="filter-days" onchange="loadVulnerabilities()">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <label>
+        <input type="checkbox" id="filter-affected" onchange="loadVulnerabilities()">
+        Inventory match only
+      </label>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Severity</th>
+            <th>CVE / GHSA</th>
+            <th>Title</th>
+            <th>Affected</th>
+            <th>Source</th>
+            <th>OWASP ASI</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody id="vuln-table-body">
+          <tr><td colspan="7" class="empty-state">
+            <div class="spinner"></div>
+            <p>Loading vulnerabilities...</p>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Inventory table -->
+  <div class="card">
+    <div class="card-header section-header">
+      <span class="section-title">Component Inventory</span>
+      <span class="section-count" id="inventory-count">—</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Type</th>
+            <th>Ecosystem</th>
+            <th>Version</th>
+            <th>Config Path</th>
+            <th>Vulnerabilities</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="inventory-table-body">
+          <tr><td colspan="7" class="empty-state">
+            <div class="spinner"></div>
+            <p>Loading inventory...</p>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+  // ── Utilities ──────────────────────────────────────────
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function severityBadge(sev) {
+    const cls = { CRITICAL: 'critical', HIGH: 'high', MEDIUM: 'medium', LOW: 'low' }[sev] || 'low';
+    return `<span class="badge badge-${cls}">${sev}</span>`;
+  }
+
+  function showToast(msg, type = 'success') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = `show ${type}`;
+    setTimeout(() => { el.className = ''; }, 3500);
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ── Stats ──────────────────────────────────────────────
+  async function loadStats() {
+    try {
+      const r = await fetch('/api/stats');
+      if (!r.ok) throw new Error(r.status);
+      const d = await r.json();
+      document.getElementById('stat-critical').textContent = d.critical_unresolved ?? 0;
+      document.getElementById('stat-high').textContent     = d.high_unresolved ?? 0;
+      document.getElementById('stat-new').textContent      = d.new_7_days ?? 0;
+      document.getElementById('stat-affected').textContent = d.systems_affected ?? 0;
+    } catch (e) {
+      console.error('Stats load failed', e);
+    }
+  }
+
+  // ── Vulnerabilities ────────────────────────────────────
+  async function loadVulnerabilities() {
+    const tbody = document.getElementById('vuln-table-body');
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><div class="spinner"></div><p>Loading...</p></td></tr>';
+
+    const severity  = document.getElementById('filter-severity').value;
+    const days      = document.getElementById('filter-days').value;
+    const affected  = document.getElementById('filter-affected').checked;
+
+    let url = `/api/vulnerabilities?days=${days}&limit=200`;
+    if (severity) url += `&severity=${severity}`;
+    if (affected) url += `&affected_only=true`;
+
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(r.status);
+      const data = await r.json();
+
+      document.getElementById('vuln-count').textContent = `${data.total} total`;
+
+      if (!data.vulnerabilities.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No vulnerabilities found for the selected filters.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = data.vulnerabilities.map(v => {
+        const id = v.cve_id || v.ghsa_id || '—';
+        const affected_comp = v.affected_component ? escapeHtml(v.affected_component) : '—';
+        const version = v.affected_version ? `<span style="color:var(--text-muted)">${escapeHtml(v.affected_version)}</span>` : '';
+        const matchBadge = v.inventory_match ? ' <span class="badge badge-match">INVENTORY</span>' : '';
+        const owasp = (v.owasp_asi || []).map(t => `<span class="owasp-tag">${escapeHtml(t)}</span>`).join('');
+        return `<tr>
+          <td>${severityBadge(v.severity)}</td>
+          <td><span class="cve-id">${escapeHtml(id)}</span></td>
+          <td>
+            <div class="vuln-title">${escapeHtml((v.title || '').slice(0, 90))}</div>
+            <div class="vuln-sub">${matchBadge}</div>
+          </td>
+          <td><span style="font-family:var(--mono);font-size:12px">${affected_comp}</span>${version ? '<br>' + version : ''}</td>
+          <td><span class="badge badge-source">${escapeHtml(v.source || '—')}</span></td>
+          <td>${owasp || '—'}</td>
+          <td style="white-space:nowrap;color:var(--text-muted)">${fmtDate(v.ingested_at)}</td>
+        </tr>`;
+      }).join('');
+
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-state" style="color:var(--critical)">Failed to load vulnerabilities: ${e.message}</td></tr>`;
+    }
+  }
+
+  // ── Inventory ──────────────────────────────────────────
+  async function loadInventory() {
+    const tbody = document.getElementById('inventory-table-body');
+    try {
+      const r = await fetch('/api/inventory');
+      if (!r.ok) throw new Error(r.status);
+      const data = await r.json();
+
+      document.getElementById('inventory-count').textContent = `${data.components.length} components`;
+
+      if (!data.components.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No inventory components found. Run a scan first.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = data.components.map(c => {
+        const vulnClass = c.vulnerability_count > 0 ? 'vuln-count-pos' : 'vuln-count-0';
+        const vulnText = c.vulnerability_count > 0 ? `⚠ ${c.vulnerability_count}` : '0';
+        const status = c.active ? `<span class="badge badge-low">Active</span>` : `<span class="badge" style="color:var(--text-muted)">Inactive</span>`;
+        return `<tr>
+          <td style="font-family:var(--mono);font-size:12px;color:var(--accent)">${escapeHtml(c.name)}</td>
+          <td><span class="type-badge">${escapeHtml(c.component_type || '—')}</span></td>
+          <td style="color:var(--text-muted)">${escapeHtml(c.ecosystem || '—')}</td>
+          <td style="color:var(--text-muted)">${escapeHtml(c.version || 'latest')}</td>
+          <td style="font-size:11px;color:var(--text-muted);font-family:var(--mono)">${escapeHtml(c.config_path || '—')}</td>
+          <td class="${vulnClass}" style="font-weight:600">${vulnText}</td>
+          <td>${status}</td>
+        </tr>`;
+      }).join('');
+
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-state" style="color:var(--critical)">Failed to load inventory: ${e.message}</td></tr>`;
+    }
+  }
+
+  // ── Actions ────────────────────────────────────────────
+  async function runScan() {
+    const btn = document.getElementById('btn-scan');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> Running...';
+    try {
+      const r = await fetch('/api/collect', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        const total = Object.values(d.counts || {}).reduce((a, b) => typeof b === 'number' ? a + b : a, 0);
+        showToast(`Scan complete. ${d.counts?.new_total ?? 0} new vulnerabilities found.`);
+        loadAll();
+      } else {
+        showToast(`Scan failed: ${d.detail || 'Unknown error'}`, 'error');
+      }
+    } catch (e) {
+      showToast(`Scan error: ${e.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '⚡ Run Scan';
+    }
+  }
+
+  async function runAnalyze() {
+    const btn = document.getElementById('btn-analyze');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> Analyzing...';
+    try {
+      const r = await fetch('/api/analyze', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        showToast(`Analysis complete. Processed: ${d.counts?.processed ?? 0}, Notified: ${d.counts?.notified ?? 0}`);
+        loadAll();
+      } else {
+        showToast(`Analysis failed: ${d.detail || 'Unknown error'}`, 'error');
+      }
+    } catch (e) {
+      showToast(`Analysis error: ${e.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '🔍 Analyze';
+    }
+  }
+
+  async function runDigest() {
+    const btn = document.getElementById('btn-digest');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> Generating...';
+    try {
+      const r = await fetch('/api/digest', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        showToast('Daily digest generated and sent to configured channels.');
+      } else {
+        showToast(`Digest failed: ${d.detail || 'Unknown error'}`, 'error');
+      }
+    } catch (e) {
+      showToast(`Digest error: ${e.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '📨 Generate Digest';
+    }
+  }
+
+  // ── Load all ───────────────────────────────────────────
+  function loadAll() {
+    const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    document.getElementById('last-updated').textContent = `Updated ${now}`;
+    loadStats();
+    loadVulnerabilities();
+    loadInventory();
+  }
+
+  // ── Init + auto-refresh ────────────────────────────────
+  loadAll();
+  setInterval(loadAll, 60_000);
+</script>
+</body>
+</html>

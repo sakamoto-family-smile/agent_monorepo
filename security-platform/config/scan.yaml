@@ -1,0 +1,125 @@
+# Scan configuration
+
+# Paths to scan (relative to monorepo root)
+targets:
+  mcp_configs:
+    - "agent-system-1/.mcp.json"
+    - "agent-system-2/.mcp.json"
+
+  skills_directories:
+    - "agent-system-1/skills/"
+    - "agent-system-2/skills/"
+
+  source_directories:
+    - "agent-system-1/src/"
+    - "agent-system-2/src/"
+
+# CVSS thresholds
+cvss_thresholds:
+  critical: 9.0
+  high: 7.0
+  medium: 4.0
+  low: 0.0
+
+# Collector settings
+collector:
+  nvd:
+    enabled: true
+    poll_interval_hours: 2
+    lookback_days: 7  # Initial fetch: last 7 days
+    keywords:
+      - "mcp"
+      - "model context protocol"
+      - "claude"
+      - "agent"
+      - "llm"
+      - "prompt injection"
+
+  github_advisory:
+    enabled: true
+    poll_interval_hours: 1
+    ecosystems:
+      - "npm"
+      - "pip"
+      - "go"
+
+  osv:
+    enabled: true
+    poll_interval_hours: 1
+    ecosystems:
+      - "npm"
+      - "PyPI"
+      - "Go"
+
+  vulnerable_mcp:
+    enabled: true
+    poll_interval_hours: 24
+    url: "https://vulnerablemcp.info"
+
+# Scanner settings
+scanner:
+  snyk_agent_scan:
+    enabled: true  # Requires: uvx snyk-agent-scan
+    fail_on_severity: "high"  # Block CI on high/critical
+
+  gitleaks:
+    enabled: true  # Requires: gitleaks binary
+    config: ".gitleaks.toml"
+
+# Proxy settings
+proxy:
+  rate_limiter:
+    max_calls_per_minute: 100
+    circuit_breaker_threshold: 10  # consecutive failures before opening
+
+  dlp:
+    patterns:
+      - name: "API_KEY"
+        pattern: "(?i)(api[_-]?key|apikey)\\s*[:=]\\s*[\"']?([a-zA-Z0-9_\\-]{20,})[\"']?"
+      - name: "AWS_SECRET"
+        pattern: "(?i)aws[_-]?secret[_-]?access[_-]?key\\s*[:=]\\s*[\"']?([a-zA-Z0-9/+]{40})[\"']?"
+      - name: "CREDIT_CARD"
+        pattern: "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\\b"
+      - name: "PRIVATE_KEY"
+        pattern: "-----BEGIN (?:RSA |EC )?PRIVATE KEY-----"
+      - name: "JWT_TOKEN"
+        pattern: "eyJ[a-zA-Z0-9_-]{10,}\\.[a-zA-Z0-9_-]{10,}\\.[a-zA-Z0-9_-]{10,}"
+
+  tool_pinning:
+    enabled: true
+    alert_on_change: true
+
+# MCP Gateway settings (Layer 3)
+gateway:
+  # Operating mode:
+  #   passive — log violations but do NOT block traffic (recommended for first 1-2 weeks)
+  #   active  — block violations and alert immediately (switch after calibrating rules)
+  mode: passive
+
+  rate_limiter:
+    max_calls_per_minute: 100
+    circuit_breaker_threshold: 10
+
+  # Maximum hourly API cost before blocking (USD)
+  max_usd_per_hour: 10.0
+
+  # Maximum response body size from MCP servers (bytes). Default: 10 MB
+  max_response_bytes: 10485760
+
+  # Allowed destination hostnames/URLs for outbound MCP calls.
+  # Requests to unlisted destinations are blocked (or logged in passive mode).
+  # Supports wildcards: "*.example.com"
+  allowed_destinations:
+    - "localhost"
+    - "127.0.0.1"
+    - "::1"
+    # Add production MCP server hosts here, e.g.:
+    # - "api.anthropic.com"
+    # - "*.modelcontextprotocol.io"
+
+  # Additional injection patterns (merged with built-in defaults in injection.py).
+  # Use this to add project-specific patterns without modifying source code.
+  # injection_patterns:
+  #   - name: "MY_CUSTOM_PATTERN"
+  #     category: "prompt"
+  #     pattern: "(?i)my_secret_keyword"

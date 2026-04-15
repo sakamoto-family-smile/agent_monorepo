@@ -1,0 +1,73 @@
+# Promptfoo Red Team configuration
+# Covers OWASP ASI and AST10 vulnerabilities
+# Updated to match design spec §5.3 (Layer 2)
+
+description: "Agent Security Platform - Red Team Testing"
+
+targets:
+  - id: anthropic:claude-haiku-4-5-20251001
+    config:
+      temperature: 0.7
+
+redteam:
+  numTests: 25
+  plugins:
+    # --- Direct / Indirect Prompt Injection (ASI01, ASI08, LLM01) ---
+    - id: prompt-injection              # Direct: user input contains malicious instructions
+      numTests: 5
+    - id: indirect-prompt-injection     # Indirect: tool output / RAG data contains injected commands
+      numTests: 5
+
+    # --- Memory / Context Poisoning (ASI08) ---
+    - id: agentic:memory-poisoning      # Inject poison into conversation history or RAG
+      numTests: 3
+    - id: cross-session-leak            # Data/instructions bleeding across sessions
+      numTests: 3
+
+    # --- Goal Hijack / Agent Misalignment (ASI01, ASI10) ---
+    - id: goal-misalignment             # Multi-step attacks that rewrite the agent's objective
+      numTests: 3
+
+    # --- MCP-specific attacks (ASI01, ASI02, ASI04) ---
+    - id: mcp                           # MCP tool call result injection
+      numTests: 5
+
+    # --- Identity & Credential Abuse (ASI03) ---
+    - id: rbac                          # Role-based access control bypass
+      numTests: 3
+    - id: bola                          # Broken Object-Level Authorization
+      numTests: 3
+    - id: bfla                          # Broken Function-Level Authorization
+      numTests: 3
+
+    # --- Excessive Agency (ASI02, ASI10) ---
+    - id: excessive-agency              # Agent takes actions beyond its intended scope
+      numTests: 5
+
+    # --- Injection via Tools (ASI02, AST05) ---
+    - id: shell-injection               # OS command injection through tool parameters
+      numTests: 5
+    - id: sql-injection                 # SQL injection through tool parameters
+      numTests: 5
+
+    # --- Data Leakage (ASI06) ---
+    - id: pii-direct                    # Agent includes PII in output
+      numTests: 3
+
+    # --- Encoding / Obfuscation Attacks ---
+    - id: ascii-smuggling               # Hidden instructions via ASCII smuggling
+      numTests: 3
+    - id: base64-encoded-instructions   # Instructions encoded in base64
+      numTests: 3
+
+  strategies:
+    - jailbreak            # Generic jailbreak attempts
+    - prompt-injection     # Prompt injection strategy variants
+    - crescendo            # Multi-turn escalation attacks
+    - base64               # Base64 obfuscation
+
+output:
+  - type: json
+    path: "../logs/redteam-latest.json"
+  - type: html
+    path: "../logs/redteam-latest.html"

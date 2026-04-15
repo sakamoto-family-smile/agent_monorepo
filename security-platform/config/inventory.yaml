@@ -1,0 +1,92 @@
+# Component Inventory - Track all MCP servers, skills, and packages in use
+# Update this file when adding/removing components
+
+mcp_servers:
+  - name: "@modelcontextprotocol/server-brave-search"
+    version: "latest"
+    source: "npm"
+    config_path: "agent-system-1/.mcp.json"
+    server_key: "brave-search"
+    tags: ["search", "web"]
+
+  - name: "@modelcontextprotocol/server-filesystem"
+    version: "latest"
+    source: "npm"
+    config_path: "agent-system-1/.mcp.json"
+    server_key: "filesystem"
+    tags: ["filesystem", "files"]
+
+  - name: "@modelcontextprotocol/server-github"
+    version: "latest"
+    source: "npm"
+    config_path: "agent-system-2/.mcp.json"
+    server_key: "github"
+    tags: ["github", "code"]
+
+  - name: "@modelcontextprotocol/server-postgres"
+    version: "latest"
+    source: "npm"
+    config_path: "agent-system-2/.mcp.json"
+    server_key: "postgres"
+    tags: ["database", "sql"]
+
+skills:
+  - name: "research-assistant"
+    path: "agent-system-1/skills/research-assistant/"
+    agent_system: "agent-system-1"
+
+  - name: "code-helper"
+    path: "agent-system-2/skills/code-helper/"
+    agent_system: "agent-system-2"
+
+npm_packages:
+  - name: "@modelcontextprotocol/server-brave-search"
+    version: "latest"
+    ecosystem: "npm"
+
+  - name: "@modelcontextprotocol/server-filesystem"
+    version: "latest"
+    ecosystem: "npm"
+
+  - name: "@modelcontextprotocol/server-github"
+    version: "latest"
+    ecosystem: "npm"
+
+  - name: "@modelcontextprotocol/server-postgres"
+    version: "latest"
+    ecosystem: "npm"
+
+python_packages:
+  - name: "fastapi"
+    version: "0.115.0"
+    ecosystem: "pip"
+
+  - name: "anthropic"
+    version: "0.30.0"
+    ecosystem: "pip"
+
+  - name: "sqlalchemy"
+    version: "2.0.0"
+    ecosystem: "pip"
+
+agent_frameworks:
+  - name: "anthropic-claude-code"
+    version: "latest"
+    type: "agent-runtime"
+
+keywords:
+  # Keywords to match when filtering CVEs from NVD
+  mcp_related:
+    - "model context protocol"
+    - "mcp-server"
+    - "mcp server"
+    - "claude"
+    - "anthropic"
+    - "llm tool"
+    - "agent tool"
+  agent_related:
+    - "llm"
+    - "large language model"
+    - "ai agent"
+    - "prompt injection"
+    - "tool calling"
