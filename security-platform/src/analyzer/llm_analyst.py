@@ -108,9 +108,9 @@ async def _analyze_with_gemini(prompt: str) -> dict[str, str]:
             model="gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
-                max_output_tokens=1024,
-                temperature=0.2,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                max_output_tokens=2048,
+                temperature=1.0,  # required for thinking mode
+                thinking_config=types.ThinkingConfig(thinking_budget=1024),
             ),
         )
         raw = response.text or "{}"
