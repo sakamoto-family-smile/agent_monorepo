@@ -1,0 +1,44 @@
+# Notification configuration
+# Set webhook URLs and tokens in .env file
+
+channels:
+  slack:
+    enabled: false  # Set to true after configuring SLACK_WEBHOOK_URL in .env
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+    mention_critical: "@channel"
+    mention_high: "@here"
+
+  line:
+    enabled: false  # Set to true after configuring LINE_NOTIFY_TOKEN in .env
+    token: "${LINE_NOTIFY_TOKEN}"
+
+  email:
+    enabled: false  # Set to true after configuring SMTP settings in .env
+    smtp_host: "${SMTP_HOST}"
+    smtp_port: 587
+    from_address: "${SMTP_USER}"
+    to_addresses:
+      - "${NOTIFICATION_EMAIL}"
+
+# Thresholds for immediate vs digest notifications
+thresholds:
+  immediate:
+    - severity: CRITICAL
+      channels: [slack, line, email]
+    - severity: HIGH
+      channels: [slack, line]
+
+  daily_digest:
+    - severity: MEDIUM
+      channels: [slack, email]
+    - severity: LOW
+      channels: [email]
+
+  weekly_digest:
+    - severity: LOW
+      channels: [email]
+
+# Digest schedule
+digest:
+  daily_time: "09:00"   # Daily digest at 9:00 AM
+  timezone: "Asia/Tokyo"
