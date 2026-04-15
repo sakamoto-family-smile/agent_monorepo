@@ -1,0 +1,152 @@
+name: PR Tests
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  detect-changes:
+    name: Detect changed modules
+    runs-on: ubuntu-latest
+    outputs:
+      test_paths: ${{ steps.map.outputs.test_paths }}
+      run_all: ${{ steps.map.outputs.run_all }}
+      has_changes: ${{ steps.map.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed
+        run: |
+          git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            -- 'security-platform/**' > changed_files.txt
+          echo "Changed files:"
+          cat changed_files.txt
+
+      - name: Map source changes to test paths
+        id: map
+        run: |
+          python3 - <<'PYEOF'
+          import os
+          import sys
+
+          MODULE_MAP = {
+              "security-platform/src/proxy/":     "security-platform/tests/proxy/",
+              "security-platform/src/analyzer/":  "security-platform/tests/analyzer/",
+              "security-platform/src/collector/": "security-platform/tests/collector/",
+              "security-platform/src/db/":        "security-platform/tests/db/",
+              "security-platform/src/notifier/":  "security-platform/tests/notifier/",
+          }
+
+          # Files that touch shared infrastructure → run full suite
+          FULL_SUITE_TRIGGERS = [
+              "security-platform/src/config.py",
+              "security-platform/pyproject.toml",
+              "security-platform/uv.lock",
+          ]
+
+          with open("changed_files.txt") as f:
+              changed = [line.strip() for line in f if line.strip()]
+
+          if not changed:
+              print("No security-platform files changed.")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                  out.write("has_changes=false\n")
+                  out.write("run_all=false\n")
+                  out.write("test_paths=\n")
+              sys.exit(0)
+
+          # Check if full suite is needed
+          for trigger in FULL_SUITE_TRIGGERS:
+              if any(f == trigger or f.startswith(trigger) for f in changed):
+                  print(f"Full suite triggered by: {trigger}")
+                  with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                      out.write("has_changes=true\n")
+                      out.write("run_all=true\n")
+                      out.write("test_paths=security-platform/tests/\n")
+                  sys.exit(0)
+
+          # Build targeted test paths
+          test_paths = set()
+          for f in changed:
+              # Direct changes to test files → use the parent directory
+              if f.startswith("security-platform/tests/"):
+                  parts = f.split("/")
+                  dir_parts = parts[:-1]  # strip filename
+                  if len(dir_parts) >= 3:
+                      test_paths.add("/".join(dir_parts) + "/")
+                  else:
+                      test_paths.add("security-platform/tests/")
+                  continue
+
+              # Map source → test directory
+              for src_prefix, test_prefix in MODULE_MAP.items():
+                  if f.startswith(src_prefix):
+                      if os.path.isdir(test_prefix):
+                          test_paths.add(test_prefix)
+                      else:
+                          # Fallback to full suite if test dir missing
+                          test_paths.add("security-platform/tests/")
+                      break
+
+          if not test_paths:
+              # Changes outside known modules (e.g. scripts/, README) — skip tests
+              print("No testable changes detected.")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                  out.write("has_changes=false\n")
+                  out.write("run_all=false\n")
+                  out.write("test_paths=\n")
+              sys.exit(0)
+
+          paths_str = " ".join(sorted(test_paths))
+          print(f"Test paths to run: {paths_str}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write("has_changes=true\n")
+              out.write("run_all=false\n")
+              out.write(f"test_paths={paths_str}\n")
+          PYEOF
+
+  test:
+    name: Run tests (${{ needs.detect-changes.outputs.test_paths || 'none' }})
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: security-platform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run targeted tests
+        run: |
+          TEST_PATHS="${{ needs.detect-changes.outputs.test_paths }}"
+          # Strip the security-platform/ prefix (we're already in that dir)
+          RELATIVE_PATHS=$(echo "$TEST_PATHS" | sed 's|security-platform/||g')
+          echo "Running: pytest $RELATIVE_PATHS"
+          uv run pytest $RELATIVE_PATHS \
+            --tb=short \
+            -v \
+            --no-header
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: security-platform/.pytest_cache/
+          retention-days: 7
