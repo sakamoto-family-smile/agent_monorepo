@@ -1,0 +1,68 @@
+# ビルドコンテキスト: プロジェクトルート（kanie-lab-agent/）
+# Cloud Build から使用: cloudbuild.yaml で context: . として指定
+
+FROM python:3.12-slim
+
+# システム依存パッケージ（Node.js + uv + gosu）
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    gosu \
+    gnupg \
+    ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv のインストール（uvx で MCP サーバーを実行するために必要）
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
+WORKDIR /app
+
+# 非rootユーザーを作成
+RUN useradd -m -u 1000 appuser \
+    && mkdir -p /home/appuser/.local/bin \
+    && ln -s /root/.local/bin/uv /home/appuser/.local/bin/uv 2>/dev/null || true \
+    && ln -s /root/.local/bin/uvx /home/appuser/.local/bin/uvx 2>/dev/null || true
+
+ENV PATH="/root/.local/bin:/home/appuser/.local/bin:${PATH}"
+
+# Claude CLI のインストール
+RUN curl -fsSL https://claude.ai/install.sh | sh || true
+
+# Python 依存パッケージのインストール
+COPY backend/pyproject.toml .
+RUN pip install --no-cache-dir -e ".[all]" 2>/dev/null || pip install --no-cache-dir \
+    fastapi>=0.115.0 \
+    "uvicorn[standard]>=0.30.0" \
+    firebase-admin>=6.0.0 \
+    google-cloud-firestore>=2.19.0 \
+    python-dotenv>=1.0.0 \
+    httpx>=0.27.0 \
+    python-multipart>=0.0.9 \
+    claude-agent-sdk
+
+# Google Search MCP の依存パッケージ
+RUN pip install --no-cache-dir fastmcp google-genai
+
+# アプリケーションコードのコピー
+COPY backend/ .
+
+# Google Search MCP サーバーをコピー
+RUN mkdir -p /app/mcp
+COPY tools/google-search-mcp/server.py /app/mcp/google_search_server.py
+
+# ワークスペースディレクトリの事前作成
+RUN mkdir -p /app/workspace/users /home/appuser/.claude \
+    && chown -R appuser:appuser /app /home/appuser
+
+# 本番用エントリーポイントのコピー
+COPY infra/docker/entrypoint.prod.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 8000
+
+ENTRYPOINT ["/entrypoint.sh"]
+# Cloud Run は単一コンテナのため workers=1 を推奨（並列リクエストは Cloud Run がスケールで対応）
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
