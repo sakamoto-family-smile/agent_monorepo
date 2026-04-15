@@ -29,7 +29,10 @@ uv sync
 
 # 2. 環境変数を設定
 cp config/.env.example config/.env
-# config/.env を編集 — LLM分析を使う場合は最低限 ANTHROPIC_API_KEY を設定
+# config/.env を編集 — LLM分析を使う場合は以下のいずれかを設定:
+#   Claude:  ANTHROPIC_API_KEY
+#   Gemini:  VERTEX_AI_PROJECT + VERTEX_AI_LOCATION (Application Default Credentials を使用)
+#            実行: gcloud auth application-default login
 
 # 3. データベースを初期化
 uv run python -m src.db.migrations
