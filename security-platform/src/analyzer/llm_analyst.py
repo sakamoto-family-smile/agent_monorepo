@@ -85,27 +85,32 @@ async def _analyze_with_claude(prompt: str) -> dict[str, str]:
 
 
 async def _analyze_with_gemini(prompt: str) -> dict[str, str]:
-    """Call Gemini Flash via Vertex AI (cost-efficient) for analysis."""
+    """Call Gemini Flash via Vertex AI (cost-efficient) for analysis.
+
+    Uses google-genai SDK with vertexai=True (Application Default Credentials).
+    """
     try:
-        import vertexai
-        from vertexai.generative_models import GenerationConfig, GenerativeModel
+        from google import genai
+        from google.genai import types
     except ImportError:
         logger.warning(
-            "google-cloud-aiplatform package not installed; run: uv add google-cloud-aiplatform"
+            "google-genai package not installed; run: uv add google-genai"
         )
         return {}
 
-    vertexai.init(
+    client = genai.Client(
+        vertexai=True,
         project=settings.vertex_ai_project,
         location=settings.vertex_ai_location,
     )
-    model = GenerativeModel("gemini-1.5-flash")
     try:
-        response = await model.generate_content_async(
-            prompt,
-            generation_config=GenerationConfig(
-                max_output_tokens=512,
+        response = await client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                max_output_tokens=1024,
                 temperature=0.2,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
         raw = response.text or "{}"
