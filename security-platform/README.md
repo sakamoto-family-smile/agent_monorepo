@@ -29,7 +29,10 @@ uv sync
 
 # 2. Configure environment
 cp config/.env.example config/.env
-# Edit config/.env — at minimum, set ANTHROPIC_API_KEY if you want LLM analysis
+# Edit config/.env — set one of the following for LLM analysis:
+#   Claude:    ANTHROPIC_API_KEY
+#   Gemini:    VERTEX_AI_PROJECT + VERTEX_AI_LOCATION (uses Application Default Credentials)
+#              Run: gcloud auth application-default login
 
 # 3. Initialize the database
 uv run python -m src.db.migrations
