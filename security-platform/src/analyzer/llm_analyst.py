@@ -48,8 +48,11 @@ def _resolve_provider() -> Provider | None:
     if explicit in ("claude", "gemini"):
         return explicit  # type: ignore[return-value]
 
-    # Auto-detect from available keys
-    if settings.anthropic_api_key:
+    # Auto-detect from available keys (checked in priority order)
+    # 1. ANTHROPIC_API_KEY  — standard API key
+    # 2. ANTHROPIC_AUTH_TOKEN — Bearer token for LLM proxy/gateway
+    # 3. CLAUDE_CODE_OAUTH_TOKEN — long-lived token from `claude setup-token`
+    if settings.anthropic_api_key or settings.anthropic_auth_token or settings.claude_code_oauth_token:
         return "claude"
     if settings.gemini_api_key:
         return "gemini"
@@ -57,14 +60,25 @@ def _resolve_provider() -> Provider | None:
 
 
 async def _analyze_with_claude(prompt: str) -> dict[str, str]:
-    """Call Claude claude-haiku-4-5 (cost-efficient) for analysis."""
+    """Call Claude claude-haiku-4-5 (cost-efficient) for analysis.
+
+    Supports three auth methods (checked in priority order):
+    - ANTHROPIC_API_KEY: standard API key → X-Api-Key header
+    - ANTHROPIC_AUTH_TOKEN: Bearer token for LLM proxy/gateway → Authorization: Bearer header
+    - CLAUDE_CODE_OAUTH_TOKEN: long-lived OAuth token from `claude setup-token` → Authorization: Bearer header
+    """
     try:
         import anthropic
     except ImportError:
         logger.warning("anthropic package not installed; run: uv add anthropic")
         return {}
 
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    if settings.anthropic_api_key:
+        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    elif settings.anthropic_auth_token:
+        client = anthropic.AsyncAnthropic(auth_token=settings.anthropic_auth_token)
+    else:
+        client = anthropic.AsyncAnthropic(auth_token=settings.claude_code_oauth_token)
     try:
         message = await client.messages.create(
             model="claude-haiku-4-5-20251001",

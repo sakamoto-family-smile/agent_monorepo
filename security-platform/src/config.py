@@ -18,7 +18,9 @@ class Settings(BaseSettings):
     # API Keys
     nvd_api_key: str = ""  # Required for full NVD rate limits (50 req/30s vs 5 req/30s)
     github_token: str = ""
-    anthropic_api_key: str = ""
+    anthropic_api_key: str = ""        # Anthropic API key (ANTHROPIC_API_KEY)
+    anthropic_auth_token: str = ""     # Bearer token for LLM proxy/gateway (ANTHROPIC_AUTH_TOKEN)
+    claude_code_oauth_token: str = ""  # Long-lived OAuth token from `claude setup-token` (CLAUDE_CODE_OAUTH_TOKEN)
     gemini_api_key: str = ""
     llm_provider: str = ""  # "claude" | "gemini" | "" (auto-detect)
 
