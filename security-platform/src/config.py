@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     nvd_api_key: str = ""  # Required for full NVD rate limits (50 req/30s vs 5 req/30s)
     github_token: str = ""
     anthropic_api_key: str = ""
-    gemini_api_key: str = ""
+    vertex_ai_project: str = ""   # GCP project ID for Vertex AI
+    vertex_ai_location: str = "us-central1"  # Vertex AI region
     llm_provider: str = ""  # "claude" | "gemini" | "" (auto-detect)
 
     # Notifications

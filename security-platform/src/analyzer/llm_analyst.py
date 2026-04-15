@@ -1,10 +1,13 @@
 """Optional LLM-based analysis for vulnerabilities.
 
-Supports Claude (Anthropic) and Gemini (Google) interchangeably.
+Supports Claude (Anthropic) and Gemini via Vertex AI (Google) interchangeably.
 Provider selection:
   1. LLM_PROVIDER env var ("claude" or "gemini") — explicit override
-  2. Auto-detect: use Claude if ANTHROPIC_API_KEY set, Gemini if GEMINI_API_KEY set
-  3. If neither key is set, analysis is skipped gracefully.
+  2. Auto-detect: use Claude if ANTHROPIC_API_KEY set, Gemini if VERTEX_AI_PROJECT set
+  3. If neither is configured, analysis is skipped gracefully.
+
+Gemini uses Vertex AI (Application Default Credentials) instead of an API key.
+Run `gcloud auth application-default login` to authenticate locally.
 """
 from __future__ import annotations
 
@@ -48,10 +51,10 @@ def _resolve_provider() -> Provider | None:
     if explicit in ("claude", "gemini"):
         return explicit  # type: ignore[return-value]
 
-    # Auto-detect from available keys
+    # Auto-detect from available keys / config
     if settings.anthropic_api_key:
         return "claude"
-    if settings.gemini_api_key:
+    if settings.vertex_ai_project:
         return "gemini"
     return None
 
@@ -82,21 +85,25 @@ async def _analyze_with_claude(prompt: str) -> dict[str, str]:
 
 
 async def _analyze_with_gemini(prompt: str) -> dict[str, str]:
-    """Call Gemini Flash (cost-efficient) for analysis."""
+    """Call Gemini Flash via Vertex AI (cost-efficient) for analysis."""
     try:
-        import google.generativeai as genai
+        import vertexai
+        from vertexai.generative_models import GenerationConfig, GenerativeModel
     except ImportError:
         logger.warning(
-            "google-generativeai package not installed; run: uv add google-generativeai"
+            "google-cloud-aiplatform package not installed; run: uv add google-cloud-aiplatform"
         )
         return {}
 
-    genai.configure(api_key=settings.gemini_api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    vertexai.init(
+        project=settings.vertex_ai_project,
+        location=settings.vertex_ai_location,
+    )
+    model = GenerativeModel("gemini-1.5-flash")
     try:
         response = await model.generate_content_async(
             prompt,
-            generation_config=genai.GenerationConfig(
+            generation_config=GenerationConfig(
                 max_output_tokens=512,
                 temperature=0.2,
             ),
@@ -113,7 +120,7 @@ async def _analyze_with_gemini(prompt: str) -> dict[str, str]:
         logger.warning("Gemini response was not valid JSON: %s", exc)
         return {}
     except Exception as exc:
-        logger.warning("Gemini analysis failed: %s", exc)
+        logger.warning("Gemini (Vertex AI) analysis failed: %s", exc)
         return {}
 
 
