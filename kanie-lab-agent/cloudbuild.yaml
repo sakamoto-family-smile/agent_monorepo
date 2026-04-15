@@ -1,0 +1,140 @@
+################################################################################
+# Cloud Build CI/CD パイプライン
+#
+# トリガー設定例（Cloud Console または gcloud で設定）:
+#   ブランチ: main → 本番デプロイ
+#
+# 必要な substitution 変数（Cloud Build トリガーで設定）:
+#   _REGION         : us-central1 など
+#   _REGISTRY       : ${_REGION}-docker.pkg.dev/${PROJECT_ID}/kanie-lab
+#   _BACKEND_SA     : kanie-lab-backend@${PROJECT_ID}.iam.gserviceaccount.com
+#   _FRONTEND_SA    : kanie-lab-frontend@${PROJECT_ID}.iam.gserviceaccount.com
+#
+# Firebase 公開設定（Cloud Build トリガーの substitutions で設定）:
+#   _FIREBASE_PROJECT_ID
+#   _FIREBASE_API_KEY
+#   _FIREBASE_AUTH_DOMAIN
+#   _FIREBASE_STORAGE_BUCKET
+#   _FIREBASE_MESSAGING_SENDER_ID
+#   _FIREBASE_APP_ID
+################################################################################
+
+substitutions:
+  _REGION: us-central1
+  _REGISTRY: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/kanie-lab
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  # ---- バックエンドイメージのビルド ----
+  - name: gcr.io/cloud-builders/docker
+    id: build-backend
+    args:
+      - build
+      - --file=infra/docker/Dockerfile.backend.prod
+      - --tag=${_REGISTRY}/backend:${SHORT_SHA}
+      - --tag=${_REGISTRY}/backend:latest
+      - --cache-from=${_REGISTRY}/backend:latest
+      - .
+    waitFor: ["-"]
+
+  # ---- フロントエンドイメージのビルド ----
+  - name: gcr.io/cloud-builders/docker
+    id: build-frontend
+    args:
+      - build
+      - --file=infra/docker/Dockerfile.frontend.prod
+      - --tag=${_REGISTRY}/frontend:${SHORT_SHA}
+      - --tag=${_REGISTRY}/frontend:latest
+      - --cache-from=${_REGISTRY}/frontend:latest
+      - --build-arg=NEXT_PUBLIC_FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID}
+      - --build-arg=NEXT_PUBLIC_FIREBASE_API_KEY=${_FIREBASE_API_KEY}
+      - --build-arg=NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${_FIREBASE_AUTH_DOMAIN}
+      - --build-arg=NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=${_FIREBASE_STORAGE_BUCKET}
+      - --build-arg=NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${_FIREBASE_MESSAGING_SENDER_ID}
+      - --build-arg=NEXT_PUBLIC_FIREBASE_APP_ID=${_FIREBASE_APP_ID}
+      - .
+    waitFor: ["-"]
+
+  # ---- イメージのプッシュ ----
+  - name: gcr.io/cloud-builders/docker
+    id: push-backend
+    args: [push, --all-tags, ${_REGISTRY}/backend]
+    waitFor: [build-backend]
+
+  - name: gcr.io/cloud-builders/docker
+    id: push-frontend
+    args: [push, --all-tags, ${_REGISTRY}/frontend]
+    waitFor: [build-frontend]
+
+  # ---- バックエンドを Cloud Run にデプロイ ----
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: deploy-backend
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - kanie-lab-backend
+      - --image=${_REGISTRY}/backend:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --service-account=${_BACKEND_SA}
+      - --timeout=3600
+      - --concurrency=1
+      - --max-instances=5
+      - --min-instances=0
+      - --memory=2Gi
+      - --cpu=2
+      - --execution-environment=gen2
+      - --no-allow-unauthenticated
+      - --set-env-vars=APP_ENV=production,FIREBASE_PROJECT_ID=${PROJECT_ID},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},WORKSPACE_BASE=/tmp/workspace/users
+      - --set-secrets=ANTHROPIC_API_KEY=anthropic-api-key:latest,BRAVE_API_KEY=brave-api-key:latest,ESTAT_APP_ID=estat-app-id:latest,SEMANTIC_SCHOLAR_API_KEY=semantic-scholar-api-key:latest,FRONTEND_URL=frontend-url:latest
+      - --set-secrets=/tmp/claude_credentials.json=claude-credentials:latest
+    waitFor: [push-backend]
+
+  # ---- フロントエンドを Cloud Run にデプロイ ----
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: deploy-frontend
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - kanie-lab-frontend
+      - --image=${_REGISTRY}/frontend:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --service-account=${_FRONTEND_SA}
+      - --timeout=60
+      - --concurrency=80
+      - --max-instances=10
+      - --min-instances=0
+      - --memory=512Mi
+      - --cpu=1
+      - --execution-environment=gen2
+      - --allow-unauthenticated
+    waitFor: [push-frontend, deploy-backend]
+
+  # ---- フロントエンドの BACKEND_URL を更新 ----
+  # バックエンドの URL を取得してフロントエンドに設定
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: update-frontend-backend-url
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        BACKEND_URL=$(gcloud run services describe kanie-lab-backend \
+          --region=${_REGION} \
+          --format='value(status.url)')
+        echo "Backend URL: $${BACKEND_URL}"
+        gcloud run services update kanie-lab-frontend \
+          --region=${_REGION} \
+          --update-env-vars=BACKEND_URL=$${BACKEND_URL}
+    waitFor: [deploy-frontend]
+
+images:
+  - ${_REGISTRY}/backend:${SHORT_SHA}
+  - ${_REGISTRY}/backend:latest
+  - ${_REGISTRY}/frontend:${SHORT_SHA}
+  - ${_REGISTRY}/frontend:latest

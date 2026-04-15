@@ -1,0 +1,46 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# システム依存パッケージのインストール（gosu: root→appuser の権限降格に使用）
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+# 非rootユーザーを作成（bypassPermissionsモードに必要）
+RUN useradd -m -u 1000 appuser
+
+# Claude CLIのインストール（Claude Agent SDK用）
+RUN curl -fsSL https://claude.ai/install.sh | sh || true
+
+# Python依存パッケージのインストール
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e ".[all]" || pip install --no-cache-dir \
+    fastapi>=0.115.0 \
+    "uvicorn[standard]>=0.30.0" \
+    firebase-admin>=6.0.0 \
+    google-cloud-firestore>=2.19.0 \
+    python-dotenv>=1.0.0 \
+    httpx>=0.27.0 \
+    python-multipart>=0.0.9 \
+    "python-docx>=1.1.0" \
+    "pypdf>=4.0.0" \
+    claude-agent-sdk
+
+# アプリケーションコードのコピー
+COPY . .
+
+# ワークスペースディレクトリの事前作成（named volume が root 所有でも起動時に修正する）
+RUN mkdir -p /app/workspace/users && chown -R appuser:appuser /app
+
+# エントリーポイントをインラインで作成
+# 起動時に root で workspace の所有権を修正してから appuser に切り替える
+RUN printf '#!/bin/sh\nset -e\nmkdir -p /app/workspace/users\nchown -R appuser:appuser /app/workspace\n# Claude OAuth認証情報をappuserのホームにコピー\nmkdir -p /home/appuser/.claude/projects\nmkdir -p /home/appuser/.claude/sessions\nchown -R appuser:appuser /home/appuser/.claude\nif [ -f /tmp/claude_credentials.json ]; then\n  cp /tmp/claude_credentials.json /home/appuser/.claude/credentials.json\n  chown appuser:appuser /home/appuser/.claude/credentials.json\n  chmod 600 /home/appuser/.claude/credentials.json\nfi\nexec gosu appuser "$@"\n' \
+    > /entrypoint.sh && chmod +x /entrypoint.sh
+
+EXPOSE 8000
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

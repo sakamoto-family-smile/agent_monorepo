@@ -1,0 +1,77 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: kanie-lab-backend
+  annotations:
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        # 同時処理数: Claude Agent はサブプロセスを起動するため低めに設定
+        autoscaling.knative.dev/maxScale: "5"
+        autoscaling.knative.dev/minScale: "0"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      # タイムアウト: Claude Agent の処理は長くなる場合があるため最大値に設定
+      timeoutSeconds: 3600
+      # サービスアカウント（setup-gcp.sh で作成）
+      serviceAccountName: kanie-lab-backend@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/kanie-lab/backend:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          env:
+            - name: APP_ENV
+              value: production
+            - name: FIREBASE_PROJECT_ID
+              value: PROJECT_ID
+            - name: GOOGLE_CLOUD_PROJECT
+              value: PROJECT_ID
+            - name: WORKSPACE_BASE
+              value: /tmp/workspace/users
+            - name: LOG_LEVEL
+              value: info
+            # Secret Manager からのシークレット注入
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anthropic-api-key
+                  key: latest
+            - name: BRAVE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: brave-api-key
+                  key: latest
+            - name: ESTAT_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: estat-app-id
+                  key: latest
+            - name: SEMANTIC_SCHOLAR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: semantic-scholar-api-key
+                  key: latest
+            - name: FRONTEND_URL
+              valueFrom:
+                secretKeyRef:
+                  name: frontend-url
+                  key: latest
+          # Claude OAuth 認証情報をシークレットボリュームでマウント
+          volumeMounts:
+            - name: claude-credentials
+              mountPath: /tmp/claude_credentials.json
+              subPath: credentials.json
+              readOnly: true
+      volumes:
+        - name: claude-credentials
+          secret:
+            secretName: claude-credentials
+            items:
+              - key: latest
+                path: credentials.json

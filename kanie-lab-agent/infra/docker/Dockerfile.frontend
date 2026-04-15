@@ -1,0 +1,16 @@
+FROM node:20-slim
+
+WORKDIR /app
+
+# 依存パッケージのインストール
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# アプリケーションコードのコピー
+# （docker-compose.ymlのvolumeマウントで上書きされる）
+COPY . .
+
+EXPOSE 3000
+
+# 開発サーバーの起動
+CMD ["npm", "run", "dev"]

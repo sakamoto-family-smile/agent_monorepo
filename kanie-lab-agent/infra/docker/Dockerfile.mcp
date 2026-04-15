@@ -1,0 +1,15 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 依存パッケージのインストール
+COPY pyproject.toml .
+RUN pip install --no-cache-dir \
+    fastmcp>=2.0 \
+    google-genai>=1.0
+
+COPY . .
+
+# HTTP transport mode: python server.py streamable-http 3001
+# stdio mode (default): python server.py
+CMD ["python", "server.py", "streamable-http", "3001"]

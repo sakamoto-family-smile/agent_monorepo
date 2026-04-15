@@ -1,0 +1,30 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: kanie-lab-frontend
+  annotations:
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: "10"
+        autoscaling.knative.dev/minScale: "0"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      timeoutSeconds: 60
+      serviceAccountName: kanie-lab-frontend@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/kanie-lab/frontend:latest
+          ports:
+            - containerPort: 3000
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: BACKEND_URL
+              value: https://kanie-lab-backend-HASH-REGION.a.run.app
+            # Firebase の公開設定（NEXT_PUBLIC_* はビルド時に ARG で埋め込み済み）

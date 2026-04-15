@@ -1,0 +1,10 @@
+.env
+infra/secrets/
+infra/scripts/.firebase-config
+*.pyc
+__pycache__/
+.venv/
+node_modules/
+.next/
+*.log
+.claude_credentials/

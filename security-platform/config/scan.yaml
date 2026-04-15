@@ -5,14 +5,18 @@ targets:
   mcp_configs:
     - "agent-system-1/.mcp.json"
     - "agent-system-2/.mcp.json"
+    - "kanie-lab-agent/.mcp.json"
 
   skills_directories:
     - "agent-system-1/skills/"
     - "agent-system-2/skills/"
+    - "kanie-lab-agent/.claude/skills/"
 
   source_directories:
     - "agent-system-1/src/"
     - "agent-system-2/src/"
+    - "kanie-lab-agent/backend/"
+    - "kanie-lab-agent/tools/"
 
 # CVSS thresholds
 cvss_thresholds:
@@ -113,9 +117,9 @@ gateway:
     - "localhost"
     - "127.0.0.1"
     - "::1"
-    # Add production MCP server hosts here, e.g.:
-    # - "api.anthropic.com"
-    # - "*.modelcontextprotocol.io"
+    # kanie-lab-agent MCP servers
+    - "mcp-google-search"      # docker-compose service name
+    - "aiplatform.googleapis.com"  # Vertex AI (Gemini grounding)
 
   # Additional injection patterns (merged with built-in defaults in injection.py).
   # Use this to add project-specific patterns without modifying source code.

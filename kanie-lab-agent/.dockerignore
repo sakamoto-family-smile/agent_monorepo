@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+
+# ローカル環境設定
+.env
+.env.*
+!.env.example
+
+# シークレット・認証情報
+.claude_credentials/
+infra/secrets/
+*.pem
+*.key
+*.json.secret
+
+# 開発用ファイル
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.venv
+**/node_modules
+**/.next
+**/dist
+**/build
+
+# ドキュメント・テスト
+*.md
+tests/
+docs/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Docker
+docker-compose*.yml
+infra/firebase/
+infra/cloudrun/
+infra/scripts/
+
+# ログ
+*.log

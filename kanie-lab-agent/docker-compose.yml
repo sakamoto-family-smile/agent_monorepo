@@ -1,0 +1,101 @@
+services:
+  # Firebase Emulator (Auth + Firestore)
+  firebase-emulator:
+    image: node:20-slim
+    working_dir: /firebase
+    volumes:
+      - ./infra/firebase:/firebase
+    ports:
+      - "127.0.0.1:4000:4000"  # Emulator UI (localhost only)
+      - "127.0.0.1:9099:9099"  # Auth (localhost only)
+    environment:
+      - FIREBASE_PROJECT_ID=demo-kanie-lab
+    # Auth エミュレーターのみ起動（Firestore は Java が必要なため除外）
+    command: >
+      sh -c "npm install -g firebase-tools &&
+             firebase emulators:start --only auth --project demo-kanie-lab"
+
+  # MCP サーバー (Google検索) — HTTP transport on port 3001
+  mcp-google-search:
+    build:
+      context: ./tools/google-search-mcp
+      dockerfile: ../../infra/docker/Dockerfile.mcp
+    environment:
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+    # ポートはDockerネットワーク内のみ（security-proxyから直接アクセス）
+    # ホスト側には公開しない
+    expose:
+      - "3001"
+    restart: unless-stopped
+
+  # Security Platform MCP Proxy — rate limiting, DLP, tool pinning
+  security-proxy:
+    build:
+      context: ../security-platform
+      dockerfile: infra/Dockerfile.proxy
+    environment:
+      - MCP_TARGET_URL=http://mcp-google-search:3001
+      - VERTEX_AI_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - VERTEX_AI_LOCATION=us-central1
+      - LLM_PROVIDER=gemini
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mcp-google-search
+    restart: unless-stopped
+
+  # バックエンド API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=local
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - FIREBASE_PROJECT_ID=demo-kanie-lab
+      - FIREBASE_AUTH_EMULATOR_HOST=firebase-emulator:9099
+      - FIRESTORE_EMULATOR_HOST=firebase-emulator:8080
+      - WORKSPACE_BASE=/app/workspace/users
+      - LOG_LEVEL=debug
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      - ESTAT_APP_ID=${ESTAT_APP_ID:-}
+      - SEMANTIC_SCHOLAR_API_KEY=${SEMANTIC_SCHOLAR_API_KEY:-}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      # Security Platform MCP Proxy (routes google-search through gateway)
+      - MCP_PROXY_URL=http://security-proxy:8080
+    volumes:
+      - workspace_data:/app/workspace
+      - ./backend:/app
+      - ./.claude:/app/.claude:ro
+      - ./.claude_credentials/credentials.json:/tmp/claude_credentials.json:ro
+    depends_on:
+      - firebase-emulator
+      - security-proxy
+    restart: unless-stopped
+
+  # フロントエンド
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../infra/docker/Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+      - NEXT_PUBLIC_FIREBASE_PROJECT_ID=demo-kanie-lab
+      - NEXT_PUBLIC_FIREBASE_API_KEY=demo-api-key
+      - NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=demo-kanie-lab.firebaseapp.com
+      - NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST=localhost:9099
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  workspace_data:

@@ -10,109 +10,37 @@ jobs:
     name: Detect changed modules
     runs-on: ubuntu-latest
     outputs:
-      test_paths: ${{ steps.map.outputs.test_paths }}
-      run_all: ${{ steps.map.outputs.run_all }}
-      has_changes: ${{ steps.map.outputs.has_changes }}
+      security_platform: ${{ steps.detect.outputs.security_platform }}
+      kanie_lab_agent:   ${{ steps.detect.outputs.kanie_lab_agent }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Get changed files
-        id: changed
+      - name: Detect which modules changed
+        id: detect
         run: |
-          git diff --name-only origin/${{ github.base_ref }}...HEAD \
-            -- 'security-platform/**' > changed_files.txt
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
           echo "Changed files:"
-          cat changed_files.txt
+          echo "$CHANGED"
 
-      - name: Map source changes to test paths
-        id: map
-        run: |
-          python3 - <<'PYEOF'
-          import os
-          import sys
+          if echo "$CHANGED" | grep -q '^security-platform/'; then
+            echo "security_platform=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "security_platform=false" >> "$GITHUB_OUTPUT"
+          fi
 
-          MODULE_MAP = {
-              "security-platform/src/proxy/":     "security-platform/tests/proxy/",
-              "security-platform/src/analyzer/":  "security-platform/tests/analyzer/",
-              "security-platform/src/collector/": "security-platform/tests/collector/",
-              "security-platform/src/db/":        "security-platform/tests/db/",
-              "security-platform/src/notifier/":  "security-platform/tests/notifier/",
-          }
+          if echo "$CHANGED" | grep -q '^kanie-lab-agent/'; then
+            echo "kanie_lab_agent=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "kanie_lab_agent=false" >> "$GITHUB_OUTPUT"
+          fi
 
-          # Files that touch shared infrastructure → run full suite
-          FULL_SUITE_TRIGGERS = [
-              "security-platform/src/config.py",
-              "security-platform/pyproject.toml",
-              "security-platform/uv.lock",
-          ]
-
-          with open("changed_files.txt") as f:
-              changed = [line.strip() for line in f if line.strip()]
-
-          if not changed:
-              print("No security-platform files changed.")
-              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-                  out.write("has_changes=false\n")
-                  out.write("run_all=false\n")
-                  out.write("test_paths=\n")
-              sys.exit(0)
-
-          # Check if full suite is needed
-          for trigger in FULL_SUITE_TRIGGERS:
-              if any(f == trigger or f.startswith(trigger) for f in changed):
-                  print(f"Full suite triggered by: {trigger}")
-                  with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-                      out.write("has_changes=true\n")
-                      out.write("run_all=true\n")
-                      out.write("test_paths=security-platform/tests/\n")
-                  sys.exit(0)
-
-          # Build targeted test paths
-          test_paths = set()
-          for f in changed:
-              # Direct changes to test files → use the parent directory
-              if f.startswith("security-platform/tests/"):
-                  parts = f.split("/")
-                  dir_parts = parts[:-1]  # strip filename
-                  if len(dir_parts) >= 3:
-                      test_paths.add("/".join(dir_parts) + "/")
-                  else:
-                      test_paths.add("security-platform/tests/")
-                  continue
-
-              # Map source → test directory
-              for src_prefix, test_prefix in MODULE_MAP.items():
-                  if f.startswith(src_prefix):
-                      if os.path.isdir(test_prefix):
-                          test_paths.add(test_prefix)
-                      else:
-                          # Fallback to full suite if test dir missing
-                          test_paths.add("security-platform/tests/")
-                      break
-
-          if not test_paths:
-              # Changes outside known modules (e.g. scripts/, README) — skip tests
-              print("No testable changes detected.")
-              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-                  out.write("has_changes=false\n")
-                  out.write("run_all=false\n")
-                  out.write("test_paths=\n")
-              sys.exit(0)
-
-          paths_str = " ".join(sorted(test_paths))
-          print(f"Test paths to run: {paths_str}")
-          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write("has_changes=true\n")
-              out.write("run_all=false\n")
-              out.write(f"test_paths={paths_str}\n")
-          PYEOF
-
-  test:
-    name: Run tests (${{ needs.detect-changes.outputs.test_paths || 'none' }})
+  # ── security-platform ──────────────────────────────────────────────────────
+  test-security-platform:
+    name: Test / security-platform
     needs: detect-changes
-    if: needs.detect-changes.outputs.has_changes == 'true'
+    if: needs.detect-changes.outputs.security_platform == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -132,21 +60,108 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Run targeted tests
+      - name: Map changed files to test paths
+        id: map
         run: |
-          TEST_PATHS="${{ needs.detect-changes.outputs.test_paths }}"
-          # Strip the security-platform/ prefix (we're already in that dir)
-          RELATIVE_PATHS=$(echo "$TEST_PATHS" | sed 's|security-platform/||g')
-          echo "Running: pytest $RELATIVE_PATHS"
-          uv run pytest $RELATIVE_PATHS \
-            --tb=short \
-            -v \
-            --no-header
+          python3 - <<'PYEOF'
+          import os, sys
+
+          MODULE_MAP = {
+              "security-platform/src/proxy/":     "tests/proxy/",
+              "security-platform/src/analyzer/":  "tests/analyzer/",
+              "security-platform/src/collector/": "tests/collector/",
+              "security-platform/src/db/":        "tests/db/",
+              "security-platform/src/notifier/":  "tests/notifier/",
+          }
+          FULL_SUITE_TRIGGERS = [
+              "security-platform/src/config.py",
+              "security-platform/pyproject.toml",
+              "security-platform/uv.lock",
+          ]
+
+          import subprocess
+          result = subprocess.run(
+              ["git", "diff", "--name-only", f"origin/{os.environ['GITHUB_BASE_REF']}...HEAD"],
+              capture_output=True, text=True
+          )
+          changed = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+
+          for trigger in FULL_SUITE_TRIGGERS:
+              if any(f == trigger or f.startswith(trigger) for f in changed):
+                  print(f"Full suite triggered by: {trigger}")
+                  with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                      out.write("test_paths=tests/\n")
+                  sys.exit(0)
+
+          test_paths = set()
+          for f in changed:
+              if f.startswith("security-platform/tests/"):
+                  parts = f.split("/")
+                  test_paths.add("/".join(parts[1:-1]) + "/")
+                  continue
+              for src, tgt in MODULE_MAP.items():
+                  if f.startswith(src):
+                      test_paths.add(tgt)
+                      break
+
+          paths = " ".join(sorted(test_paths)) if test_paths else "tests/"
+          print(f"Test paths: {paths}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"test_paths={paths}\n")
+          PYEOF
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+
+      - name: Run tests
+        run: |
+          uv run pytest ${{ steps.map.outputs.test_paths }} \
+            --tb=short -v --no-header
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-security-platform
           path: security-platform/.pytest_cache/
+          retention-days: 7
+
+  # ── kanie-lab-agent ────────────────────────────────────────────────────────
+  test-kanie-lab-agent:
+    name: Test / kanie-lab-agent
+    needs: detect-changes
+    if: needs.detect-changes.outputs.kanie_lab_agent == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kanie-lab-agent/backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run tests
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: "localhost:9099"
+          FIREBASE_PROJECT_ID: "demo-kanie-lab"
+          APP_ENV: "local"
+        run: |
+          uv run pytest tests/ \
+            --tb=short -v --no-header
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-kanie-lab-agent
+          path: kanie-lab-agent/backend/.pytest_cache/
           retention-days: 7
