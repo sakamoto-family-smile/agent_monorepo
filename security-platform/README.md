@@ -97,6 +97,176 @@ Enable/disable notification channels and configure severity thresholds.
 ### `config/.env`
 API keys and secrets. Copy from `.env.example`. Never commit this file.
 
+## Applying Security Layers to an Agent System
+
+This section explains how to apply each security layer to any agent system inside this monorepo.
+
+### Overview of layers
+
+| Layer | What it does | Required? |
+|-------|-------------|-----------|
+| 1. Inventory registration | Declare your MCP servers and packages for CVE monitoring | Yes |
+| 2. Scan target registration | Include your agent system in automated scans | Yes |
+| 3. MCP Proxy | Intercept all MCP tool calls for rate limiting, DLP, tool pinning, and injection detection | Recommended |
+| 4. Notifications | Receive alerts when vulnerabilities or violations are detected | Optional |
+
+---
+
+### Step 1 — Register your inventory
+
+Edit `config/inventory.yaml` and add your agent system's MCP servers and packages.
+
+```yaml
+mcp_servers:
+  - name: "@modelcontextprotocol/server-your-server"
+    version: "latest"
+    source: "npm"
+    config_path: "your-agent-system/.mcp.json"  # path from monorepo root
+    server_key: "your-server-key"               # key name inside .mcp.json
+    tags: ["your", "tags"]
+
+npm_packages:
+  - name: "@modelcontextprotocol/server-your-server"
+    version: "latest"
+    ecosystem: "npm"
+```
+
+The analyzer uses this inventory to match fetched CVEs against your specific stack and generate targeted alerts.
+
+---
+
+### Step 2 — Register as a scan target
+
+Edit `config/scan.yaml` and add your agent system to the `targets` section:
+
+```yaml
+targets:
+  mcp_configs:
+    - "your-agent-system/.mcp.json"
+
+  skills_directories:
+    - "your-agent-system/skills/"   # omit if no skills directory
+
+  source_directories:
+    - "your-agent-system/src/"
+```
+
+This ensures the automated MCP config scan (`scripts/scan-mcp.sh`) and Gitleaks secret scan cover your agent system.
+
+---
+
+### Step 3 — Apply the MCP Proxy
+
+The proxy sits between your agent and its MCP servers. It enforces rate limiting, DLP, tool pinning, and injection detection on every tool call.
+
+**3-1. Start the proxy**
+
+```bash
+cd security-platform
+MCP_TARGET_URL=http://localhost:<your-mcp-port> \
+  uv run uvicorn src.proxy.server:app --port 8080
+```
+
+**3-2. Point your agent at the proxy**
+
+In your agent system's `.mcp.json`, change each MCP server entry to use the proxy URL instead of the original server URL.
+
+Before:
+```json
+{
+  "mcpServers": {
+    "your-server": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-your-server"]
+    }
+  }
+}
+```
+
+After (HTTP transport via proxy):
+```json
+{
+  "mcpServers": {
+    "your-server": {
+      "transport": "http",
+      "url": "http://localhost:8080"
+    }
+  }
+}
+```
+
+**3-3. Choose proxy mode**
+
+Edit `config/scan.yaml` — `gateway.mode`:
+
+| Mode | Behaviour | When to use |
+|------|-----------|-------------|
+| `passive` | Logs violations, does not block traffic | First 1–2 weeks while calibrating rules |
+| `active` | Blocks violations and alerts immediately | After calibration |
+
+```yaml
+gateway:
+  mode: passive   # change to "active" when ready
+```
+
+**3-4. Tune allowed destinations (active mode)**
+
+Add the hostnames your MCP servers connect to under `gateway.allowed_destinations` in `config/scan.yaml`:
+
+```yaml
+gateway:
+  allowed_destinations:
+    - "localhost"
+    - "api.your-mcp-provider.com"
+```
+
+Requests to unlisted destinations are blocked in active mode, logged in passive mode.
+
+---
+
+### Step 4 — Run the collector and analyzer
+
+Fetch the latest CVEs and match them against your registered inventory:
+
+```bash
+cd security-platform
+
+# Fetch CVEs from NVD, GitHub Advisory, OSV, VulnerableMCP
+uv run python -m src.collector.main
+
+# Match against inventory, score, and send notifications
+uv run python -m src.analyzer.main
+```
+
+For ongoing monitoring, set up a cron job:
+
+```bash
+./scripts/setup-cron.sh
+```
+
+---
+
+### Step 5 — Verify in the dashboard
+
+Open `http://localhost:8000` after starting the dashboard:
+
+```bash
+uv run uvicorn src.dashboard.app:app --port 8000
+```
+
+Check that:
+- Your agent system's MCP servers appear in the inventory view
+- Tool call logs show traffic passing through the proxy
+- Any CVE matches appear in the vulnerability list
+
+---
+
+### Minimal setup (monitoring only, no proxy)
+
+If you only want CVE monitoring without the proxy layer, Steps 1, 2, and 4 are sufficient. Skip Step 3.
+
+---
+
 ## Architecture
 
 ```
