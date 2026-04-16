@@ -1,0 +1,29 @@
+services:
+  # Stock Analysis Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      - APP_ENV=local
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION:-us-east5}
+      - DB_PATH=/app/data/stock_analysis.db
+      - DATA_DIR=/app/data
+      - CHARTS_DIR=/app/data/charts
+      - REPORTS_DIR=/app/data/reports
+      - CACHE_DIR=/app/data/cache
+      - DICTIONARIES_DIR=/app/data/dictionaries
+      - LOG_LEVEL=debug
+      - MCP_PROXY_URL=${MCP_PROXY_URL:-}
+    volumes:
+      - stock_data:/app/data
+      - ./.claude_credentials/credentials.json:/tmp/claude_credentials.json:ro
+    restart: unless-stopped
+
+volumes:
+  stock_data:

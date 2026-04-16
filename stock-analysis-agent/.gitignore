@@ -1,0 +1,15 @@
+# Data directories (local only)
+data/
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# uv
+uv.lock
