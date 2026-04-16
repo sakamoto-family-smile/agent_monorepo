@@ -10,8 +10,9 @@ jobs:
     name: Detect changed modules
     runs-on: ubuntu-latest
     outputs:
-      security_platform: ${{ steps.detect.outputs.security_platform }}
-      kanie_lab_agent:   ${{ steps.detect.outputs.kanie_lab_agent }}
+      security_platform:    ${{ steps.detect.outputs.security_platform }}
+      kanie_lab_agent:      ${{ steps.detect.outputs.kanie_lab_agent }}
+      stock_analysis_agent: ${{ steps.detect.outputs.stock_analysis_agent }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,6 +35,12 @@ jobs:
             echo "kanie_lab_agent=true" >> "$GITHUB_OUTPUT"
           else
             echo "kanie_lab_agent=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -q '^stock-analysis-agent/'; then
+            echo "stock_analysis_agent=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stock_analysis_agent=false" >> "$GITHUB_OUTPUT"
           fi
 
   # ── security-platform ──────────────────────────────────────────────────────
@@ -164,4 +171,44 @@ jobs:
         with:
           name: test-results-kanie-lab-agent
           path: kanie-lab-agent/backend/.pytest_cache/
+          retention-days: 7
+
+  # ── stock-analysis-agent ───────────────────────────────────────────────────
+  test-stock-analysis-agent:
+    name: Test / stock-analysis-agent
+    needs: detect-changes
+    if: needs.detect-changes.outputs.stock_analysis_agent == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: stock-analysis-agent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run tests
+        env:
+          APP_ENV: "local"
+          ANTHROPIC_API_KEY: "dummy-key-for-tests"
+        run: |
+          uv run pytest tests/ \
+            --tb=short -v --no-header
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-stock-analysis-agent
+          path: stock-analysis-agent/.pytest_cache/
           retention-days: 7
