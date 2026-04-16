@@ -17,6 +17,7 @@ targets:
     - "agent-system-2/src/"
     - "kanie-lab-agent/backend/"
     - "kanie-lab-agent/tools/"
+    - "stock-analysis-agent/app/"
 
 # CVSS thresholds
 cvss_thresholds:
