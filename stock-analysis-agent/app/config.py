@@ -7,7 +7,7 @@ load_dotenv()
 class Settings:
     app_env: str = os.getenv("APP_ENV", "local")
     log_level: str = os.getenv("LOG_LEVEL", "info")
-    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    claude_code_oauth_token: str = os.getenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
     # Database
     db_path: str = os.getenv("DB_PATH", "data/stock_analysis.db")

@@ -209,7 +209,7 @@ stock-analysis-agent/
 
 | 変数名 | 必須 | 説明 |
 |--------|------|------|
-| `ANTHROPIC_API_KEY` | ✅ | Anthropic API キー |
+| `CLAUDE_CODE_OAUTH_TOKEN` | ✅ | Claude Code OAuth トークン |
 | `BRAVE_API_KEY` | - | センチメント分析用（省略可） |
 | `GOOGLE_CLOUD_PROJECT` | - | VertexAI 用 GCP プロジェクト ID |
 | `VERTEX_AI_LOCATION` | - | VertexAI リージョン（デフォルト: us-east5） |
@@ -234,7 +234,7 @@ cd stock-analysis-agent
 
 # .env を作成
 cp .env.example .env
-# ANTHROPIC_API_KEY を編集
+# CLAUDE_CODE_OAUTH_TOKEN を編集
 
 # 依存パッケージインストール & 起動
 make run

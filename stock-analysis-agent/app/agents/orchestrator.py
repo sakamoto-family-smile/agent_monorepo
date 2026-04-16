@@ -182,7 +182,7 @@ async def run_analysis(request: AnalysisRequest) -> AsyncIterator[dict]:
         env={
             "HOME": "/tmp",
             "ANTHROPIC_API_KEY": "",
-            "CLAUDE_CODE_OAUTH_TOKEN": os.getenv("ANTHROPIC_API_KEY", ""),
+            "CLAUDE_CODE_OAUTH_TOKEN": os.getenv("CLAUDE_CODE_OAUTH_TOKEN", ""),
             "BRAVE_API_KEY": os.getenv("BRAVE_API_KEY", ""),
         },
         allowed_tools=[

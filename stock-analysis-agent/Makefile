@@ -47,6 +47,6 @@ help:
 	@echo "  make test    - pytest でテストを実行"
 	@echo ""
 	@echo "環境変数 (.env):"
-	@echo "  ANTHROPIC_API_KEY  - Anthropic API キー (必須)"
+	@echo "  CLAUDE_CODE_OAUTH_TOKEN - Claude Code OAuth トークン (必須)"
 	@echo "  BRAVE_API_KEY      - Brave Search API キー (センチメント分析用)"
 	@echo "  GOOGLE_CLOUD_PROJECT - GCP プロジェクト ID (VertexAI 用)"
