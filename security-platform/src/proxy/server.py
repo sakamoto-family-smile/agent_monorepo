@@ -9,13 +9,14 @@ Active mode:   Violations are blocked. Alert is sent. External traffic is stoppe
                Switch after verifying false-positive rate is acceptable.
 
 Endpoints:
+  POST /                 MCP Streamable HTTP transport (Claude agent SDK)
   GET  /health           Health check
   GET  /mode             Current gateway mode (passive/active)
   POST /mode             Switch gateway mode (body: {"mode": "passive"|"active"})
   GET  /tools            List pinned tool definitions
   GET  /audit-log        Recent audit log entries
   GET  /stats            Rate limiter and cost statistics
-  POST /proxy/{tool}     Intercept and forward MCP tool call
+  POST /proxy/{tool}     Legacy: intercept and forward MCP tool call (REST)
 """
 from __future__ import annotations
 
@@ -38,6 +39,7 @@ from .destination import DestinationChecker
 from .dlp import DLPEngine
 from .inbound import InboundInspector
 from .injection import InjectionDetector
+from .mcp_client import MCPSSESession
 from .outbound import OutboundInspector
 from .rate_limiter import RateLimiter
 from .tool_pinning import ToolPinStore
@@ -467,6 +469,192 @@ def _block_status_code(reason: str | None) -> int:
         "COST_LIMIT": 429,
     }
     return codes.get(reason or "", 400)
+
+
+# ---------------------------------------------------------------------------
+# MCP Streamable HTTP transport — agent-facing endpoint
+# ---------------------------------------------------------------------------
+
+# Cache the tools list from downstream (invalidated on restart)
+_mcp_tools_cache: list[dict] | None = None
+
+
+async def _get_downstream_tools() -> list[dict]:
+    """Fetch the tools list from downstream MCP server (cached per process)."""
+    global _mcp_tools_cache
+    if _mcp_tools_cache is not None:
+        return _mcp_tools_cache
+    try:
+        async with MCPSSESession(MCP_TARGET_URL) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            _mcp_tools_cache = tools
+            logger.info("Cached %d tools from downstream %s", len(tools), MCP_TARGET_URL)
+            return tools
+    except Exception as exc:
+        logger.warning("Could not fetch tools from downstream: %s", exc)
+        return []
+
+
+async def _call_downstream_tool(tool_name: str, arguments: dict) -> dict:
+    """Open a fresh SSE session, initialize, and call one tool."""
+    async with MCPSSESession(MCP_TARGET_URL) as session:
+        await session.initialize()
+        return await session.call_tool(tool_name, arguments)
+
+
+def _mcp_error(req_id: Any, code: int, message: str) -> JSONResponse:
+    return JSONResponse(
+        {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
+    )
+
+
+@app.post("/")
+async def mcp_streamable_http(request: Request) -> JSONResponse:
+    """MCP Streamable HTTP transport endpoint (MCP spec 2024-11-05).
+
+    Accepts JSON-RPC 2.0 messages from the Claude agent SDK and proxies
+    tool calls through the full Inbound → Forward → Outbound security pipeline.
+    Non-tool messages (initialize, tools/list, etc.) are handled inline or
+    forwarded transparently to the downstream server.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return _mcp_error(None, -32700, "Parse error: invalid JSON")
+
+    method: str = body.get("method", "")
+    req_id: Any = body.get("id")
+    params: dict = body.get("params") or {}
+
+    # --- initialize: respond with gateway capabilities ---
+    if method == "initialize":
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "mcp-security-gateway", "version": "0.2.0"},
+            },
+        })
+
+    # --- notifications have no id; just acknowledge ---
+    if method.startswith("notifications/"):
+        return JSONResponse(status_code=202, content={})
+
+    # --- tools/list: proxy to downstream (with cache) ---
+    if method == "tools/list":
+        tools = await _get_downstream_tools()
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {"tools": tools},
+        })
+
+    # --- tools/call: full security inspection pipeline ---
+    if method == "tools/call":
+        tool_name: str = params.get("name", "")
+        arguments: dict = params.get("arguments") or {}
+        client_id: str = (
+            request.headers.get("X-Client-ID")
+            or str(request.client.host if request.client else "unknown")
+        )
+        params_summary = json.dumps(arguments, default=str)[:200]
+
+        # ── Inbound inspection ───────────────────────────────────────────
+        inbound_verdict = await _inbound.inspect(
+            tool_name=tool_name,
+            tool_description=params.get("description", ""),
+            parameters=arguments,
+            destination_url=MCP_TARGET_URL,
+            estimated_cost_usd=float(params.get("estimated_cost_usd", 0.0)),
+        )
+
+        if not inbound_verdict.passed:
+            reason = inbound_verdict.block_reason
+            detail = inbound_verdict.block_detail
+            event_type = f"inbound_{'blocked' if _gateway_mode == 'active' else 'violation'}_{(reason or 'unknown').lower()}"
+            verdict = "BLOCK" if _gateway_mode == "active" else "LOG_ONLY"
+
+            await _save_audit_log(
+                event_type=event_type,
+                tool_name=tool_name,
+                tool_description_hash=inbound_verdict.description_hash,
+                parameters_summary=params_summary,
+                result_summary=f"{'BLOCKED' if verdict == 'BLOCK' else 'PASSIVE LOG'}: {detail}",
+                client_id=client_id,
+                verdict=verdict,
+                block_reason=reason,
+                block_detail=detail,
+            )
+
+            if _gateway_mode == "active":
+                return _mcp_error(
+                    req_id,
+                    -32000,
+                    f"Request blocked by MCP Gateway [{reason}]: {detail}",
+                )
+            logger.warning("[PASSIVE] Inbound violation: [%s] %s — %s", tool_name, reason, detail)
+
+        # ── Forward to downstream MCP server ────────────────────────────
+        try:
+            result = await _call_downstream_tool(tool_name, arguments)
+            if _rate_limiter:
+                await _rate_limiter.record_success(tool_name)
+        except Exception as exc:
+            logger.warning("Downstream tool call failed: %s", exc)
+            if _rate_limiter:
+                await _rate_limiter.record_failure(tool_name)
+            result = {
+                "content": [{"type": "text", "text": f"[gateway] downstream unavailable: {exc}"}],
+                "isError": True,
+            }
+
+        # ── Outbound inspection ──────────────────────────────────────────
+        outbound_verdict = _outbound.inspect(result, tool_name=tool_name)
+
+        if not outbound_verdict.passed:
+            reason = outbound_verdict.block_reason
+            detail = outbound_verdict.block_detail
+            event_type = f"outbound_{'blocked' if _gateway_mode == 'active' else 'violation'}_{(reason or 'unknown').lower()}"
+            verdict = "BLOCK" if _gateway_mode == "active" else "LOG_ONLY"
+
+            await _save_audit_log(
+                event_type=event_type,
+                tool_name=tool_name,
+                tool_description_hash=inbound_verdict.description_hash,
+                parameters_summary=params_summary,
+                result_summary=f"{'RESPONSE DROPPED' if verdict == 'BLOCK' else 'PASSIVE LOG'}: {detail}",
+                client_id=client_id,
+                verdict=verdict,
+                block_reason=reason,
+                block_detail=detail,
+            )
+
+            if _gateway_mode == "active":
+                return _mcp_error(
+                    req_id,
+                    -32000,
+                    f"Response blocked by MCP Gateway [{reason}]: {detail}",
+                )
+            logger.warning("[PASSIVE] Outbound violation: [%s] %s — %s", tool_name, reason, detail)
+
+        # ── Success ──────────────────────────────────────────────────────
+        await _save_audit_log(
+            event_type="tool_call",
+            tool_name=tool_name,
+            tool_description_hash=inbound_verdict.description_hash,
+            parameters_summary=params_summary,
+            result_summary="success",
+            client_id=client_id,
+            verdict="PASS",
+        )
+
+        return JSONResponse({"jsonrpc": "2.0", "id": req_id, "result": result})
+
+    # --- unknown method ---
+    return _mcp_error(req_id, -32601, f"Method not found: {method}")
 
 
 def main() -> None:

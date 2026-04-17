@@ -102,8 +102,19 @@ class MCPStreamableHTTPSession:
         return msg.get("result")
 
     @staticmethod
+    def _parse_sse(text: str) -> dict:
+        """Extract the last JSON-RPC message from an SSE text body."""
+        last_data: str | None = None
+        for line in text.splitlines():
+            if line.startswith("data:"):
+                last_data = line[5:].strip()
+        if last_data:
+            return json.loads(last_data)
+        return {}
+
+    @staticmethod
     async def _read_sse_response(resp: Any) -> dict:
-        """Read SSE lines until the first data event and parse it as JSON-RPC."""
+        """Read SSE chunks until the first data event and parse it as JSON-RPC."""
         buf = b""
         async for chunk in resp.aiter_bytes():
             buf += chunk
