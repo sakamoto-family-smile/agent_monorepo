@@ -1,5 +1,6 @@
-# Data directories (local only)
-data/
+# Data directories (local only) — ただし data/universe だけはコードの一部として追跡
+data/*
+!data/universe/
 .env
 
 # Python

@@ -19,87 +19,17 @@ import pandas as pd
 import yfinance as yf
 
 from models.stock import ScreenerCandidate, ScreenerRequest, ScreenerResult
+from agents.universe import get_universe
 
 logger = logging.getLogger(__name__)
 
-# ── 銘柄ユニバース ────────────────────────────────────────────────────────────
-
-# 日経225 主要構成銘柄（代表的な流動性の高い銘柄）
-_JP_TICKERS: List[str] = [
-    "7203.T",  # トヨタ自動車
-    "6758.T",  # ソニーグループ
-    "9984.T",  # ソフトバンクグループ
-    "7974.T",  # 任天堂
-    "6861.T",  # キーエンス
-    "8306.T",  # 三菱UFJフィナンシャル
-    "6098.T",  # リクルートホールディングス
-    "4063.T",  # 信越化学工業
-    "6367.T",  # ダイキン工業
-    "8035.T",  # 東京エレクトロン
-    "4519.T",  # 中外製薬
-    "9432.T",  # NTT
-    "7741.T",  # HOYA
-    "6954.T",  # ファナック
-    "4568.T",  # 第一三共
-    "8316.T",  # 三井住友フィナンシャルG
-    "9433.T",  # KDDI
-    "7267.T",  # 本田技研工業
-    "4502.T",  # 武田薬品工業
-    "6501.T",  # 日立製作所
-    "6702.T",  # 富士通
-    "7751.T",  # キヤノン
-    "8411.T",  # みずほフィナンシャルG
-    "9020.T",  # 東日本旅客鉄道
-    "4661.T",  # オリエンタルランド
-    "6503.T",  # 三菱電機
-    "6594.T",  # 日本電産（ニデック）
-    "4543.T",  # テルモ
-    "7832.T",  # バンダイナムコホールディングス
-    "2802.T",  # 味の素
-    "9022.T",  # 東海旅客鉄道
-    "4901.T",  # 富士フイルムホールディングス
-    "7733.T",  # オリンパス
-    "6723.T",  # ルネサスエレクトロニクス
-    "7201.T",  # 日産自動車
-    "4307.T",  # 野村総合研究所
-    "9613.T",  # NTTデータグループ
-    "2914.T",  # 日本たばこ産業
-    "8801.T",  # 三井不動産
-    "3382.T",  # セブン＆アイ・ホールディングス
-    "4813.T",  # ACCESS
-    "6146.T",  # ディスコ
-    "6920.T",  # レーザーテック
-    "4911.T",  # 資生堂
-    "9064.T",  # ヤマトホールディングス
-    "7269.T",  # スズキ
-    "6902.T",  # デンソー
-    "8002.T",  # 丸紅
-    "8058.T",  # 三菱商事
-    "8031.T",  # 三井物産
-]
-
-# 米国主要銘柄（S&P500 大型株）
-_US_TICKERS: List[str] = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
-    "META", "TSLA", "AVGO", "ORCL", "AMD",
-    "NFLX", "ADBE", "CRM", "INTC", "QCOM",
-    "TXN", "MU", "AMAT", "LRCX", "KLAC",
-    "JPM", "BAC", "GS", "MS", "WFC",
-    "JNJ", "UNH", "PFE", "MRK", "ABBV",
-    "XOM", "CVX", "COP", "EOG", "SLB",
-    "AMGN", "GILD", "REGN", "VRTX", "BMY",
-    "V", "MA", "PYPL", "AXP", "COF",
-    "DIS", "CMCSA", "T", "VZ", "NFLX",
-]
-
 
 def _get_universe(market: str) -> List[str]:
-    market = market.upper()
-    if market == "JP":
-        return _JP_TICKERS
-    if market == "US":
-        return _US_TICKERS
-    return _JP_TICKERS + _US_TICKERS
+    """
+    後方互換のための薄いラッパー。
+    実装は agents.universe.get_universe に委譲する（JSON + Finnhub フォールバック）。
+    """
+    return get_universe(market)
 
 
 # ── スコアリング ──────────────────────────────────────────────────────────────

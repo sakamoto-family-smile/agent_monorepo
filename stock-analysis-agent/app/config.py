@@ -25,6 +25,9 @@ class Settings:
     # Cache settings
     price_cache_ttl_hours: int = int(os.getenv("PRICE_CACHE_TTL_HOURS", "24"))
 
+    # Finnhub（未設定の場合はJSONユニバースのみを使用）
+    finnhub_api_key: str = os.getenv("FINNHUB_API_KEY", "")
+
     # VertexAI settings
     vertex_ai_project: str = os.getenv("GOOGLE_CLOUD_PROJECT", "")
     vertex_ai_location: str = os.getenv("VERTEX_AI_LOCATION", "us-east5")

@@ -58,7 +58,10 @@ class TestGetUniverse:
         tickers = _get_universe("ALL")
         jp = _get_universe("JP")
         us = _get_universe("US")
-        assert len(tickers) == len(jp) + len(us)
+        # ALL は JP + US + GROWTH を結合する
+        assert len(tickers) > len(jp) + len(us)
+        assert all(t in tickers for t in jp)
+        assert all(t in tickers for t in us)
 
     def test_case_insensitive(self):
         assert _get_universe("jp") == _get_universe("JP")
