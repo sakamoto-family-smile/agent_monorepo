@@ -17,8 +17,14 @@ RUN uv sync --no-dev
 
 COPY app/ ./app/
 
-# Create data directories
-RUN mkdir -p data/charts data/cache data/reports data/dictionaries
+# Create non-root user (required by Claude Agent SDK --dangerously-skip-permissions)
+RUN useradd -m -u 1000 appuser
+
+# Create data directories and set ownership
+RUN mkdir -p data/charts data/cache data/reports data/dictionaries \
+    && chown -R appuser:appuser /app
+
+USER appuser
 
 EXPOSE 8000
 
