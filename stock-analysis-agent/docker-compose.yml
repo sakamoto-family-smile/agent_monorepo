@@ -1,4 +1,33 @@
 services:
+  # MCP サーバー (Brave Search) — supergateway で stdio→HTTP SSE に変換
+  mcp-brave-search:
+    image: node:20-slim
+    working_dir: /app
+    environment:
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+    command: >
+      sh -c "npm install -g supergateway @modelcontextprotocol/server-brave-search &&
+             npx supergateway --stdio 'npx @modelcontextprotocol/server-brave-search' --port 3002 --outputTransport streamableHttp"
+    expose:
+      - "3002"
+    restart: unless-stopped
+
+  # Security Platform MCP Proxy — rate limiting, DLP, tool pinning
+  security-proxy:
+    build:
+      context: ../security-platform
+      dockerfile: infra/Dockerfile.proxy
+    environment:
+      - MCP_TARGET_URL=http://mcp-brave-search:3002
+      - VERTEX_AI_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - VERTEX_AI_LOCATION=us-central1
+      - LLM_PROVIDER=gemini
+    ports:
+      - "8082:8080"
+    depends_on:
+      - mcp-brave-search
+    restart: unless-stopped
+
   # Stock Analysis Backend API
   backend:
     build:
@@ -19,10 +48,12 @@ services:
       - CACHE_DIR=/app/data/cache
       - DICTIONARIES_DIR=/app/data/dictionaries
       - LOG_LEVEL=debug
-      - MCP_PROXY_URL=${MCP_PROXY_URL:-}
+      # Security Platform MCP Proxy (routes brave-search through gateway)
+      - MCP_PROXY_URL=http://security-proxy:8080
     volumes:
       - stock_data:/app/data
-      - ./.claude_credentials/credentials.json:/tmp/claude_credentials.json:ro
+    depends_on:
+      - security-proxy
     restart: unless-stopped
 
 volumes:

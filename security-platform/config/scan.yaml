@@ -17,6 +17,7 @@ targets:
     - "agent-system-2/src/"
     - "kanie-lab-agent/backend/"
     - "kanie-lab-agent/tools/"
+    - "stock-analysis-agent/app/"
 
 # CVSS thresholds
 cvss_thresholds:
@@ -120,6 +121,8 @@ gateway:
     # kanie-lab-agent MCP servers
     - "mcp-google-search"      # docker-compose service name
     - "aiplatform.googleapis.com"  # Vertex AI (Gemini grounding)
+    # stock-analysis-agent MCP servers
+    - "mcp-brave-search"       # docker-compose service name (Brave Search)
 
   # Additional injection patterns (merged with built-in defaults in injection.py).
   # Use this to add project-specific patterns without modifying source code.

@@ -52,6 +52,14 @@ mcp_servers:
     server_key: "postgres"
     tags: ["database", "sql"]
 
+  # stock-analysis-agent
+  - name: "@modelcontextprotocol/server-brave-search"
+    version: "latest"
+    source: "npm"
+    config_path: "stock-analysis-agent/docker-compose.yml"
+    server_key: "brave-search"
+    tags: ["search", "web", "news", "sentiment", "stock-analysis"]
+
 skills:
   # kanie-lab-agent
   - name: "research-design"
@@ -96,6 +104,27 @@ npm_packages:
     ecosystem: "npm"
 
 python_packages:
+  # stock-analysis-agent
+  - name: "yfinance"
+    version: "0.2.40"
+    ecosystem: "pip"
+
+  - name: "aiosqlite"
+    version: "0.20.0"
+    ecosystem: "pip"
+
+  - name: "pandas"
+    version: "2.2.0"
+    ecosystem: "pip"
+
+  - name: "mplfinance"
+    version: "0.12.9"
+    ecosystem: "pip"
+
+  - name: "rapidfuzz"
+    version: "3.0.0"
+    ecosystem: "pip"
+
   # kanie-lab-agent backend
   - name: "fastmcp"
     version: "2.0.0"
