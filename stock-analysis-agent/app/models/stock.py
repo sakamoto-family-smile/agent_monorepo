@@ -70,3 +70,37 @@ class AnalysisReport(BaseModel):
     chart_path: Optional[str] = None
     report_text: str = ""
     summary: str = ""
+
+
+# --- Screener models ---
+
+class ScreenerRequest(BaseModel):
+    market: str = "JP"          # "JP", "US", "ALL"
+    top_n: int = Field(default=20, ge=1, le=50)
+    rsi_max: float = Field(default=45.0, ge=0.0, le=100.0)   # RSI上限（売られすぎ）
+    rsi_min: float = Field(default=0.0, ge=0.0, le=100.0)    # RSI下限
+    volume_spike_min: float = Field(default=1.5, ge=1.0)     # 出来高スパイク倍率（直近5日平均比）
+    require_macd_cross: bool = False                          # MACDゴールデンクロス必須
+    require_price_above_sma20: bool = False                   # SMA20超え必須
+    period: str = "3mo"                                       # データ取得期間
+
+
+class ScreenerCandidate(BaseModel):
+    rank: int
+    ticker: str
+    company_name: Optional[str] = None
+    current_price: float
+    price_change_pct: float        # 直近5日間の騰落率
+    rsi_14: Optional[float] = None
+    volume_spike: Optional[float] = None   # 直近出来高 / 5日平均出来高
+    macd_hist: Optional[float] = None
+    above_sma20: Optional[bool] = None
+    score: float                   # 総合スコア（高いほど短期上昇期待大）
+    signals: List[str] = []        # 点灯しているシグナル一覧
+
+
+class ScreenerResult(BaseModel):
+    screened_at: datetime
+    market: str
+    total_scanned: int
+    candidates: List[ScreenerCandidate]
