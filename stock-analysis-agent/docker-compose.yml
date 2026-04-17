@@ -1,13 +1,13 @@
 services:
-  # MCP サーバー (Brave Search) — HTTP transport on port 3002
+  # MCP サーバー (Brave Search) — supergateway で stdio→HTTP SSE に変換
   mcp-brave-search:
     image: node:20-slim
     working_dir: /app
     environment:
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
     command: >
-      sh -c "npm install -g @modelcontextprotocol/server-brave-search &&
-             npx @modelcontextprotocol/server-brave-search --port 3002"
+      sh -c "npm install -g supergateway @modelcontextprotocol/server-brave-search &&
+             npx supergateway --stdio 'npx @modelcontextprotocol/server-brave-search' --port 3002 --outputTransport streamableHttp"
     expose:
       - "3002"
     restart: unless-stopped
@@ -52,7 +52,6 @@ services:
       - MCP_PROXY_URL=http://security-proxy:8080
     volumes:
       - stock_data:/app/data
-      - ./.claude_credentials/credentials.json:/tmp/claude_credentials.json:ro
     depends_on:
       - security-proxy
     restart: unless-stopped
