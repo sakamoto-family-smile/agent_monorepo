@@ -16,10 +16,16 @@ class Settings:
     brave_api_key: str = os.getenv("BRAVE_API_KEY", "")
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
     # Phase 3a: LLM アドバイザー設定
+    # provider: "anthropic" (Anthropic API 直呼) | "vertex" (GCP Vertex AI 経由)
+    llm_provider: str = os.getenv("LLM_PROVIDER", "anthropic").lower()
     llm_model: str = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
     llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "1200"))
     # LLM 呼出をモック化(テスト・オフライン時)
     llm_mock_mode: bool = os.getenv("LLM_MOCK_MODE", "false").lower() == "true"
+    # Vertex AI 用 (llm_provider=vertex のとき必須)
+    # ADC (Application Default Credentials) を使用。ローカルは `gcloud auth application-default login`。
+    gcp_project_id: str = os.getenv("GOOGLE_CLOUD_PROJECT", "")
+    vertex_region: str = os.getenv("VERTEX_AI_LOCATION", "us-east5")
 
     # Phase 1+ DB 接続
     db_url: str = os.getenv("DB_URL", "sqlite+aiosqlite:///data/lifeplanner.db")
