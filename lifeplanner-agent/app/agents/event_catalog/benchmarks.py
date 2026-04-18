@@ -54,6 +54,50 @@ class EducationBenchmark:
     preschool_free_from_age: int
 
 
+@dataclass(frozen=True)
+class HousingBenchmark:
+    closing_cost_ratio: Decimal
+    property_tax_rate: Decimal
+    annual_maintenance_condo: Decimal
+    annual_maintenance_house: Decimal
+    mortgage_credit_new_years: int
+    mortgage_credit_used_years: int
+    mortgage_credit_rate: Decimal
+    mortgage_credit_max_balance_general: Decimal
+    mortgage_credit_max_balance_energy_saving: Decimal
+    default_interest_rate: Decimal
+    default_term_years: int
+
+
+@dataclass(frozen=True)
+class VehicleAnnualCost:
+    insurance: Decimal
+    auto_tax: Decimal
+    inspection_annual: Decimal
+    fuel: Decimal
+    maintenance: Decimal
+    parking: Decimal
+
+    @property
+    def total(self) -> Decimal:
+        return (
+            self.insurance
+            + self.auto_tax
+            + self.inspection_annual
+            + self.fuel
+            + self.maintenance
+            + self.parking
+        )
+
+
+@dataclass(frozen=True)
+class VehicleBenchmark:
+    annual_by_class: dict[str, VehicleAnnualCost]
+    closing_cost_ratio: Decimal
+    resale_ratio_by_years: dict[int, Decimal]
+    default_hold_years: int
+
+
 @lru_cache(maxsize=4)
 def load_education_benchmark(*, data_dir: Path | None = None) -> EducationBenchmark:
     base = data_dir or _BENCHMARK_DIR
@@ -91,4 +135,51 @@ def load_education_benchmark(*, data_dir: Path | None = None) -> EducationBenchm
         ),
         childcare_brackets=brackets,
         preschool_free_from_age=int(data["preschool_free_from_age"]),
+    )
+
+
+@lru_cache(maxsize=4)
+def load_housing_benchmark(*, data_dir: Path | None = None) -> HousingBenchmark:
+    base = data_dir or _BENCHMARK_DIR
+    with (base / "housing_cost.yaml").open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    mc = data["mortgage_credit"]
+    return HousingBenchmark(
+        closing_cost_ratio=_dec(data["closing_cost_ratio"]),
+        property_tax_rate=_dec(data["property_tax_rate"]),
+        annual_maintenance_condo=_dec(data["annual_maintenance_condo"]),
+        annual_maintenance_house=_dec(data["annual_maintenance_house"]),
+        mortgage_credit_new_years=int(mc["new_years"]),
+        mortgage_credit_used_years=int(mc["used_years"]),
+        mortgage_credit_rate=_dec(mc["rate"]),
+        mortgage_credit_max_balance_general=_dec(mc["max_balance_general"]),
+        mortgage_credit_max_balance_energy_saving=_dec(mc["max_balance_energy_saving"]),
+        default_interest_rate=_dec(data["default_interest_rate"]),
+        default_term_years=int(data["default_term_years"]),
+    )
+
+
+@lru_cache(maxsize=4)
+def load_vehicle_benchmark(*, data_dir: Path | None = None) -> VehicleBenchmark:
+    base = data_dir or _BENCHMARK_DIR
+    with (base / "vehicle_cost.yaml").open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+
+    annual = {
+        class_name: VehicleAnnualCost(
+            insurance=_dec(row["insurance"]),
+            auto_tax=_dec(row["auto_tax"]),
+            inspection_annual=_dec(row["inspection_annual"]),
+            fuel=_dec(row["fuel"]),
+            maintenance=_dec(row["maintenance"]),
+            parking=_dec(row["parking"]),
+        )
+        for class_name, row in data["annual_costs"].items()
+    }
+    resale = {int(years): _dec(ratio) for years, ratio in data["resale_ratio_by_years"].items()}
+    return VehicleBenchmark(
+        annual_by_class=annual,
+        closing_cost_ratio=_dec(data["closing_cost_ratio"]),
+        resale_ratio_by_years=resale,
+        default_hold_years=int(data["default_hold_years"]),
     )

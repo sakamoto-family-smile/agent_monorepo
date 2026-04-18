@@ -124,6 +124,112 @@ async def test_simulate_with_birth_event(client, scenario_payload):
     assert Decimal(body["total_event_net"]) < Decimal(0)
 
 
+async def test_simulate_with_housing_event(client, scenario_payload):
+    """住宅購入イベント付きのシミュは ONE_TIME 頭金+諸費用で年次ネットが大きく凹む。"""
+    r = await client.post("/api/scenarios", json=scenario_payload)
+    scenario_id = r.json()["id"]
+    await client.post(
+        f"/api/scenarios/{scenario_id}/events",
+        json={
+            "event_type": "E02",
+            "start_year": 2028,
+            "params": {
+                "purchase_year": 2028,
+                "price": "50000000",
+                "down_payment": "10000000",
+                "loan_term_years": 35,
+                "interest_rate": "0.015",
+                "property_type": "condo",
+                "property_condition": "new",
+            },
+        },
+    )
+    r = await client.post(f"/api/scenarios/{scenario_id}/simulate")
+    assert r.status_code == 200
+    body = r.json()
+    assert Decimal(body["total_event_net"]) < Decimal(0)
+    # 購入年(2028)の annual_net は頭金 1000万 + 諸費用 350万 分で大きく負になる
+    row_2028 = next(r for r in body["rows"] if r["year"] == 2028)
+    assert Decimal(row_2028["event_net"]) < Decimal("-10000000")
+
+
+async def test_simulate_with_vehicle_event(client, scenario_payload):
+    """車購入 + 買替イベント付きのシミュは純資産を削る。"""
+    r = await client.post("/api/scenarios", json=scenario_payload)
+    scenario_id = r.json()["id"]
+    await client.post(
+        f"/api/scenarios/{scenario_id}/events",
+        json={
+            "event_type": "E04",
+            "start_year": 2026,
+            "params": {
+                "first_purchase_year": 2026,
+                "vehicle_class": "compact",
+                "price": "2500000",
+                "hold_years": 8,
+                "repeat_replacement": True,
+            },
+        },
+    )
+    r = await client.post(f"/api/scenarios/{scenario_id}/simulate")
+    assert r.status_code == 200
+    body = r.json()
+    assert Decimal(body["total_event_net"]) < Decimal(0)
+    # 30年で購入イベントは 2026 / 2034 / 2042 / 2050 の 4 回
+    purchase_years = [2026, 2034, 2042, 2050]
+    for py in purchase_years:
+        row = next(r for r in body["rows"] if r["year"] == py)
+        # ONE_TIME 購入 + 年次コスト がまとまった年なので event_net は大きく負
+        assert Decimal(row["event_net"]) < Decimal(0)
+
+
+async def test_simulate_with_all_three_events(client, scenario_payload):
+    """E01 + E02 + E04 を全部組むと、イベント累積は大きく負。"""
+    r = await client.post("/api/scenarios", json=scenario_payload)
+    scenario_id = r.json()["id"]
+    for ev in [
+        {
+            "event_type": "E01",
+            "start_year": 2027,
+            "params": {
+                "birth_year": 2027,
+                "parental_leave_parent_salary": "4800000",
+                "household_income_for_childcare": "9000000",
+            },
+        },
+        {
+            "event_type": "E02",
+            "start_year": 2029,
+            "params": {
+                "purchase_year": 2029,
+                "price": "45000000",
+                "down_payment": "9000000",
+                "loan_term_years": 35,
+                "interest_rate": "0.015",
+                "property_type": "condo",
+                "property_condition": "new",
+            },
+        },
+        {
+            "event_type": "E04",
+            "start_year": 2026,
+            "params": {
+                "first_purchase_year": 2026,
+                "vehicle_class": "compact",
+                "price": "2500000",
+                "hold_years": 8,
+            },
+        },
+    ]:
+        rv = await client.post(f"/api/scenarios/{scenario_id}/events", json=ev)
+        assert rv.status_code == 201
+
+    r = await client.post(f"/api/scenarios/{scenario_id}/simulate")
+    assert r.status_code == 200
+    body = r.json()
+    assert Decimal(body["total_event_net"]) < Decimal("-10000000")
+
+
 async def test_simulate_not_found(client):
     r = await client.post("/api/scenarios/9999/simulate")
     assert r.status_code == 404
