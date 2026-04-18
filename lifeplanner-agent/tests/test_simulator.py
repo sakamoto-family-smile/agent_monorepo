@@ -5,7 +5,6 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-
 from agents.event_catalog import BirthEventParams, expand_birth_event
 from agents.simulator import (
     HouseholdProfile,

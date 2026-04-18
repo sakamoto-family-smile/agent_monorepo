@@ -6,7 +6,6 @@ from collections import defaultdict
 from decimal import Decimal
 
 import pytest
-
 from agents.event_catalog import (
     BirthEventParams,
     CashFlowDelta,

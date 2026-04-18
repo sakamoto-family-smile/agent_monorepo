@@ -12,10 +12,10 @@ Phase 2 スコープ:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 
-from agents.event_catalog.types import CashFlowDelta, EventCategory
+from agents.event_catalog.types import CashFlowDelta
 from agents.tax_jp import (
     TaxTable,
     calc_income_tax,

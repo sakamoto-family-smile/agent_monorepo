@@ -13,7 +13,6 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-
 from agents.tax_jp import (
     calc_income_tax,
     calc_resident_tax,
