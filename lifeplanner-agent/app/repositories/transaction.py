@@ -39,6 +39,8 @@ def _domain_to_orm_kwargs(household_id: str, tx: DomainTransaction) -> dict:
         "account": tx.account,
         "category": tx.category,
         "subcategory": tx.subcategory,
+        "canonical_category": tx.canonical_category,
+        "expense_type": tx.expense_type,
         "memo": tx.memo,
         "is_transfer": tx.is_transfer,
         "is_target": tx.is_target,
@@ -48,7 +50,9 @@ def _domain_to_orm_kwargs(household_id: str, tx: DomainTransaction) -> dict:
 def _fields_differ(existing: Transaction, data: dict) -> bool:
     for key in (
         "date", "content", "amount", "account",
-        "category", "subcategory", "memo",
+        "category", "subcategory",
+        "canonical_category", "expense_type",
+        "memo",
         "is_transfer", "is_target",
     ):
         if getattr(existing, key) != data[key]:

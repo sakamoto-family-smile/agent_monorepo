@@ -31,9 +31,13 @@ class Transaction(BaseModel):
     account: str                  # 保有金融機関
     category: str                 # 大項目
     subcategory: str | None       # 中項目
-    memo: str | None
-    is_transfer: bool             # 振替取引か
-    is_target: bool               # 計算対象フラグ
+    # canonical 分類 (MF 大項目 → mf_to_canonical.yaml で変換)
+    canonical_category: str = "other"
+    # 固定費/変動費/収入 の分類
+    expense_type: str = "variable"
+    memo: str | None = None
+    is_transfer: bool = False     # 振替取引か
+    is_target: bool = True        # 計算対象フラグ
 
     @property
     def kind(self) -> TransactionKind:

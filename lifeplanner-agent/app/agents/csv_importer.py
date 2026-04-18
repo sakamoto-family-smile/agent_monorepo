@@ -20,6 +20,7 @@ from io import StringIO
 from pathlib import Path
 
 from models.transaction import ImportResult, Transaction
+from services.category_mapper import CategoryMapper, load_category_mapper
 from utils.encoding import detect_encoding
 from utils.money import to_yen
 
@@ -57,6 +58,7 @@ def parse_bytes(
     source_label: str = "<memory>",
     include_transfers: bool = False,
     include_excluded: bool = False,
+    mapper: CategoryMapper | None = None,
 ) -> ImportResult:
     """
     CSV バイト列をパースして ImportResult を返す。
@@ -72,6 +74,7 @@ def parse_bytes(
         encoding=encoding,
         include_transfers=include_transfers,
         include_excluded=include_excluded,
+        mapper=mapper or load_category_mapper(),
     )
 
 
@@ -80,6 +83,7 @@ def parse_file(
     *,
     include_transfers: bool = False,
     include_excluded: bool = False,
+    mapper: CategoryMapper | None = None,
 ) -> ImportResult:
     """ファイルパスから ImportResult を得る薄いラッパー。"""
     p = Path(path)
@@ -88,6 +92,7 @@ def parse_file(
         source_label=str(p),
         include_transfers=include_transfers,
         include_excluded=include_excluded,
+        mapper=mapper,
     )
 
 
@@ -98,6 +103,7 @@ def _parse_text(
     encoding: str,
     include_transfers: bool,
     include_excluded: bool,
+    mapper: CategoryMapper,
 ) -> ImportResult:
     reader = csv.DictReader(StringIO(text))
 
@@ -133,14 +139,18 @@ def _parse_text(
                 skipped_excluded += 1
                 continue
 
+            mf_category = (row.get("大項目") or "").strip()
+            canonical = mapper.resolve(mf_category)
             tx = Transaction(
                 source_id=source_id,
                 date=_parse_date(row["日付"]),
                 content=(row.get("内容") or "").strip(),
                 amount=to_yen(row.get("金額（円）", "0")),
                 account=(row.get("保有金融機関") or "").strip(),
-                category=(row.get("大項目") or "").strip(),
+                category=mf_category,
                 subcategory=(row.get("中項目") or "").strip() or None,
+                canonical_category=canonical.canonical,
+                expense_type=canonical.expense_type,
                 memo=(row.get("メモ") or "").strip() or None,
                 is_transfer=is_transfer,
                 is_target=is_target,

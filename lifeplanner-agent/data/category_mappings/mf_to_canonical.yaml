@@ -1,0 +1,125 @@
+---
+# MF ME 大項目 → 自社 canonical カテゴリ マッピング
+#
+# canonical カテゴリ設計方針:
+#   - ライフプラン上意味を持つ粒度にまとめる
+#   - 固定費/変動費の分類 (fixed/variable) を付与
+#   - 未知の MF 大項目は canonical="other", expense_type="variable" にフォールバック
+#
+# フォーマット:
+#   <MF大項目>:
+#     canonical: <自社カテゴリキー>
+#     expense_type: fixed | variable
+#     description: <人間可読な説明>
+
+food:
+  canonical: food
+  expense_type: variable
+  description: 食費・飲料
+食費:
+  canonical: food
+  expense_type: variable
+  description: 食費・飲料
+
+日用品:
+  canonical: daily_goods
+  expense_type: variable
+  description: 日用消耗品
+
+衣服・美容:
+  canonical: apparel_beauty
+  expense_type: variable
+  description: 被服・美容費
+
+健康・医療:
+  canonical: health_medical
+  expense_type: variable
+  description: 医療費・ドラッグストア
+
+交通費:
+  canonical: transportation
+  expense_type: variable
+  description: 電車・バス・ガソリン
+
+趣味・娯楽:
+  canonical: entertainment
+  expense_type: variable
+  description: 娯楽・サブスク・書籍
+
+交際費:
+  canonical: social
+  expense_type: variable
+  description: 飲み会・プレゼント
+
+教養・教育:
+  canonical: education
+  expense_type: variable
+  description: 学費・書籍・習い事
+
+自動車:
+  canonical: vehicle
+  expense_type: fixed
+  description: 車両費・ガソリン・駐車場
+
+住宅:
+  canonical: housing
+  expense_type: fixed
+  description: 家賃・住宅ローン・管理費
+
+水道・光熱費:
+  canonical: utilities
+  expense_type: fixed
+  description: 電気・ガス・水道
+
+通信費:
+  canonical: communication
+  expense_type: fixed
+  description: 携帯・インターネット
+
+保険:
+  canonical: insurance
+  expense_type: fixed
+  description: 生保・医療保険・損保
+
+税・社会保障:
+  canonical: tax_social
+  expense_type: fixed
+  description: 税金・社保料
+
+現金・カード:
+  canonical: cash_transfer
+  expense_type: variable
+  description: ATM 引出等のキャッシュ移動 (通常は振替除外対象)
+
+特別な支出:
+  canonical: one_time
+  expense_type: variable
+  description: 冠婚葬祭・家電等の一時支出
+
+# 収入系 (amount > 0)
+給与:
+  canonical: salary
+  expense_type: income
+  description: 給与所得
+ボーナス:
+  canonical: bonus
+  expense_type: income
+  description: 賞与
+事業・副業:
+  canonical: business_income
+  expense_type: income
+  description: 事業収入・副業
+一時所得:
+  canonical: misc_income
+  expense_type: income
+  description: 一時的な収入
+その他入金:
+  canonical: misc_income
+  expense_type: income
+  description: その他入金
+
+# 未分類フォールバック
+未分類:
+  canonical: other
+  expense_type: variable
+  description: 分類不能

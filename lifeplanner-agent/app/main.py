@@ -42,10 +42,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Household-ID"],
 )
 
+from routes.anomalies import router as anomalies_router  # noqa: E402
+from routes.networth import router as networth_router  # noqa: E402
+from routes.profile import router as profile_router  # noqa: E402
 from routes.scenarios import router as scenarios_router  # noqa: E402
 from routes.simulate import router as simulate_router  # noqa: E402
 from routes.summary import router as summary_router  # noqa: E402
@@ -55,6 +58,9 @@ from routes.upload import router as upload_router  # noqa: E402
 app.include_router(upload_router)
 app.include_router(transactions_router)
 app.include_router(summary_router)
+app.include_router(networth_router)
+app.include_router(anomalies_router)
+app.include_router(profile_router)
 app.include_router(scenarios_router)
 app.include_router(simulate_router)
 
