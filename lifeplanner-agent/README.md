@@ -4,6 +4,139 @@ Money Forward ME の家計データを起点に、家族単位のライフプラ
 
 ---
 
+## 0. Quickstart
+
+### 0.1 前提ツール
+
+| ツール | バージョン | 備考 |
+|---|---|---|
+| Python | 3.12+ | `pyproject.toml` で指定 |
+| uv | 最新 | パッケージ管理 (`curl -LsSf https://astral.sh/uv/install.sh \| sh`) |
+| Docker / Docker Compose | 任意 | `docker compose up` で一括起動する場合のみ |
+| gcloud CLI | 任意 | `LLM_PROVIDER=vertex` で ADC を使う場合 |
+
+### 0.2 初期セットアップ
+
+```bash
+cd agent_monorepo/lifeplanner-agent
+
+# 1. 環境変数テンプレートをコピー
+cp .env.example .env
+# → .env を編集して必要なキーを設定 (最低限は何も設定しなくても LLM_MOCK_MODE=true で起動可)
+
+# 2. 依存インストール (dev 含む)
+make install
+
+# 3. ローカル SQLite を使う場合、起動時に自動で DB 初期化されるためマイグレーション不要
+#    Postgres を使う場合のみ:
+#    DB_URL=postgresql+asyncpg://... uv run alembic upgrade head
+
+# 4. MF ME CSV を配置 (任意、Phase 1+ の /api/upload で使用)
+mkdir -p data/mf_csv
+cp ~/Downloads/収入・支出詳細_*.csv data/mf_csv/
+```
+
+### 0.3 起動
+
+```bash
+# ローカル (FastAPI のみ、SQLite)
+make run                 # → http://127.0.0.1:8001
+
+# または Docker Compose (ホットリロード付き)
+docker compose up --build    # → http://127.0.0.1:8001
+
+# ヘルスチェック
+curl http://127.0.0.1:8001/health
+# → {"status":"ok","service":"lifeplanner-agent"}
+
+# OpenAPI ドキュメント (Swagger UI)
+open http://127.0.0.1:8001/docs
+```
+
+### 0.4 テスト・静的解析
+
+```bash
+make test         # pytest
+make lint         # ruff check
+make format       # ruff format + --fix
+make check        # lint + test
+```
+
+### 0.5 主要 API エンドポイント
+
+すべて `X-Household-ID` ヘッダで世帯を指定（未指定時は `DEV_HOUSEHOLD_ID` フォールバック）。
+
+| メソッド | パス | 用途 |
+|---|---|---|
+| `POST` | `/api/upload` | MF ME CSV をアップロードして取り込み |
+| `GET` | `/api/transactions` | 取引一覧（期間・カテゴリでフィルタ） |
+| `GET` | `/api/summary` | 月次サマリ（収入・支出・カテゴリ別） |
+| `GET` | `/api/networth` | 純資産スナップショット |
+| `GET` | `/api/anomalies` | 異常値検知（外れ値の取引） |
+| `GET/POST/DELETE` | `/api/profile/members` | 世帯メンバー管理 |
+| `GET/POST/DELETE` | `/api/profile/assets` | 資産管理 |
+| `GET/POST/DELETE` | `/api/profile/liabilities` | 負債管理 |
+| `GET/POST` | `/api/scenarios` | シナリオ一覧 / 作成 |
+| `POST` | `/api/scenarios/{id}/events` | シナリオにライフイベント追加 |
+| `POST` | `/api/scenarios/{id}/simulate` | 30年プロジェクション実行 |
+| `POST` | `/api/scenarios/compare` | 複数シナリオの決定論的差分 |
+| `POST` | `/api/chat` | LLM アドバイザー（シナリオ要約・比較解説） |
+
+#### 使い方例
+
+```bash
+# MF CSV アップロード
+curl -X POST http://127.0.0.1:8001/api/upload \
+  -H "X-Household-ID: dev-household-00000000" \
+  -F "file=@data/mf_csv/収入・支出詳細_2026-04.csv"
+
+# 期間サマリ (start / end は YYYY-MM-DD、省略時は当月)
+curl "http://127.0.0.1:8001/api/summary?start=2026-04-01&end=2026-04-30" \
+  -H "X-Household-ID: dev-household-00000000"
+
+# シナリオ作成 (primary_salary / start_year は必須)
+curl -X POST http://127.0.0.1:8001/api/scenarios \
+  -H "X-Household-ID: dev-household-00000000" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "name": "base",
+        "description": "現状維持",
+        "primary_salary": 6000000,
+        "start_year": 2026,
+        "horizon_years": 30
+      }'
+
+# 30年プロジェクション実行
+curl -X POST http://127.0.0.1:8001/api/scenarios/1/simulate \
+  -H "X-Household-ID: dev-household-00000000"
+
+# LLM 要約（LLM_MOCK_MODE=true 時は決定論モック応答）
+curl -X POST http://127.0.0.1:8001/api/chat \
+  -H "X-Household-ID: dev-household-00000000" \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_ids":[1,2],"question":"どちらが有利？"}'
+```
+
+### 0.6 環境変数サマリ
+
+主要なもののみ。詳細は `.env.example` 参照。
+
+| 変数 | 既定 | 用途 |
+|---|---|---|
+| `APP_ENV` | `local` | `local` 以外で SQLite 自動作成を無効化 |
+| `LOG_LEVEL` | `info` | ログレベル |
+| `DB_URL` | `sqlite+aiosqlite:///data/lifeplanner.db` | DB 接続文字列 |
+| `MF_CSV_DIR` | `data/mf_csv` | CSV 配置先 (gitignore 済) |
+| `DEV_HOUSEHOLD_ID` | `dev-household-00000000` | 認証スタブ用フォールバック |
+| `LLM_PROVIDER` | `anthropic` | `anthropic` \| `vertex` |
+| `LLM_MODEL` | `claude-sonnet-4-6` | モデル名 (Vertex は `@日付` 付き) |
+| `LLM_MAX_TOKENS` | `1200` | レスポンス上限 |
+| `LLM_MOCK_MODE` | `false` | `true` で LLM をモック化（オフライン開発） |
+| `ANTHROPIC_API_KEY` | - | `LLM_PROVIDER=anthropic` で必須 |
+| `GOOGLE_CLOUD_PROJECT` / `VERTEX_AI_LOCATION` | - / `us-east5` | `LLM_PROVIDER=vertex` で必須 |
+
+---
+
 ## 1. 目的とゴール
 
 - **家族単位**での中長期（30〜50年）のキャッシュフロー・純資産推移を可視化する
