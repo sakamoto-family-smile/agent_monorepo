@@ -46,6 +46,8 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "X-Household-ID"],
 )
 
+from routes.scenarios import router as scenarios_router  # noqa: E402
+from routes.simulate import router as simulate_router  # noqa: E402
 from routes.summary import router as summary_router  # noqa: E402
 from routes.transactions import router as transactions_router  # noqa: E402
 from routes.upload import router as upload_router  # noqa: E402
@@ -53,6 +55,8 @@ from routes.upload import router as upload_router  # noqa: E402
 app.include_router(upload_router)
 app.include_router(transactions_router)
 app.include_router(summary_router)
+app.include_router(scenarios_router)
+app.include_router(simulate_router)
 
 
 @app.get("/health")
