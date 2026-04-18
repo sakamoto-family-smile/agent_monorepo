@@ -169,6 +169,80 @@ async def add_event_endpoint(
     )
 
 
+class CompareIn(BaseModel):
+    base_scenario_id: int
+    compare_scenario_ids: list[int] = Field(default_factory=list, min_length=1)
+
+
+class SummaryOut(BaseModel):
+    scenario_id: int
+    name: str
+    horizon_years: int
+    total_net_worth_end: Decimal
+    total_take_home: Decimal
+    total_tax_paid: Decimal
+    total_social_insurance: Decimal
+    total_event_net: Decimal
+    min_net_worth: Decimal
+    min_net_worth_year: int
+    max_net_worth: Decimal
+    max_net_worth_year: int
+
+
+class DiffOut(BaseModel):
+    scenario_id: int
+    name: str
+    net_worth_diff: Decimal
+    event_net_diff: Decimal
+    take_home_diff: Decimal
+    tax_diff: Decimal
+
+
+class CompareOut(BaseModel):
+    base: SummaryOut
+    compares: list[SummaryOut]
+    diffs: list[DiffOut]
+
+
+@router.post("/compare", response_model=CompareOut)
+async def compare_scenarios_endpoint(
+    payload: CompareIn,
+    household_id: str = Depends(get_household_id),
+    session: AsyncSession = Depends(get_session_dep),
+) -> CompareOut:
+    from services.scenario_comparer import compare_scenarios
+    from services.scenario_runner import simulate_scenario
+
+    base = await get_scenario_for_household(session, payload.base_scenario_id, household_id)
+    if base is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Base scenario not found: {payload.base_scenario_id}",
+        )
+    base_result = await simulate_scenario(session, base)
+
+    compare_loaded: list[tuple[int, str, object]] = []
+    for sid in payload.compare_scenario_ids:
+        s = await get_scenario_for_household(session, sid, household_id)
+        if s is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Compare scenario not found: {sid}",
+            )
+        r = await simulate_scenario(session, s)
+        compare_loaded.append((s.id, s.name, r))
+
+    report = compare_scenarios(
+        base=(base.id, base.name, base_result),
+        compares=compare_loaded,  # type: ignore[arg-type]
+    )
+    return CompareOut(
+        base=SummaryOut(**report.base.__dict__),
+        compares=[SummaryOut(**s.__dict__) for s in report.compares],
+        diffs=[DiffOut(**d.__dict__) for d in report.diffs],
+    )
+
+
 @router.get("/{scenario_id}/events", response_model=list[EventOut])
 async def list_events_endpoint(
     scenario_id: int,

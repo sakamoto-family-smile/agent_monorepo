@@ -213,9 +213,9 @@ MF の資産情報は CSV 化されない項目もあるため、一部は手入
 
 ### Phase 3: LLM 対話 + LINE
 **目的**: 自然言語で操作・質問できる
-- F6 LLM アドバイザー（Claude Agent SDK）
-- F9 LINE Bot（質問応答 + CSVアップロード）
-- F8 シナリオ比較をLLMで要約
+- F6 LLM アドバイザー — **Phase 3a 実装済** (Anthropic SDK + Mock フォールバック、`/api/chat` で単一/複数シナリオを自然言語要約)
+- F8 シナリオ比較 — **Phase 3a 実装済** (`/api/scenarios/compare` で決定論差分、`/api/chat` で LLM 要約)
+- F9 LINE Bot（質問応答 + CSVアップロード）— Phase 3b で実装予定
 
 ### Phase 4: 高度シミュレーション
 - F4 残りのイベント（E03/E05-E12）

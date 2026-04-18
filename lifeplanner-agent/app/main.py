@@ -47,6 +47,7 @@ app.add_middleware(
 )
 
 from routes.anomalies import router as anomalies_router  # noqa: E402
+from routes.chat import router as chat_router  # noqa: E402
 from routes.networth import router as networth_router  # noqa: E402
 from routes.profile import router as profile_router  # noqa: E402
 from routes.scenarios import router as scenarios_router  # noqa: E402
@@ -63,6 +64,7 @@ app.include_router(anomalies_router)
 app.include_router(profile_router)
 app.include_router(scenarios_router)
 app.include_router(simulate_router)
+app.include_router(chat_router)
 
 
 @app.get("/health")

@@ -45,12 +45,17 @@ async def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("MF_CSV_DIR", str(tmp_path / "mf_csv"))
     monkeypatch.setenv("DEV_HOUSEHOLD_ID", "test-household")
+    # LLM をモック化して外部 API を叩かない
+    monkeypatch.setenv("LLM_MOCK_MODE", "true")
 
     import importlib
     import config
     importlib.reload(config)
     from services import database as db_mod
     importlib.reload(db_mod)
+    from services import llm_client as llm_mod
+    importlib.reload(llm_mod)
+    llm_mod.set_llm_client(None)
     import main
     importlib.reload(main)
 
