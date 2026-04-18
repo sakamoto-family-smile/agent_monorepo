@@ -6,6 +6,12 @@ data/mf_csv/*
 # DB / ローカル永続ストア
 data/*.db
 data/*.sqlite*
+tmp/
+*.db-shm
+*.db-wal
+
+# Alembic 生成物の一部（キャッシュ）
+infra/migrations/versions/__pycache__/
 
 # 認証情報・環境変数
 .env
