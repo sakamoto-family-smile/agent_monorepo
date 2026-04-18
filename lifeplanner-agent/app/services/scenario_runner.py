@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from agents.event_catalog import BirthEventParams, expand_birth_event
+from agents.event_catalog import (
+    BirthEventParams,
+    HousingEventParams,
+    VehicleEventParams,
+    expand_birth_event,
+    expand_housing_event,
+    expand_vehicle_event,
+)
 from agents.event_catalog.types import CashFlowDelta
 from agents.simulator import (
     HouseholdProfile,
@@ -62,6 +69,30 @@ def _expand_birth_params(params: dict, start_year: int) -> BirthEventParams:
     )
 
 
+def _expand_housing_params(params: dict, start_year: int) -> HousingEventParams:
+    return HousingEventParams(
+        purchase_year=int(params.get("purchase_year", start_year)),
+        price=_dec(params.get("price", 0)),
+        down_payment=_dec(params.get("down_payment", 0)),
+        loan_term_years=params.get("loan_term_years"),
+        interest_rate=_dec(params["interest_rate"]) if params.get("interest_rate") is not None else None,
+        property_type=params.get("property_type", "condo"),
+        property_condition=params.get("property_condition", "new"),
+        energy_class=params.get("energy_class", "general"),
+        include_mortgage_credit=bool(params.get("include_mortgage_credit", True)),
+    )
+
+
+def _expand_vehicle_params(params: dict, start_year: int) -> VehicleEventParams:
+    return VehicleEventParams(
+        first_purchase_year=int(params.get("first_purchase_year", start_year)),
+        vehicle_class=params.get("vehicle_class", "compact"),
+        price=_dec(params.get("price", 2_500_000)),
+        hold_years=params.get("hold_years"),
+        repeat_replacement=bool(params.get("repeat_replacement", True)),
+    )
+
+
 def _expand_events(events: list[LifeEvent], horizon_years: int) -> list[CashFlowDelta]:
     """全イベントを CashFlowDelta 列に展開する。"""
     deltas: list[CashFlowDelta] = []
@@ -69,8 +100,14 @@ def _expand_events(events: list[LifeEvent], horizon_years: int) -> list[CashFlow
         if e.event_type == "E01":
             params = _expand_birth_params(e.params, e.start_year)
             deltas.extend(expand_birth_event(params, horizon_years=horizon_years))
+        elif e.event_type == "E02":
+            housing = _expand_housing_params(e.params, e.start_year)
+            deltas.extend(expand_housing_event(housing, horizon_years=horizon_years))
+        elif e.event_type == "E04":
+            vehicle = _expand_vehicle_params(e.params, e.start_year)
+            deltas.extend(expand_vehicle_event(vehicle, horizon_years=horizon_years))
         else:
-            # Phase 2 スコープ外。将来の EventCatalog 拡張で追加。
+            # 未サポートのイベントは現状スキップ(E03/E05-E12 は Phase 4)
             continue
     return deltas
 

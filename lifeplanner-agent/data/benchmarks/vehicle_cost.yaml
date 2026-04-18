@@ -1,0 +1,61 @@
+---
+# 車両費ベンチマーク (円・年額)
+#
+# 出所:
+#   - 日本自動車工業会 家計調査
+#   - 自賠責・自動車税・車検費用の公式値
+#
+# 区分: コンパクト / セダン / SUV / 軽 / EV
+
+# 保有維持費 (年額)
+annual_costs:
+  compact:
+    insurance: 80_000          # 任意保険 (30 代ゴールド免許想定)
+    auto_tax: 30_500           # 自動車税 (1.5L 以下)
+    inspection_annual: 50_000  # 車検を 2 年に 1 度 10 万とし年割
+    fuel: 100_000              # 年 1 万 km 想定、燃費 15km/L、150 円/L
+    maintenance: 40_000        # オイル・タイヤ・整備
+    parking: 180_000           # 月 15,000 の駐車場
+  sedan:
+    insurance: 90_000
+    auto_tax: 36_000           # (2.0L)
+    inspection_annual: 55_000
+    fuel: 130_000
+    maintenance: 50_000
+    parking: 180_000
+  suv:
+    insurance: 100_000
+    auto_tax: 45_000           # (2.5L)
+    inspection_annual: 65_000
+    fuel: 170_000
+    maintenance: 60_000
+    parking: 200_000
+  kei:
+    insurance: 60_000
+    auto_tax: 10_800           # 軽自動車税
+    inspection_annual: 35_000
+    fuel: 80_000
+    maintenance: 30_000
+    parking: 120_000
+  ev:
+    insurance: 95_000
+    auto_tax: 25_000           # グリーン化特例で減免想定
+    inspection_annual: 55_000
+    fuel: 50_000               # 電気代 (自宅充電中心)
+    maintenance: 30_000
+    parking: 180_000
+
+# 一時費用
+# 購入時の諸費用 (車両価格比率)
+closing_cost_ratio: 0.10  # 税・登録・整備で本体の 10% 想定
+
+# 買替時の下取り比率 (保有年数別)
+resale_ratio_by_years:
+  3: 0.55
+  5: 0.40
+  7: 0.25
+  10: 0.15
+  15: 0.05
+
+# 既定の保有年数 (買替周期)
+default_hold_years: 8

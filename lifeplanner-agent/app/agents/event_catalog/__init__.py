@@ -10,11 +10,17 @@ Phase 2 スコープ:
 from __future__ import annotations
 
 from agents.event_catalog.birth import BirthEventParams, expand_birth_event
+from agents.event_catalog.housing import HousingEventParams, expand_housing_event
 from agents.event_catalog.types import CashFlowDelta, EventCategory
+from agents.event_catalog.vehicle import VehicleEventParams, expand_vehicle_event
 
 __all__ = [
     "BirthEventParams",
     "CashFlowDelta",
     "EventCategory",
+    "HousingEventParams",
+    "VehicleEventParams",
     "expand_birth_event",
+    "expand_housing_event",
+    "expand_vehicle_event",
 ]
