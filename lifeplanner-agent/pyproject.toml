@@ -16,6 +16,7 @@ dependencies = [
     "alembic>=1.13.0",
     "python-multipart>=0.0.9",
     "pyyaml>=6.0",
+    "anthropic>=0.40.0",
 ]
 
 [build-system]

@@ -14,6 +14,12 @@ class Settings:
     # Phase 3+ の拡張用（未設定でも起動可能）
     claude_code_oauth_token: str = os.getenv("CLAUDE_CODE_OAUTH_TOKEN", "")
     brave_api_key: str = os.getenv("BRAVE_API_KEY", "")
+    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    # Phase 3a: LLM アドバイザー設定
+    llm_model: str = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
+    llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "1200"))
+    # LLM 呼出をモック化(テスト・オフライン時)
+    llm_mock_mode: bool = os.getenv("LLM_MOCK_MODE", "false").lower() == "true"
 
     # Phase 1+ DB 接続
     db_url: str = os.getenv("DB_URL", "sqlite+aiosqlite:///data/lifeplanner.db")
