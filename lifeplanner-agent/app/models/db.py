@@ -55,6 +55,7 @@ class Transaction(Base):
         UniqueConstraint("household_id", "source_id", name="uq_transactions_household_source"),
         Index("ix_transactions_household_date", "household_id", "date"),
         Index("ix_transactions_household_category", "household_id", "category"),
+        Index("ix_transactions_household_canonical", "household_id", "canonical_category"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -69,6 +70,10 @@ class Transaction(Base):
     account: Mapped[str] = mapped_column(String(200), nullable=False, default="")
     category: Mapped[str] = mapped_column(String(100), nullable=False, default="")
     subcategory: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # 自社 canonical カテゴリ (MF 大項目 → mf_to_canonical.yaml で変換)
+    canonical_category: Mapped[str] = mapped_column(String(64), nullable=False, default="other")
+    # 固定費/変動費/収入 の区分 (fixed/variable/income)
+    expense_type: Mapped[str] = mapped_column(String(16), nullable=False, default="variable")
     memo: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_transfer: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_target: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -81,6 +86,90 @@ class Transaction(Base):
     )
 
     household: Mapped[Household] = relationship(back_populates="transactions", lazy="noload")
+
+
+class HouseholdMember(Base):
+    """世帯メンバー (F2)。配偶者・子供・扶養家族を管理。"""
+
+    __tablename__ = "household_members"
+    __table_args__ = (
+        Index("ix_members_household", "household_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    household_id: Mapped[str] = mapped_column(
+        ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # owner / spouse / child / dependent
+    relation: Mapped[str] = mapped_column(String(32), nullable=False)
+    birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # 雇用形態: employed / self_employed / student / retired / none
+    employment_status: Mapped[str] = mapped_column(String(32), nullable=False, default="none")
+    annual_income: Mapped[Decimal] = mapped_column(Numeric(14, 0), nullable=False, default=0)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class Asset(Base):
+    """資産 (F2)。現預金・投資・不動産など。"""
+
+    __tablename__ = "assets"
+    __table_args__ = (
+        Index("ix_assets_household", "household_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    household_id: Mapped[str] = mapped_column(
+        ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    # cash / deposit / investment / real_estate / other
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    value: Mapped[Decimal] = mapped_column(Numeric(16, 0), nullable=False)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class Liability(Base):
+    """負債 (F2)。住宅ローン・車ローン・その他。"""
+
+    __tablename__ = "liabilities"
+    __table_args__ = (
+        Index("ix_liabilities_household", "household_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    household_id: Mapped[str] = mapped_column(
+        ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    # mortgage / car_loan / credit_card / student_loan / other
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    balance: Mapped[Decimal] = mapped_column(Numeric(16, 0), nullable=False)
+    interest_rate: Mapped[Decimal] = mapped_column(Numeric(6, 4), nullable=False, default=0)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 class Scenario(Base):
