@@ -29,6 +29,12 @@ class CategoryOut(BaseModel):
     count: int
 
 
+class ExpenseTypeOut(BaseModel):
+    fixed: Decimal
+    variable: Decimal
+    other: Decimal
+
+
 class SummaryResponse(BaseModel):
     household_id: str
     start: date
@@ -36,8 +42,10 @@ class SummaryResponse(BaseModel):
     total_income: Decimal
     total_expense: Decimal
     net: Decimal
+    savings_rate: Decimal
     monthly: list[MonthlyOut]
     categories: list[CategoryOut]
+    expense_types: ExpenseTypeOut
 
 
 def _default_period() -> tuple[date, date]:
@@ -71,6 +79,12 @@ async def summary_endpoint(
         total_income=s.total_income,
         total_expense=s.total_expense,
         net=s.net,
+        savings_rate=s.savings_rate,
         monthly=[MonthlyOut(**m.__dict__) for m in s.monthly],
         categories=[CategoryOut(**c.__dict__) for c in s.categories],
+        expense_types=ExpenseTypeOut(
+            fixed=s.expense_types.fixed,
+            variable=s.expense_types.variable,
+            other=s.expense_types.other,
+        ),
     )

@@ -35,6 +35,19 @@ class CategoryBreakdown:
 
 
 @dataclass(frozen=True)
+class ExpenseTypeBreakdown:
+    """固定費 / 変動費 の分解。"""
+
+    fixed: Decimal
+    variable: Decimal
+    other: Decimal  # expense_type 未設定 or income 扱い以外
+
+    @property
+    def total(self) -> Decimal:
+        return self.fixed + self.variable + self.other
+
+
+@dataclass(frozen=True)
 class Summary:
     household_id: str
     start: date
@@ -42,8 +55,10 @@ class Summary:
     total_income: Decimal
     total_expense: Decimal
     net: Decimal
+    savings_rate: Decimal  # net / total_income (収入 0 のときは 0)
     monthly: list[MonthlyBreakdown]
     categories: list[CategoryBreakdown]
+    expense_types: ExpenseTypeBreakdown
 
 
 def _year_month_expr(dialect: str):
@@ -105,26 +120,48 @@ async def compute_summary(
         for row in monthly_res
     ]
 
-    # カテゴリ別支出（大項目）
+    # カテゴリ別支出（canonical_category 優先、fallback として大項目）
     cat_res = await session.execute(
         select(
-            Transaction.category,
+            Transaction.canonical_category.label("cat"),
             func.coalesce(func.sum(-Transaction.amount), 0).label("exp"),
             func.count().label("n"),
         )
         .where(and_(conditions, Transaction.amount < 0))
-        .group_by(Transaction.category)
+        .group_by(Transaction.canonical_category)
         .order_by(func.sum(-Transaction.amount).desc())
         .limit(top_categories)
     )
     categories = [
         CategoryBreakdown(
-            category=row.category,
+            category=row.cat,
             expense=Decimal(row.exp or 0),
             count=int(row.n),
         )
         for row in cat_res
     ]
+
+    # 固定費 / 変動費 分解
+    type_res = await session.execute(
+        select(
+            Transaction.expense_type.label("et"),
+            func.coalesce(func.sum(-Transaction.amount), 0).label("exp"),
+        )
+        .where(and_(conditions, Transaction.amount < 0))
+        .group_by(Transaction.expense_type)
+    )
+    type_map: dict[str, Decimal] = {row.et: Decimal(row.exp or 0) for row in type_res}
+    expense_types = ExpenseTypeBreakdown(
+        fixed=type_map.get("fixed", Decimal(0)),
+        variable=type_map.get("variable", Decimal(0)),
+        other=sum(
+            (v for k, v in type_map.items() if k not in ("fixed", "variable")),
+            Decimal(0),
+        ),
+    )
+
+    net = total_income - total_expense
+    savings_rate = (net / total_income) if total_income > 0 else Decimal(0)
 
     return Summary(
         household_id=household_id,
@@ -132,7 +169,9 @@ async def compute_summary(
         end=end,
         total_income=total_income,
         total_expense=total_expense,
-        net=total_income - total_expense,
+        net=net,
+        savings_rate=savings_rate,
         monthly=monthly,
         categories=categories,
+        expense_types=expense_types,
     )
