@@ -15,8 +15,11 @@ class Settings:
     claude_code_oauth_token: str = os.getenv("CLAUDE_CODE_OAUTH_TOKEN", "")
     brave_api_key: str = os.getenv("BRAVE_API_KEY", "")
 
-    # Phase 1+ で DB 接続（未設定時はアプリは DB 非接続で起動）
-    db_url: str = os.getenv("DB_URL", "")
+    # Phase 1+ DB 接続
+    db_url: str = os.getenv("DB_URL", "sqlite+aiosqlite:///data/lifeplanner.db")
+
+    # 認証スタブ（Phase 1 開発用、Phase 3 で Firebase Auth へ移行）
+    dev_household_id: str = os.getenv("DEV_HOUSEHOLD_ID", "dev-household-00000000")
 
     @property
     def cors_origins(self) -> list[str]:
