@@ -64,3 +64,35 @@ def test_anthropic_client_constructs_without_call():
     """API キーがあれば AnthropicLLMClient がインスタンス化できる (HTTP 呼出しはしない)。"""
     c = AnthropicLLMClient(api_key="sk-test", model="claude-sonnet-4-6", max_tokens=100)
     assert c is not None
+
+
+def test_build_default_client_vertex_without_project_falls_back_to_mock(monkeypatch):
+    """LLM_PROVIDER=vertex かつ GOOGLE_CLOUD_PROJECT 未設定 → MockLLMClient。"""
+    monkeypatch.delenv("LLM_MOCK_MODE", raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "vertex")
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    import importlib
+
+    import config as config_mod
+
+    importlib.reload(config_mod)
+    import services.llm_client as llm_mod
+
+    importlib.reload(llm_mod)
+    assert isinstance(llm_mod.build_default_client(), llm_mod.MockLLMClient)
+
+
+def test_build_default_client_unknown_provider_treated_as_anthropic(monkeypatch):
+    """未知のプロバイダ名は anthropic 扱い。APIキー未設定で Mock にフォールバック。"""
+    monkeypatch.delenv("LLM_MOCK_MODE", raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "bogus")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    import importlib
+
+    import config as config_mod
+
+    importlib.reload(config_mod)
+    import services.llm_client as llm_mod
+
+    importlib.reload(llm_mod)
+    assert isinstance(llm_mod.build_default_client(), llm_mod.MockLLMClient)

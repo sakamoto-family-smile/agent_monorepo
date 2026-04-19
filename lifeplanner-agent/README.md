@@ -274,6 +274,20 @@ MF の資産情報は CSV 化されない項目もあるため、一部は手入
 - 改善提案（節約余地・iDeCo/NISA活用・保険見直し）
 - 免責文言の自動付記
 
+#### LLM プロバイダ設定
+
+`LLM_PROVIDER` で Anthropic API 直呼 / GCP Vertex AI 経由を切替える:
+
+| 値 | 必須環境変数 | 用途 |
+|---|---|---|
+| `anthropic` (既定) | `ANTHROPIC_API_KEY` | 開発・PoC、シンプル構成 |
+| `vertex` | `GOOGLE_CLOUD_PROJECT`, `VERTEX_AI_LOCATION` (例: `us-east5`) + ADC | GCP 本番、監査ログ・VPC 制御・IAM 統合 |
+
+Vertex 利用時:
+- `gcloud auth application-default login`（ローカル）または Cloud Run SA に `roles/aiplatform.user`
+- モデル名は Vertex 形式 `claude-sonnet-4-6@20250929` を `LLM_MODEL` に設定
+- 認証情報・モデルが欠落している場合は `MockLLMClient` にフォールバック
+
 ### F7. 日本税制計算（年版管理）
 - 所得税（給与所得・事業所得・雑所得・譲渡所得）
 - 住民税（均等割・所得割）
@@ -346,7 +360,7 @@ MF の資産情報は CSV 化されない項目もあるため、一部は手入
 
 ### Phase 3: LLM 対話 + LINE
 **目的**: 自然言語で操作・質問できる
-- F6 LLM アドバイザー — **Phase 3a 実装済** (Anthropic SDK + Mock フォールバック、`/api/chat` で単一/複数シナリオを自然言語要約)
+- F6 LLM アドバイザー — **Phase 3a 実装済** (Anthropic SDK + Mock フォールバック、`/api/chat` で単一/複数シナリオを自然言語要約、Anthropic API 直 / GCP Vertex AI 経由を `LLM_PROVIDER` で切替可能)
 - F8 シナリオ比較 — **Phase 3a 実装済** (`/api/scenarios/compare` で決定論差分、`/api/chat` で LLM 要約)
 - F9 LINE Bot（質問応答 + CSVアップロード）— Phase 3b で実装予定
 
