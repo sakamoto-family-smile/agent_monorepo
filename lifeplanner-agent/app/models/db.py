@@ -13,6 +13,7 @@ from decimal import Decimal
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -20,7 +21,6 @@ from sqlalchemy import (
     Numeric,
     String,
     UniqueConstraint,
-    Date,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -42,7 +42,7 @@ class Household(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    transactions: Mapped[list["Transaction"]] = relationship(
+    transactions: Mapped[list[Transaction]] = relationship(
         back_populates="household",
         cascade="all, delete-orphan",
         lazy="noload",
@@ -196,12 +196,12 @@ class Scenario(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    events: Mapped[list["LifeEvent"]] = relationship(
+    events: Mapped[list[LifeEvent]] = relationship(
         back_populates="scenario",
         cascade="all, delete-orphan",
         lazy="noload",
     )
-    results: Mapped[list["SimulationResultRow"]] = relationship(
+    results: Mapped[list[SimulationResultRow]] = relationship(
         back_populates="scenario",
         cascade="all, delete-orphan",
         lazy="noload",
@@ -229,6 +229,27 @@ class LifeEvent(Base):
     )
 
     scenario: Mapped[Scenario] = relationship(back_populates="events", lazy="noload")
+
+
+class LineUserLink(Base):
+    """LINE userId と世帯 (household) の紐付け。
+
+    同じ世帯を複数の LINE ユーザー (夫婦など) で共有することを許可する。
+    主キーは line_user_id なので、一人の LINE ユーザーは同時に 1 世帯のみ参加可能。
+    """
+
+    __tablename__ = "line_user_links"
+    __table_args__ = (
+        Index("ix_line_user_links_household", "household_id"),
+    )
+
+    line_user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    household_id: Mapped[str] = mapped_column(
+        ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    linked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class SimulationResultRow(Base):

@@ -1,4 +1,5 @@
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -32,6 +33,10 @@ class Settings:
 
     # 認証スタブ（Phase 1 開発用、Phase 3 で Firebase Auth へ移行）
     dev_household_id: str = os.getenv("DEV_HOUSEHOLD_ID", "dev-household-00000000")
+
+    # Phase 3b: LINE Bot 連携 (未設定時は webhook が 503 を返す)
+    line_channel_secret: str = os.getenv("LINE_CHANNEL_SECRET", "")
+    line_channel_access_token: str = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 
     @property
     def cors_origins(self) -> list[str]:
