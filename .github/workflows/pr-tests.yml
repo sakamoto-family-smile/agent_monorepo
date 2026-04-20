@@ -13,6 +13,7 @@ jobs:
       security_platform:    ${{ steps.detect.outputs.security_platform }}
       kanie_lab_agent:      ${{ steps.detect.outputs.kanie_lab_agent }}
       stock_analysis_agent: ${{ steps.detect.outputs.stock_analysis_agent }}
+      lifeplanner_agent:    ${{ steps.detect.outputs.lifeplanner_agent }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,6 +42,12 @@ jobs:
             echo "stock_analysis_agent=true" >> "$GITHUB_OUTPUT"
           else
             echo "stock_analysis_agent=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -q '^lifeplanner-agent/'; then
+            echo "lifeplanner_agent=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "lifeplanner_agent=false" >> "$GITHUB_OUTPUT"
           fi
 
   # ── security-platform ──────────────────────────────────────────────────────
@@ -211,4 +218,45 @@ jobs:
         with:
           name: test-results-stock-analysis-agent
           path: stock-analysis-agent/.pytest_cache/
+          retention-days: 7
+
+  # ── lifeplanner-agent ──────────────────────────────────────────────────────
+  test-lifeplanner-agent:
+    name: Test / lifeplanner-agent
+    needs: detect-changes
+    if: needs.detect-changes.outputs.lifeplanner_agent == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lifeplanner-agent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run tests
+        env:
+          APP_ENV: "local"
+          # LLM / LINE とも外部呼出はテスト側でモック化されるためダミーで良い
+          LLM_MOCK_MODE: "true"
+        run: |
+          uv run pytest tests/ \
+            --tb=short -v --no-header
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-lifeplanner-agent
+          path: lifeplanner-agent/.pytest_cache/
           retention-days: 7

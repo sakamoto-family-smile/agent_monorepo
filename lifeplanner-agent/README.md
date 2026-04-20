@@ -81,6 +81,7 @@ make check        # lint + test
 | `POST` | `/api/scenarios/{id}/simulate` | 30年プロジェクション実行 |
 | `POST` | `/api/scenarios/compare` | 複数シナリオの決定論的差分 |
 | `POST` | `/api/chat` | LLM アドバイザー（シナリオ要約・比較解説） |
+| `POST` | `/api/line/webhook` | **LINE Bot Webhook** (LINE Messaging API からのコールバック) |
 
 #### 使い方例
 
@@ -134,6 +135,37 @@ curl -X POST http://127.0.0.1:8001/api/chat \
 | `LLM_MOCK_MODE` | `false` | `true` で LLM をモック化（オフライン開発） |
 | `ANTHROPIC_API_KEY` | - | `LLM_PROVIDER=anthropic` で必須 |
 | `GOOGLE_CLOUD_PROJECT` / `VERTEX_AI_LOCATION` | - / `us-east5` | `LLM_PROVIDER=vertex` で必須 |
+| `LINE_CHANNEL_SECRET` | - | LINE Bot 署名検証用チャネルシークレット (未設定なら `/api/line/webhook` が 503) |
+| `LINE_CHANNEL_ACCESS_TOKEN` | - | LINE Messaging API 呼出用トークン (同上) |
+
+### 0.7 LINE Bot セットアップ (Phase 3b)
+
+1. **LINE Developers コンソール** で Messaging API チャネルを作成し、
+   - `Channel secret` → `LINE_CHANNEL_SECRET`
+   - `Channel access token` (長期) → `LINE_CHANNEL_ACCESS_TOKEN`
+2. `.env` に上記 2 つを設定してアプリを起動
+3. ローカルで動作確認する場合は ngrok 等で公開 URL を作り、
+   `https://<public>/api/line/webhook` を LINE Webhook URL に登録
+4. 友だち追加後に bot に何か送ると世帯が自動作成され、以降は下記コマンドが利用可能
+
+| コマンド | 動作 |
+|---|---|
+| (任意テキスト) | 初回は世帯自動作成、以降は `/help` を案内 |
+| `/help` | コマンド一覧 |
+| `/whoami` | 連携状態と世帯 ID を表示 |
+| `/invite` | 配偶者共有用の `/link <世帯ID>` コマンドを出力 |
+| `/link <世帯ID>` | 既存世帯へ参加 |
+| `/unlink` | 連携解除 |
+| `/scenarios` | シナリオ一覧 |
+| `/summarize <id>` | 単一シナリオの LLM 要約 |
+| `/compare <id1> <id2> [...]` | シナリオ比較 (最大5件) |
+| CSV ファイル送信 | 世帯に取り込み (MF ME CSV, 5MB まで) |
+
+未対応 (Phase 3b.2+ / Phase 4 予定):
+- LIFF (LINE Login) を使った認証ベースの連携 — 現状は `/link` コマンドでの手動共有
+- Flex Message によるリッチ表示 — 現状は plain text のみ
+- Rich menu 設定
+- push 通知 / リマインダー (月次 CSV 取込忘れ・ライフイベント接近)
 
 ---
 
@@ -362,7 +394,8 @@ Vertex 利用時:
 **目的**: 自然言語で操作・質問できる
 - F6 LLM アドバイザー — **Phase 3a 実装済** (Anthropic SDK + Mock フォールバック、`/api/chat` で単一/複数シナリオを自然言語要約、Anthropic API 直 / GCP Vertex AI 経由を `LLM_PROVIDER` で切替可能)
 - F8 シナリオ比較 — **Phase 3a 実装済** (`/api/scenarios/compare` で決定論差分、`/api/chat` で LLM 要約)
-- F9 LINE Bot（質問応答 + CSVアップロード）— Phase 3b で実装予定
+- F9 LINE Bot（質問応答 + CSVアップロード）— **Phase 3b 実装済** (Webhook + 署名検証 + 世帯自動連携 + コマンド / 自然文 / CSV ファイル受信、`/api/line/webhook` 参照)
+  - 未対応: LIFF 認証 UI、Flex Message、push 通知・リマインダー (Phase 3b.2 以降)
 
 ### Phase 4: 高度シミュレーション
 - F4 残りのイベント（E03/E05-E12）
