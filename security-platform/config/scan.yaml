@@ -6,6 +6,8 @@ targets:
     - "agent-system-1/.mcp.json"
     - "agent-system-2/.mcp.json"
     - "kanie-lab-agent/.mcp.json"
+    # stock-analysis-agent: .mcp.json は data/workspace/ 配下で gitignore 済 (実行時生成)
+    # lifeplanner-agent: MCP 未使用
 
   skills_directories:
     - "agent-system-1/skills/"
@@ -18,6 +20,7 @@ targets:
     - "kanie-lab-agent/backend/"
     - "kanie-lab-agent/tools/"
     - "stock-analysis-agent/app/"
+    - "lifeplanner-agent/app/"
 
 # CVSS thresholds
 cvss_thresholds:
