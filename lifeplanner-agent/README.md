@@ -82,6 +82,8 @@ make check        # lint + test
 | `POST` | `/api/scenarios/compare` | 複数シナリオの決定論的差分 |
 | `POST` | `/api/chat` | LLM アドバイザー（シナリオ要約・比較解説） |
 | `POST` | `/api/line/webhook` | **LINE Bot Webhook** (LINE Messaging API からのコールバック) |
+| `GET` | `/liff/link.html` | **LIFF ページ** (LINE Login → ID トークンを POST) |
+| `POST` | `/api/line/liff-login` | LIFF から受けた ID トークンを検証して世帯連携 |
 
 #### 使い方例
 
@@ -136,7 +138,9 @@ curl -X POST http://127.0.0.1:8001/api/chat \
 | `ANTHROPIC_API_KEY` | - | `LLM_PROVIDER=anthropic` で必須 |
 | `GOOGLE_CLOUD_PROJECT` / `VERTEX_AI_LOCATION` | - / `us-east5` | `LLM_PROVIDER=vertex` で必須 |
 | `LINE_CHANNEL_SECRET` | - | LINE Bot 署名検証用チャネルシークレット (未設定なら `/api/line/webhook` が 503) |
-| `LINE_CHANNEL_ACCESS_TOKEN` | - | LINE Messaging API 呼出用トークン (同上) |
+| `LINE_CHANNEL_ACCESS_TOKEN` | - | LINE Messaging API 呼出用トークン (同上、Rich menu セットアップにも利用) |
+| `LIFF_ID` | - | LIFF アプリ ID (`12345-abcdefg` 形式)。未設定なら `/liff/link.html` と `/api/line/liff-login` が 503 |
+| `LINE_LOGIN_CHANNEL_ID` | - | LINE Login チャネル ID (ID トークンの `aud` 検証用)。`/api/line/liff-login` 必須 |
 
 ### 0.7 LINE Bot セットアップ (Phase 3b)
 
@@ -161,11 +165,39 @@ curl -X POST http://127.0.0.1:8001/api/chat \
 | `/compare <id1> <id2> [...]` | シナリオ比較 (最大5件) |
 | CSV ファイル送信 | 世帯に取り込み (MF ME CSV, 5MB まで) |
 
-未対応 (Phase 3b.2+ / Phase 4 予定):
-- LIFF (LINE Login) を使った認証ベースの連携 — 現状は `/link` コマンドでの手動共有
-- Flex Message によるリッチ表示 — 現状は plain text のみ
-- Rich menu 設定
+### 0.8 LIFF セットアップ (Phase 3b.2)
+
+1. **LINE Developers** で LIFF アプリを作成:
+   - Scope: `profile` + `openid` (ID トークン取得に openid が必須)
+   - Endpoint URL: `https://<public-host>/liff/link.html`
+   - `LIFF ID` を `.env` の `LIFF_ID` に設定
+2. **LINE Login チャネル** の Channel ID を `.env` の `LINE_LOGIN_CHANNEL_ID` に設定 (ID トークンの `aud` クレーム検証に使用)
+3. LIFF URL (`https://liff.line.me/<LIFF_ID>`) をユーザーに配布するか、Rich menu の「連携」ボタンに紐付ける
+4. ユーザーが LIFF を開くと:
+   - `liff.login()` でログイン (未ログイン時のみ)
+   - `liff.getIDToken()` で ID トークン取得
+   - `POST /api/line/liff-login` に送信 → 自動で世帯作成 or 指定世帯へ紐付け
+   - 以降は LINE Webhook 経由でコマンドが利用可能
+
+### 0.9 Flex Message / Rich menu
+
+- **Flex Message**: `/scenarios` は Carousel、`/summarize` と `/compare` は Bubble で返す。
+  SDK 未対応クライアントや Flex 構築失敗時は自動で plain text にフォールバックする。
+- **Rich menu 登録** (1 回のセットアップ):
+  ```bash
+  # ドライラン (API 不要、JSON + PNG を logs/ に書き出す)
+  uv run python scripts/setup_rich_menu.py --dry-run
+  # 本番登録 (LINE_CHANNEL_ACCESS_TOKEN / LIFF_ID を env に設定した上で)
+  uv run python scripts/setup_rich_menu.py
+  ```
+  ボタン構成: `[シナリオ一覧] [ヘルプ] [連携]` の 3 ボタン。
+  「連携」は `LIFF_ID` が設定されていれば LIFF URL、未設定時は `/help` コマンドにフォールバック。
+
+### Phase 3b 未対応 (Phase 4 予定)
+
 - push 通知 / リマインダー (月次 CSV 取込忘れ・ライフイベント接近)
+- Flex Message のインタラクティブコンポーネント (datetime picker, postback 等)
+- LIFF からの CSV アップロード UI (現状は LINE のファイル添付のみ)
 
 ---
 
@@ -395,7 +427,8 @@ Vertex 利用時:
 - F6 LLM アドバイザー — **Phase 3a 実装済** (Anthropic SDK + Mock フォールバック、`/api/chat` で単一/複数シナリオを自然言語要約、Anthropic API 直 / GCP Vertex AI 経由を `LLM_PROVIDER` で切替可能)
 - F8 シナリオ比較 — **Phase 3a 実装済** (`/api/scenarios/compare` で決定論差分、`/api/chat` で LLM 要約)
 - F9 LINE Bot（質問応答 + CSVアップロード）— **Phase 3b 実装済** (Webhook + 署名検証 + 世帯自動連携 + コマンド / 自然文 / CSV ファイル受信、`/api/line/webhook` 参照)
-  - 未対応: LIFF 認証 UI、Flex Message、push 通知・リマインダー (Phase 3b.2 以降)
+  - **Phase 3b.2 実装済**: LIFF (LINE Login) 認証 (`/liff/link.html` + `/api/line/liff-login`)、Flex Message (carousel / bubble + text フォールバック)、Rich menu 登録スクリプト (`scripts/setup_rich_menu.py`)
+  - 未対応: push 通知・リマインダー (Phase 4 予定)
 
 ### Phase 4: 高度シミュレーション
 - F4 残りのイベント（E03/E05-E12）

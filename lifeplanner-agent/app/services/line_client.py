@@ -59,6 +59,10 @@ class LineBotClient(Protocol):
 
     async def reply_text(self, *, reply_token: str, text: str) -> None: ...
 
+    async def reply_flex(
+        self, *, reply_token: str, alt_text: str, contents: dict
+    ) -> None: ...
+
     async def get_message_content(self, *, message_id: str) -> bytes: ...
 
     async def close(self) -> None: ...
@@ -157,6 +161,28 @@ class LineBotSdkClient:
             ReplyMessageRequest(
                 reply_token=reply_token,
                 messages=[TextMessage(text=trimmed)],
+            )
+        )
+
+    async def reply_flex(
+        self, *, reply_token: str, alt_text: str, contents: dict
+    ) -> None:
+        from linebot.v3.messaging import (
+            FlexContainer,
+            FlexMessage,
+            ReplyMessageRequest,
+        )
+
+        if not reply_token:
+            logger.warning("reply_flex called without reply_token; skipping")
+            return
+        # alt_text は通知表示や非対応クライアントで使われる。上限 400 文字。
+        safe_alt = alt_text[:400] or "(no alt)"
+        container = FlexContainer.from_dict(contents)
+        await self._messaging.reply_message(
+            ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[FlexMessage(alt_text=safe_alt, contents=container)],
             )
         )
 
