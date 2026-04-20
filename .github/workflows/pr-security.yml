@@ -1,0 +1,133 @@
+name: PR Security Scan
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # ── gitleaks ───────────────────────────────────────────────────────────────
+  # Scans the PR commit range for committed secrets (API keys, tokens,
+  # private keys). Allowlist lives in .gitleaks.toml at the repo root.
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          VERSION=8.21.2
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            -o /tmp/gitleaks.tgz
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan PR diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "Scanning commits ${BASE_SHA}..${HEAD_SHA}"
+          gitleaks detect \
+            --source . \
+            --config .gitleaks.toml \
+            --log-opts="${BASE_SHA}..${HEAD_SHA}" \
+            --redact \
+            --no-banner \
+            --verbose \
+            --report-format sarif \
+            --report-path gitleaks.sarif \
+            --exit-code 1
+
+      - name: Upload SARIF report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-sarif
+          path: gitleaks.sarif
+          retention-days: 7
+
+  # ── bandit ─────────────────────────────────────────────────────────────────
+  # Python SAST on changed .py files. Skips test directories (assert-based
+  # test code is a known source of false positives) and limits severity to
+  # medium+ to reduce noise on the first rollout.
+  bandit:
+    name: Python SAST (bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install bandit
+        run: pip install "bandit>=1.7,<2.0"
+
+      - name: Collect changed Python files
+        id: collect
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Exclude test directories — assert statements and fixtures routinely
+          # trip bandit's B101/B105 checks without indicating real risk.
+          git diff --name-only --diff-filter=ACMR \
+            "origin/${GITHUB_BASE_REF}...HEAD" \
+            | grep -E '\.py$' \
+            | grep -Ev '(^|/)(tests?|test_[^/]+)/' \
+            > changed.txt || true
+
+          if [ -s changed.txt ]; then
+            echo "Found $(wc -l < changed.txt) changed Python file(s):"
+            cat changed.txt
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No non-test Python files changed — bandit scan skipped."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run bandit on changed files
+        if: steps.collect.outputs.has_changes == 'true'
+        run: |
+          # --severity-level medium: only surface medium-or-high severity.
+          # --confidence-level medium: drop low-confidence noisy findings.
+          # --format screen: human-readable output in the job log.
+          # --format sarif also generated separately for artifact upload.
+          bandit \
+            --severity-level medium \
+            --confidence-level medium \
+            --format screen \
+            --verbose \
+            $(cat changed.txt)
+
+      - name: Generate SARIF report
+        if: steps.collect.outputs.has_changes == 'true'
+        continue-on-error: true
+        run: |
+          pip install "bandit-sarif-formatter>=1.1"
+          bandit \
+            --severity-level medium \
+            --confidence-level medium \
+            --format sarif \
+            --output bandit.sarif \
+            $(cat changed.txt) || true
+
+      - name: Upload SARIF report
+        if: steps.collect.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-sarif
+          path: bandit.sarif
+          retention-days: 7
+          if-no-files-found: ignore

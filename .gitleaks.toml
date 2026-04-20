@@ -1,0 +1,58 @@
+# Gitleaks configuration for agent_monorepo
+#
+# Runs in CI on PR diff (see .github/workflows/pr-security.yml) to catch
+# committed secrets (API keys, tokens, private keys). The allowlist below
+# covers known-good false positives: .env templates, DLP regex pattern
+# definitions, test fixtures, and uv.lock integrity hashes. Anything not
+# listed here that matches a gitleaks default rule will block the PR.
+
+[extend]
+# Use gitleaks' bundled default ruleset as the baseline. Additional project
+# rules can be appended below the [[rules]] section if needed.
+useDefault = true
+
+[allowlist]
+description = "Project-wide allowlist for known non-secret matches."
+
+# Files that legitimately contain secret-shaped strings.
+paths = [
+    # .env templates are meant to be committed; values are placeholders.
+    '''(?i)\.env\.example$''',
+    '''(?i)\.env\.template$''',
+
+    # DLP regex patterns (the pattern strings themselves look like secrets).
+    '''security-platform/src/proxy/dlp\.py''',
+
+    # DLP / injection / gateway test fixtures deliberately embed fake
+    # credentials (e.g. `sk-verylongapikey1234...`) to drive the scanners
+    # being tested.
+    '''security-platform/tests/proxy/test_dlp\.py''',
+    '''security-platform/tests/proxy/test_injection\.py''',
+    '''security-platform/tests/proxy/test_gateway\.py''',
+    '''security-platform/tests/proxy/test_inbound\.py''',
+    '''security-platform/tests/proxy/test_outbound\.py''',
+
+    # Agent README files contain curl examples that look like auth headers.
+    '''kanie-lab-agent/README\.md''',
+
+    # uv / poetry lock files carry package integrity hashes, not secrets.
+    '''(?i)uv\.lock$''',
+    '''(?i)poetry\.lock$''',
+    '''(?i)package-lock\.json$''',
+    '''(?i)yarn\.lock$''',
+
+    # Agent-system skills and docs include prompt-injection sample payloads.
+    '''agent-system-[12]/skills/.*''',
+    '''agent-system-[12]/docs/.*''',
+]
+
+# Strings that should never be treated as leaks, regardless of file.
+# Keep this list narrow — a too-broad regex here can silently hide real secrets.
+regexes = [
+    # Common placeholder tokens in docs and examples.
+    '''(?i)(your[-_]?api[-_]?key|replace[-_]?me|example[-_]?token|dummy[-_]?key|sk-ant-xxxx|xxxx+)''',
+]
+
+# Commits that pre-existed the scanner and cannot be retroactively cleaned.
+# Leave empty until a real incident forces an allowlist entry.
+commits = []
