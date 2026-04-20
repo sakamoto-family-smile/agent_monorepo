@@ -310,3 +310,37 @@ security-platform/
 | ASI08 Overly Permissive Plugins | Snyk Agent Scan on .mcp.json |
 | ASI09 Training Data Poisoning | Indirect injection tests |
 | ASI10 Model Theft / DoS | Rate limiting, circuit breaker |
+
+## CI Security Scan (pull-request-time)
+
+Pull requests are gated by `.github/workflows/pr-security.yml`, which runs on
+every PR against `main` in parallel with `pr-tests.yml`:
+
+| Scanner | Scope | Blocks merge on |
+|---------|-------|-----------------|
+| **gitleaks** | Commit range of the PR | Any leaked secret (allowlist in `.gitleaks.toml`) |
+| **bandit** | Changed `.py` files outside `tests/` | Medium+ severity & medium+ confidence findings |
+
+Both scanners upload SARIF reports as workflow artifacts (retention 7 days).
+
+### Remaining items (not yet in CI)
+
+The following scans exist as local scripts / config but are **not** yet wired
+into the PR workflow. Tracked here so they are not forgotten:
+
+- [ ] **pip-audit / uv export + audit** — dependency CVE scan on `pyproject.toml`
+      / `uv.lock` changes across each agent. Free, no external auth required.
+- [ ] **snyk-agent-scan** — MCP / Skill specific risk scan. Requires a Snyk
+      account and `SNYK_TOKEN` secret. Locally runnable today via
+      `scripts/scan-mcp.sh` and `scripts/scan-skills.sh`; CI integration is
+      deferred until a token is provisioned.
+- [ ] **`.gitleaks.toml` allowlist calibration** — the current allowlist is a
+      best-guess starting point. First production run may surface false
+      positives that need additional entries (prefer narrow `paths` entries
+      over broad `regexes` ones).
+- [ ] **Bandit severity ratchet** — the workflow currently filters out
+      `low` severity. Once the backlog is cleared, tighten to `--severity-level
+      low` to catch weaker findings.
+- [ ] **`scripts/scan-skills.sh` REPO_ROOT fix** — the script still resolves
+      `REPO_ROOT` with `../../..` (leftover from a deeper directory layout)
+      and should be corrected to `../..` as was done for `scan-mcp.sh`.
