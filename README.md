@@ -4,15 +4,15 @@
 
 ## プロジェクト一覧
 
-| プロジェクト | 種別 | 概要 |
-|---|---|---|
-| [`kanie-lab-agent`](./kanie-lab-agent/) | 実装 | 慶應 SFC 蟹江研究室 大学院入試準備の研究支援エージェント |
-| [`stock-analysis-agent`](./stock-analysis-agent/) | 実装 | 日本株・米国株のテクニカル/ファンダメンタル/センチメント統合分析エージェント |
-| [`lifeplanner-agent`](./lifeplanner-agent/) | 実装 | Money Forward ME 起点の家族向けライフプランニング・30年シミュレーションエージェント |
-| [`security-platform`](./security-platform/) | 基盤 | 全エージェント共通のセキュリティ基盤（MCP Proxy / CVE 監視 / DLP / Red Team） |
-| [`analytics-platform`](./analytics-platform/) | 基盤 | 全エージェント横断の分析基盤（OTel + Phoenix + JSONL + DuckDB + dbt、ローカル版のみ） |
-| [`agent-system-1`](./agent-system-1/) | ダミー | 雛形（Research Assistant スキル用スケルトン） |
-| [`agent-system-2`](./agent-system-2/) | ダミー | 雛形（Code Helper スキル用スケルトン） |
+| プロジェクト | 種別 | 概要 | 分析基盤連携 |
+|---|---|---|---|
+| [`kanie-lab-agent`](./kanie-lab-agent/) | 実装 | 慶應 SFC 蟹江研究室 大学院入試準備の研究支援エージェント | ⬜ 未着手 |
+| [`stock-analysis-agent`](./stock-analysis-agent/) | 実装 | 日本株・米国株のテクニカル/ファンダメンタル/センチメント統合分析エージェント | ✅ 連携済 (PR #26) |
+| [`lifeplanner-agent`](./lifeplanner-agent/) | 実装 | Money Forward ME 起点の家族向けライフプランニング・30年シミュレーションエージェント | ✅ 連携済 (PR #27) |
+| [`security-platform`](./security-platform/) | 基盤 | 全エージェント共通のセキュリティ基盤（MCP Proxy / CVE 監視 / DLP / Red Team） | — (基盤側) |
+| [`analytics-platform`](./analytics-platform/) | 基盤 | 全エージェント横断の分析基盤（OTel + Phoenix + JSONL + DuckDB + dbt、ローカル版のみ） | — (基盤側、Phase 1-4 完了 / Phase 5+ 未着手) |
+| [`agent-system-1`](./agent-system-1/) | ダミー | 雛形（Research Assistant スキル用スケルトン） | — |
+| [`agent-system-2`](./agent-system-2/) | ダミー | 雛形（Code Helper スキル用スケルトン） | — |
 
 ---
 

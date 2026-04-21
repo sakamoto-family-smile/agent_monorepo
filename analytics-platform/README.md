@@ -580,13 +580,31 @@ with tracer.start_as_current_span("llm.call") as span:
 
 ---
 
-## 7. 既知の未対応 (後続 PR 予定)
+## 7. 実装フェーズ進捗
 
-- **GCP 版**: Langfuse on GKE / BigQuery / GCS Uploader / Cloud Workflows
-- **Enrichment パイプライン**: `content_summary` / `content_keywords` / Vector Search
-- **BI ダッシュボード**: Metabase / Looker Studio の dashboard 定義
-- **アラート**: Grafana Alert / Cloud Monitoring
-- **既存エージェント (`kanie-lab-agent`, `lifeplanner-agent`) への計装**: 別 PR
+設計書 §15 の 9 フェーズ + 各エージェントへの計装状況。
+
+### 7.1 設計書フェーズ
+
+| Phase | 内容 | 状態 | 主要 PR / 参照 |
+|---|---|---|---|
+| **Phase 1** | ローカル環境 (Phoenix + DuckDB + dbt-duckdb 雛形) | ✅ 完了 | PR #24 |
+| **Phase 2** | OTel 計装ライブラリ + AnalyticsLogger | ✅ 完了 | PR #24 / `analytics_platform/observability/` |
+| **Phase 3** | JSONL スキーマ + コンテンツ格納戦略 | ✅ 完了 | PR #24 / `schemas.py` / `content.py` |
+| **Phase 4** | dbt モデル (raw / staging / marts) | ✅ 完了 | PR #24 / `dbt/models/` |
+| Phase 5 | GCP 環境 (Langfuse on GKE + BigQuery + Cloud Workflows + GCS Uploader) | ⬜ 未着手 (想定のみ) | §3 (GCP 版インフラ想定) |
+| Phase 6 | 検索基盤 (BigQuery Search Index + Enrichment / Vector Search) | ⬜ 未着手 | §3.9 |
+| Phase 7 | ダッシュボード (Metabase + Looker Studio) | ⬜ 未着手 | §3.9 |
+| Phase 8 | アラート (Grafana Alert + Cloud Monitoring) | ⬜ 未着手 | §3.9 |
+| Phase 9 | 継続評価・セマンティック検索 (LLM-as-a-Judge / Vector Search) | ⬜ 未着手 | 設計書 §15 |
+
+### 7.2 既存エージェントへの計装状況
+
+| エージェント | 状態 | PR |
+|---|---|---|
+| `stock-analysis-agent` | ✅ 完了 (Claude Agent SDK のメッセージストリームから llm_call / tool_invocation / message を抽出) | PR #26 |
+| `lifeplanner-agent` | ✅ 完了 (Anthropic / Vertex 両クライアント + 6 ルートに business_event / error_event) | PR #27 |
+| `kanie-lab-agent` | ⬜ 未着手 (フロントエンド込みのため別 PR で対応) | - |
 
 ---
 
