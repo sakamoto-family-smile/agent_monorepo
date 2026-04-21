@@ -16,7 +16,7 @@ from agents.csv_importer import parse_bytes
 from agents.orchestrator import run_chat
 from repositories.household import ensure_household
 from repositories.line_link import create_link, delete_link, get_link
-from repositories.scenario import list_scenarios
+from repositories.scenario import get_scenario_for_household, list_scenarios
 from repositories.transaction import upsert_transactions
 from services.line_client import (
     LineBotClient,
@@ -24,6 +24,7 @@ from services.line_client import (
     LineFileEvent,
     LineTextEvent,
 )
+from services.line_flex import narrative_bubble, scenarios_carousel
 from services.llm_client import LLMClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,6 +67,30 @@ class HandlerDeps:
     session: AsyncSession
     line_client: LineBotClient
     llm_client: LLMClient
+
+
+# ---------------------------------------------------------------------------
+# リプライヘルパ (Flex → 失敗時に text にフォールバック)
+# ---------------------------------------------------------------------------
+
+
+async def _reply_flex_or_text(
+    deps: HandlerDeps,
+    *,
+    reply_token: str,
+    text: str,
+    flex_contents: dict,
+    alt_text: str,
+) -> None:
+    """Flex を試し、失敗したら text に退避する。SDK バージョン差異や JSON 構造エラーに備える。"""
+    try:
+        await deps.line_client.reply_flex(
+            reply_token=reply_token, alt_text=alt_text, contents=flex_contents
+        )
+        return
+    except Exception:
+        logger.exception("reply_flex failed; falling back to reply_text")
+    await deps.line_client.reply_text(reply_token=reply_token, text=text)
 
 
 # ---------------------------------------------------------------------------
@@ -266,10 +291,20 @@ async def _cmd_scenarios(
         )
         return
 
-    lines = [f"{s.id}: {s.name}" for s in scenarios]
-    await deps.line_client.reply_text(
+    # Flex carousel (最大 10 件)。alt_text / text フォールバックは同内容で統一。
+    summary_lines = [f"{s.id}: {s.name}" for s in scenarios]
+    text_fallback = "シナリオ一覧:\n" + "\n".join(summary_lines)
+    alt_text = "シナリオ一覧: " + ", ".join(summary_lines[:5])
+
+    flex = scenarios_carousel(
+        [(s.id, s.name, s.description) for s in scenarios]
+    )
+    await _reply_flex_or_text(
+        deps,
         reply_token=event.reply_token,
-        text="シナリオ一覧:\n" + "\n".join(lines),
+        text=text_fallback,
+        flex_contents=flex,
+        alt_text=alt_text,
     )
 
 
@@ -336,8 +371,27 @@ async def _run_chat_reply(
         )
         return
 
-    await deps.line_client.reply_text(
-        reply_token=event.reply_token, text=result.narrative
+    # 見出し用にシナリオ名を取得する。run_chat が成功している以上、
+    # いずれの ID も世帯に存在することは保証されているが、念のため None 防御する。
+    names: list[str] = []
+    for sid in scenario_ids:
+        sc = await get_scenario_for_household(deps.session, sid, household_id)
+        names.append(sc.name if sc is not None else f"#{sid}")
+
+    if len(names) == 1:
+        title = f"{names[0]} の要約"
+    else:
+        title = f"比較: {names[0]} vs " + ", ".join(names[1:])
+
+    flex = narrative_bubble(title=title, body_text=result.narrative)
+    # alt_text は通知プレビュー用。narrative の先頭を挿れる。
+    alt_text = f"{title}: {result.narrative[:200]}"
+    await _reply_flex_or_text(
+        deps,
+        reply_token=event.reply_token,
+        text=result.narrative,
+        flex_contents=flex,
+        alt_text=alt_text,
     )
 
 

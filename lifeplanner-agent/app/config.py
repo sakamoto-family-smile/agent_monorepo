@@ -37,6 +37,13 @@ class Settings:
     # Phase 3b: LINE Bot 連携 (未設定時は webhook が 503 を返す)
     line_channel_secret: str = os.getenv("LINE_CHANNEL_SECRET", "")
     line_channel_access_token: str = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+    # Phase 3b.2: LIFF (LINE Front-end Framework) ID。
+    # 未設定時は /liff/link.html と /api/line/liff-login が 503 を返す。
+    line_liff_id: str = os.getenv("LIFF_ID", "")
+    # LINE ID token 検証用の client_id (LINE Login チャネルの Channel ID)。
+    # 未指定の場合 LIFF_CHANNEL_ID = LIFF_ID の prefix (hyphen 前) を使う慣習もあるが、
+    # 明示できるように独立した env で受ける。
+    line_login_channel_id: str = os.getenv("LINE_LOGIN_CHANNEL_ID", "")
 
     @property
     def cors_origins(self) -> list[str]:

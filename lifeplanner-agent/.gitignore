@@ -13,6 +13,9 @@ tmp/
 # Alembic 生成物の一部（キャッシュ）
 infra/migrations/versions/__pycache__/
 
+# ローカル生成物 (Rich menu の dry-run PNG 等)
+logs/
+
 # 認証情報・環境変数
 .env
 .env.local

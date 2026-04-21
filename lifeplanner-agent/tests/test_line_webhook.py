@@ -32,7 +32,13 @@ pytestmark = pytest.mark.asyncio
 
 
 class StubLineBotClient:
-    """テスト用スタブ。parse_events の返却値とファイル内容を事前に仕込める。"""
+    """テスト用スタブ。parse_events の返却値とファイル内容を事前に仕込める。
+
+    `reply_text` と `reply_flex` の両方を記録する。
+    `replies[i]["text"]` は text 応答なら本文、flex 応答なら alt_text を格納する。
+    これにより "text に <文字列> が含まれる" 系の既存アサートが
+    Flex 化後も (alt_text を通じて) そのまま通る。
+    """
 
     def __init__(self) -> None:
         self.events_to_return: list[LineEvent] = []
@@ -40,6 +46,8 @@ class StubLineBotClient:
         self.raise_signature: bool = False
         self.replies: list[dict] = []
         self.close_called: bool = False
+        # Flex 呼出時に意図的に失敗させるフラグ (フォールバックテスト用)
+        self.fail_flex: bool = False
 
     def parse_events(self, *, body: bytes, signature: str):
         if self.raise_signature:
@@ -47,7 +55,24 @@ class StubLineBotClient:
         return list(self.events_to_return)
 
     async def reply_text(self, *, reply_token: str, text: str) -> None:
-        self.replies.append({"reply_token": reply_token, "text": text})
+        self.replies.append(
+            {"type": "text", "reply_token": reply_token, "text": text}
+        )
+
+    async def reply_flex(
+        self, *, reply_token: str, alt_text: str, contents: dict
+    ) -> None:
+        if self.fail_flex:
+            raise RuntimeError("stub: flex disabled")
+        self.replies.append(
+            {
+                "type": "flex",
+                "reply_token": reply_token,
+                "text": alt_text,
+                "alt_text": alt_text,
+                "contents": contents,
+            }
+        )
 
     async def get_message_content(self, *, message_id: str) -> bytes:
         return self.file_content
@@ -480,6 +505,116 @@ async def test_file_with_valid_csv_imports_transactions(client, stub):
 
 # ---------------------------------------------------------------------------
 # Real SDK: 署名検証が HMAC-SHA256 ベースで動く (統合確認)
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Flex Message: /scenarios, /summarize, /compare
+# ---------------------------------------------------------------------------
+
+
+async def test_scenarios_sends_flex_carousel(client, stub):
+    ids = await _create_linked_user_with_scenarios(client, stub, n=2)
+
+    stub.events_to_return = [_text_event("/scenarios", user_id="U_sc")]
+    await _post_webhook(client)
+
+    reply = stub.replies[0]
+    assert reply["type"] == "flex"
+    contents = reply["contents"]
+    assert contents["type"] == "carousel"
+    assert len(contents["contents"]) == 2
+    bubble_ids = [
+        bubble["body"]["contents"][0]["text"] for bubble in contents["contents"]
+    ]
+    assert bubble_ids == [f"#{ids[0]}", f"#{ids[1]}"]
+    # 各 bubble に /summarize ボタンが入る
+    for bubble in contents["contents"]:
+        action = bubble["footer"]["contents"][0]["action"]
+        assert action["type"] == "message"
+        assert action["text"].startswith("/summarize ")
+
+
+async def test_summarize_sends_flex_bubble_with_title(client, stub):
+    ids = await _create_linked_user_with_scenarios(client, stub, n=1)
+
+    stub.events_to_return = [_text_event(f"/summarize {ids[0]}", user_id="U_sc")]
+    await _post_webhook(client)
+
+    reply = stub.replies[0]
+    assert reply["type"] == "flex"
+    contents = reply["contents"]
+    assert contents["type"] == "bubble"
+    title = contents["header"]["contents"][0]["text"]
+    assert "S0 の要約" in title
+    body_text = contents["body"]["contents"][0]["text"]
+    assert "モック要約" in body_text
+
+
+async def test_compare_sends_flex_bubble_with_comparison_title(client, stub):
+    ids = await _create_linked_user_with_scenarios(client, stub, n=2)
+
+    stub.events_to_return = [
+        _text_event(f"/compare {ids[0]} {ids[1]}", user_id="U_sc")
+    ]
+    await _post_webhook(client)
+
+    reply = stub.replies[0]
+    assert reply["type"] == "flex"
+    title = reply["contents"]["header"]["contents"][0]["text"]
+    assert "比較:" in title
+    assert "S0" in title and "S1" in title
+
+
+async def test_flex_failure_falls_back_to_text(client, stub):
+    """reply_flex が例外を吐いたら reply_text にフォールバックする。"""
+    ids = await _create_linked_user_with_scenarios(client, stub, n=2)
+    stub.fail_flex = True
+
+    stub.events_to_return = [_text_event("/scenarios", user_id="U_sc")]
+    await _post_webhook(client)
+    reply = stub.replies[0]
+    assert reply["type"] == "text"
+    assert f"{ids[0]}: S0" in reply["text"]
+
+
+# ---------------------------------------------------------------------------
+# Flex JSON structure (unit)
+# ---------------------------------------------------------------------------
+
+
+async def test_flex_narrative_bubble_truncates_long_body():
+    from services.line_flex import narrative_bubble
+
+    body = "x" * 5000
+    bubble = narrative_bubble(title="title", body_text=body)
+    text = bubble["body"]["contents"][0]["text"]
+    assert len(text) <= 1800
+    assert text.endswith("…")
+
+
+async def test_flex_scenarios_carousel_caps_at_ten():
+    from services.line_flex import scenarios_carousel
+
+    scenarios = [(i, f"S{i}", None) for i in range(15)]
+    carousel = scenarios_carousel(scenarios)
+    assert len(carousel["contents"]) == 10
+
+
+async def test_flex_scenario_bubble_includes_description_when_present():
+    from services.line_flex import scenarios_carousel
+
+    carousel = scenarios_carousel([(1, "Base", "家族プランA"), (2, "Alt", None)])
+    first_body = carousel["contents"][0]["body"]["contents"]
+    texts = [c["text"] for c in first_body]
+    assert "家族プランA" in texts
+    second_body = carousel["contents"][1]["body"]["contents"]
+    # description 無しなら 2 行のみ
+    assert len(second_body) == 2
+
+
+# ---------------------------------------------------------------------------
+# Real SDK
 # ---------------------------------------------------------------------------
 
 
