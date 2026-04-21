@@ -1,0 +1,12 @@
+# Claude Code ローカル状態 (セッション・権限許可・ロック)
+.claude/
+
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
