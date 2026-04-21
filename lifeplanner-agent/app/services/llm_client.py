@@ -11,11 +11,72 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Protocol
 
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _emit_llm_call_event(
+    *,
+    provider: str,
+    model: str,
+    resp,
+    latency_ms: int,
+    error: Exception | None,
+) -> None:
+    """LLM API 呼出ごとに analytics-platform に llm_call event を 1 件 emit。
+
+    setup_observability() 未実行 / 取得失敗時は静かに無視 (テスト・CLI 経路)。
+    """
+    try:
+        from instrumentation import get_analytics_logger
+
+        al = get_analytics_logger()
+    except Exception:
+        return
+
+    fields: dict[str, object] = {
+        "llm_provider": provider,
+        "llm_model": model,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "latency_ms": latency_ms,
+    }
+    if resp is not None:
+        usage = getattr(resp, "usage", None)
+        if usage is not None:
+            fields["input_tokens"] = int(getattr(usage, "input_tokens", 0) or 0)
+            fields["output_tokens"] = int(getattr(usage, "output_tokens", 0) or 0)
+            fields["cache_read_tokens"] = int(
+                getattr(usage, "cache_read_input_tokens", 0) or 0
+            )
+            fields["cache_creation_tokens"] = int(
+                getattr(usage, "cache_creation_input_tokens", 0) or 0
+            )
+        stop_reason = getattr(resp, "stop_reason", None)
+        if stop_reason:
+            fields["stop_reason"] = stop_reason
+
+    severity: str = "INFO"
+    if error is not None:
+        fields["error_type"] = type(error).__name__
+        fields["error_message"] = str(error)[:1000]
+        severity = "ERROR"
+
+    try:
+        al.emit(
+            event_type="llm_call",
+            event_version="1.0.0",
+            severity=severity,
+            fields=fields,
+        )
+    except Exception:
+        logger.exception("failed to emit llm_call event (non-fatal)")
 
 
 class LLMClient(Protocol):
@@ -67,11 +128,29 @@ class AnthropicLLMClient:
         self._max_tokens = max_tokens
 
     async def complete(self, *, system: str, user: str) -> str:
-        resp = await self._client.messages.create(
+        started = time.monotonic()
+        try:
+            resp = await self._client.messages.create(
+                model=self._model,
+                max_tokens=self._max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+        except Exception as e:
+            _emit_llm_call_event(
+                provider="anthropic",
+                model=self._model,
+                resp=None,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                error=e,
+            )
+            raise
+        _emit_llm_call_event(
+            provider="anthropic",
             model=self._model,
-            max_tokens=self._max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+            resp=resp,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            error=None,
         )
         return _extract_text(resp)
 
@@ -93,11 +172,29 @@ class VertexAnthropicLLMClient:
         self._max_tokens = max_tokens
 
     async def complete(self, *, system: str, user: str) -> str:
-        resp = await self._client.messages.create(
+        started = time.monotonic()
+        try:
+            resp = await self._client.messages.create(
+                model=self._model,
+                max_tokens=self._max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+        except Exception as e:
+            _emit_llm_call_event(
+                provider="vertex",
+                model=self._model,
+                resp=None,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                error=e,
+            )
+            raise
+        _emit_llm_call_event(
+            provider="vertex",
             model=self._model,
-            max_tokens=self._max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+            resp=resp,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            error=None,
         )
         return _extract_text(resp)
 

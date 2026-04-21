@@ -45,6 +45,21 @@ class Settings:
     # 明示できるように独立した env で受ける。
     line_login_channel_id: str = os.getenv("LINE_LOGIN_CHANNEL_ID", "")
 
+    # ── 分析基盤 (analytics-platform) 連携 ──
+    analytics_enabled: bool = os.getenv("ANALYTICS_ENABLED", "true").lower() == "true"
+    analytics_data_dir: str = os.getenv("ANALYTICS_DATA_DIR", "./data/analytics")
+    analytics_service_name: str = os.getenv(
+        "ANALYTICS_SERVICE_NAME", "lifeplanner-agent"
+    )
+    analytics_compress: bool = os.getenv("ANALYTICS_COMPRESS", "false").lower() == "true"
+    analytics_content_inline_threshold_bytes: int = int(
+        os.getenv("ANALYTICS_CONTENT_INLINE_THRESHOLD_BYTES", "8192")
+    )
+    otel_exporter_otlp_endpoint: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    otel_exporter_otlp_headers: str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "")
+    otel_sampling_ratio: float = float(os.getenv("OTEL_SAMPLING_RATIO", "1.0"))
+    service_version: str = os.getenv("SERVICE_VERSION", "0.1.0")
+
     @property
     def cors_origins(self) -> list[str]:
         if self.app_env == "local":

@@ -176,6 +176,8 @@ async def liff_login(
             detail="ID token did not include a sub claim",
         )
 
+    from instrumentation import emit_business
+
     existing_link = await get_link(session, line_user_id)
     if existing_link is not None:
         # すでに紐付いている: 要求があってかつ異なる世帯なら 409、同じなら冪等に OK
@@ -186,6 +188,14 @@ async def liff_login(
                     f"LINE user already linked to household {existing_link.household_id}"
                 ),
             )
+        emit_business(
+            domain="line",
+            action="liff_login",
+            resource_type="household",
+            resource_id=existing_link.household_id,
+            attributes={"created": False, "already_linked": True},
+            user_id=existing_link.household_id,
+        )
         return LiffLoginOut(
             line_user_id=line_user_id,
             household_id=existing_link.household_id,
@@ -205,6 +215,14 @@ async def liff_login(
             session, line_user_id=line_user_id, household_id=payload.household_id
         )
         await session.commit()
+        emit_business(
+            domain="line",
+            action="liff_login",
+            resource_type="household",
+            resource_id=payload.household_id,
+            attributes={"created": False, "already_linked": False},
+            user_id=payload.household_id,
+        )
         return LiffLoginOut(
             line_user_id=line_user_id,
             household_id=payload.household_id,
@@ -217,6 +235,14 @@ async def liff_login(
     await ensure_household(session, new_id, name=f"LINE {new_id}")
     await create_link(session, line_user_id=line_user_id, household_id=new_id)
     await session.commit()
+    emit_business(
+        domain="line",
+        action="liff_login",
+        resource_type="household",
+        resource_id=new_id,
+        attributes={"created": True, "already_linked": False},
+        user_id=new_id,
+    )
     return LiffLoginOut(
         line_user_id=line_user_id,
         household_id=new_id,

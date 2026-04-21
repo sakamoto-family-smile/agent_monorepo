@@ -141,6 +141,12 @@ curl -X POST http://127.0.0.1:8001/api/chat \
 | `LINE_CHANNEL_ACCESS_TOKEN` | - | LINE Messaging API 呼出用トークン (同上、Rich menu セットアップにも利用) |
 | `LIFF_ID` | - | LIFF アプリ ID (`12345-abcdefg` 形式)。未設定なら `/liff/link.html` と `/api/line/liff-login` が 503 |
 | `LINE_LOGIN_CHANNEL_ID` | - | LINE Login チャネル ID (ID トークンの `aud` 検証用)。`/api/line/liff-login` 必須 |
+| `ANALYTICS_ENABLED` | `true` | `false` で analytics-platform への送信を無効化 (NoOpSink) |
+| `ANALYTICS_DATA_DIR` | `./data/analytics` | 業務ログ JSONL の出力先 |
+| `ANALYTICS_SERVICE_NAME` | `lifeplanner-agent` | service_name (Hive パーティションキー) |
+| `ANALYTICS_COMPRESS` | `false` | JSONL を gzip するか |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | - | Phoenix / Langfuse OTLP HTTP endpoint (未設定時は span 未送信、業務ログは出る) |
+| `OTEL_SAMPLING_RATIO` | `1.0` | OTel サンプリング率 0.0〜1.0 |
 
 ### 0.7 LINE Bot セットアップ (Phase 3b)
 
@@ -198,6 +204,67 @@ curl -X POST http://127.0.0.1:8001/api/chat \
 - push 通知 / リマインダー (月次 CSV 取込忘れ・ライフイベント接近)
 - Flex Message のインタラクティブコンポーネント (datetime picker, postback 等)
 - LIFF からの CSV アップロード UI (現状は LINE のファイル添付のみ)
+
+---
+
+## 0.10 分析基盤 (analytics-platform) への送信情報
+
+このエージェントは [`../analytics-platform`](../analytics-platform/) に対して、業務イベントを JSONL として書き出します。`ANALYTICS_DATA_DIR/raw/service_name=lifeplanner-agent/event_type=*/dt=YYYY-MM-DD/hour=HH/*.jsonl` に Hive パーティション形式で蓄積されます。
+
+### 送信されるイベント種別と発火タイミング
+
+| event_type | 発火タイミング | 主要フィールド |
+|---|---|---|
+| `business_event` (action=`scenario_created`) | `POST /api/scenarios` 成功時 | `name` / `has_description` |
+| `business_event` (action=`scenario_simulated`) | `POST /api/scenarios/{id}/simulate` 成功時 | `horizon_years` / `total_net_worth_end` / `total_take_home` |
+| `business_event` (action=`chat_completed`) | `POST /api/chat` 成功時 | `intent` / `scenario_count` / `narrative_chars` / `had_question` |
+| `business_event` (action=`csv_imported`) | `POST /api/upload` 成功時 | `encoding` / `imported` / `inserted` / `updated` / `skipped_*` |
+| `business_event` (action=`webhook_processed`) | `POST /api/line/webhook` 完了時 | `received` / `handled` / `failed` |
+| `business_event` (action=`liff_login`) | `POST /api/line/liff-login` 成功時 | `created` / `already_linked` |
+| `llm_call` | `AnthropicLLMClient.complete` / `VertexAnthropicLLMClient.complete` ごと | `llm_provider` / `llm_model` / `input_tokens` / `output_tokens` / `cache_read_tokens` / `latency_ms` |
+| `error_event` | route 内バリデーション失敗 / LINE handler 例外時 | `error_type` / `error_message` / `error_category` |
+
+### 各イベントに共通のフィールド
+
+すべて [`analytics_platform.observability.schemas`](../analytics-platform/analytics_platform/observability/schemas.py) で Pydantic 検証されます。共通: `event_id` / `event_timestamp` / `service_name` / `service_version` / `environment` / `trace_id` / `span_id` / `user_id` (= `household_id`) / `session_id` / `severity`。
+
+### 送信されない情報 (プライバシー / コスト配慮)
+
+- **ユーザー入力テキスト本体** (チャット質問文、CSV の取引内容など): 件数・件名・要約のみで、生データは送らない
+- **API キー / OAuth トークン**: 一切送らない
+- **LLM の raw prompt / response**: `llm_call` イベントには含めない (内訳が必要な時は OTel + Phoenix を立てて span 側で確認する)
+
+### 突合キー
+
+`user_id = household_id` でユーザー / 世帯軸の集計が可能。OTLP endpoint を設定して Phoenix / Langfuse を立てた場合は `trace_id` も入り、LLM トレース側との突合も可能になります。
+
+### 動作モード切替
+
+| `ANALYTICS_ENABLED` | 挙動 |
+|---|---|
+| `true` (既定) | `RotatingFileSink` で JSONL を書き出す |
+| `false` | `NoOpSink` に置換、JSONL は一切書かれない (テスト用 / 緊急遮断用) |
+
+### 実機検証スクリプト
+
+```bash
+# 主要 API を ASGI 経由で叩いて JSONL が書かれるか検証 (デフォルトは LLM_MOCK_MODE=true)
+uv run python scripts/integration_check_observability.py
+# → data/_integration_check/raw/ 配下に event_type 別 JSONL が生成され、
+#    末尾に件数サマリ + PASS/FAIL を表示
+
+# 実 LLM (Anthropic) も呼んで llm_call イベントを確認したい場合
+LLM_MOCK_MODE=false ANTHROPIC_API_KEY=sk-... \
+  uv run python scripts/integration_check_observability.py
+```
+
+実行例 (MOCK モード、約 1 秒):
+```
+event_type counts:
+  business_event          : 4
+business_event actions: ['chat_completed', 'csv_imported', 'scenario_created', 'scenario_simulated']
+PASS: 主要 4 アクション (...) 確認
+```
 
 ---
 

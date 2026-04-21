@@ -68,14 +68,28 @@ async def line_webhook(
 
     deps = HandlerDeps(session=session, line_client=line_client, llm_client=llm)
     handled = 0
+    failed = 0
+    from instrumentation import emit_business, emit_error
+
     for ev in events:
         try:
             await handle_event(ev, deps)
             handled += 1
-        except Exception:
+        except Exception as e:
             # LINE 側のリトライを避けるため、個別エラーでも 200 を返す。
             # 例外本体はスタックごとログに残す。
             logger.exception("LINE event handler failed: %r", ev)
+            failed += 1
+            emit_error(error=e, category="internal")
 
     logger.info("LINE webhook processed: received=%d handled=%d", len(events), handled)
+    emit_business(
+        domain="line",
+        action="webhook_processed",
+        attributes={
+            "received": len(events),
+            "handled": handled,
+            "failed": failed,
+        },
+    )
     return {"received": len(events), "handled": handled}
