@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: mart_daily_agent_metrics
+    description: agent × 日 × モデル の KPI。
+    columns:
+      - name: dt
+        tests:
+          - not_null
+      - name: agent_id
+        tests:
+          - not_null
+      - name: llm_model
+        tests:
+          - not_null
+
+  - name: mart_cache_efficiency
+    description: プロンプトキャッシュヒット率。
+    columns:
+      - name: cache_hit_ratio
+        description: 0.0〜1.0 の範囲。独自 SQL テストは `tests/` 配下参照。
+
+  - name: mart_delivery_health
+    description: 配信健全性 (E2E レイテンシ含む)。
+    columns:
+      - name: dt
+        tests:
+          - not_null
+      - name: event_type
+        tests:
+          - not_null

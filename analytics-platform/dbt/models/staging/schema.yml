@@ -1,0 +1,48 @@
+version: 2
+
+models:
+  - name: stg_agent_events
+    description: 共通フィールドを正規化した全イベントの staging ビュー。
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - unique
+      - name: ingested_at
+        tests:
+          - not_null
+
+  - name: stg_llm_calls
+    description: event_type='llm_call' のフィルタ済みビュー。
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - unique
+      - name: input_tokens
+        tests:
+          - not_null
+
+  - name: stg_messages
+    description: event_type='message' のフィルタ済みビュー。
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - unique
+      - name: message_role
+        tests:
+          - accepted_values:
+              values: [user, assistant, system, tool]
+
+  - name: stg_tool_invocations
+    description: event_type='tool_invocation' のフィルタ済みビュー。
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - unique
+      - name: status
+        tests:
+          - accepted_values:
+              values: [success, error, timeout]

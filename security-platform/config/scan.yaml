@@ -21,6 +21,7 @@ targets:
     - "kanie-lab-agent/tools/"
     - "stock-analysis-agent/app/"
     - "lifeplanner-agent/app/"
+    - "analytics-platform/app/"
 
 # CVSS thresholds
 cvss_thresholds:

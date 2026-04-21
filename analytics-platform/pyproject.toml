@@ -1,0 +1,49 @@
+[project]
+name = "analytics-platform"
+version = "0.1.0"
+description = "Agent system analytics platform (local-only Phase 1-4: Phoenix + OTel + DuckDB + dbt)"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "opentelemetry-api>=1.27.0",
+  "opentelemetry-sdk>=1.27.0",
+  "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+  "pydantic>=2.7.0",
+  "pydantic-settings>=2.2.1",
+  "structlog>=24.1.0",
+  "uuid-utils>=0.9.0",
+  "tenacity>=8.2.3",
+  "duckdb>=1.1.0",
+  "dbt-core>=1.8.0",
+  "dbt-duckdb>=1.8.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.2.0",
+  "pytest-asyncio>=0.23.0",
+  "ruff>=0.6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["app"]
+asyncio_mode = "auto"
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["dbt/target", "data", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]

@@ -1,0 +1,14 @@
+analytics_platform:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      # `DBT_DUCKDB_PATH` を envvar で上書き可。未指定時はリポジトリの data/ 配下。
+      path: "{{ env_var('DBT_DUCKDB_PATH', '../data/analytics.duckdb') }}"
+      # dbt-duckdb は `external_root` をモデル内 `external_location` で参照できる。
+      extensions:
+        - httpfs
+        - parquet
+      # read_json_auto で JSONL を外部テーブルとして読むために、
+      # raw データのルートを変数として渡す。モデル側で `var('raw_root')` を参照する。
+      threads: 4
