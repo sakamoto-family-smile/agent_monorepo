@@ -1,0 +1,35 @@
+version: 2
+
+models:
+  - name: raw_agent_events
+    description: >
+      JSONL 業務ログの生読み込み。Hive パーティション (service_name / event_type / dt / hour)
+      がそのままカラム化される。event_type ごとのフィールド差異は union_by_name で吸収。
+    columns:
+      - name: event_id
+        description: UUID v7。冪等 UPSERT のキー。
+        tests:
+          - not_null
+      - name: event_type
+        description: 設計書 §6.3 の 7 種。dbt でも sources of truth。
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - llm_call
+                - tool_invocation
+                - message
+                - conversation_event
+                - security_event
+                - business_event
+                - error_event
+      - name: event_timestamp
+        tests:
+          - not_null
+      - name: service_name
+        tests:
+          - not_null
+      - name: severity
+        tests:
+          - accepted_values:
+              values: [DEBUG, INFO, WARN, ERROR, CRITICAL]

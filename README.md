@@ -10,6 +10,7 @@
 | [`stock-analysis-agent`](./stock-analysis-agent/) | 実装 | 日本株・米国株のテクニカル/ファンダメンタル/センチメント統合分析エージェント |
 | [`lifeplanner-agent`](./lifeplanner-agent/) | 実装 | Money Forward ME 起点の家族向けライフプランニング・30年シミュレーションエージェント |
 | [`security-platform`](./security-platform/) | 基盤 | 全エージェント共通のセキュリティ基盤（MCP Proxy / CVE 監視 / DLP / Red Team） |
+| [`analytics-platform`](./analytics-platform/) | 基盤 | 全エージェント横断の分析基盤（OTel + Phoenix + JSONL + DuckDB + dbt、ローカル版のみ） |
 | [`agent-system-1`](./agent-system-1/) | ダミー | 雛形（Research Assistant スキル用スケルトン） |
 | [`agent-system-2`](./agent-system-2/) | ダミー | 雛形（Code Helper スキル用スケルトン） |
 

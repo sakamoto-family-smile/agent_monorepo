@@ -1,0 +1,15 @@
+services:
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: analytics-platform-phoenix
+    ports:
+      - "6006:6006" # Phoenix UI + OTLP/HTTP
+      - "4317:4317" # OTLP/gRPC
+    environment:
+      - PHOENIX_WORKING_DIR=/mnt/phoenix
+    volumes:
+      - phoenix-data:/mnt/phoenix
+    restart: unless-stopped
+
+volumes:
+  phoenix-data:
