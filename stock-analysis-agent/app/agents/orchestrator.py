@@ -293,7 +293,10 @@ async def _run_analysis_inner(
         cwd=workspace_dir,
         system_prompt="あなたは日本の株式市場に精通したプロのアナリストです。データに基づいた客観的な分析を行い、日本語でレポートを作成してください。",
         env={
-            "HOME": "/tmp",
+            # claude_agent_sdk は HOME を必要とする。docker / Cloud Run でも
+            # /tmp は書込可能なため恒常的にここを使う。本物のシークレット保存先
+            # ではないので bandit B108 を抑止する。
+            "HOME": "/tmp",  # nosec B108
             "ANTHROPIC_API_KEY": "",
             "CLAUDE_CODE_OAUTH_TOKEN": os.getenv("CLAUDE_CODE_OAUTH_TOKEN", ""),
             "BRAVE_API_KEY": os.getenv("BRAVE_API_KEY", ""),

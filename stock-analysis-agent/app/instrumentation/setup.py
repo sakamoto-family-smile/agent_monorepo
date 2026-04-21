@@ -86,9 +86,14 @@ def setup_observability() -> None:
             s.analytics_service_name,
         )
     else:
+        # NoOp 経路: payloads ディレクトリは tempfile で動的確保 (ハードコード回避)
+        import tempfile
+
         sink = NoOpSink()
         _content_router = ContentRouter(
-            writer=LocalFilePayloadWriter(root_dir=Path("/tmp/_noop_payloads")),
+            writer=LocalFilePayloadWriter(
+                root_dir=Path(tempfile.mkdtemp(prefix="analytics_noop_payloads_"))
+            ),
             inline_threshold_bytes=s.analytics_content_inline_threshold_bytes,
         )
         logger.info("analytics disabled (NoOpSink)")

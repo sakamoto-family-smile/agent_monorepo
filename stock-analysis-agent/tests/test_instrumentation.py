@@ -25,7 +25,7 @@ def test_get_before_setup_raises():
         instrumentation.get_tracer()
 
 
-def test_setup_with_analytics_disabled(monkeypatch, tmp_path: Path):
+async def test_setup_with_analytics_disabled(monkeypatch, tmp_path: Path):
     from config import settings
 
     monkeypatch.setattr(settings, "analytics_enabled", False)
@@ -48,9 +48,7 @@ def test_setup_with_analytics_disabled(monkeypatch, tmp_path: Path):
     assert eid
 
     # NoOpSink なので flush しても何もファイルが作られない
-    import asyncio
-
-    asyncio.get_event_loop().run_until_complete(al.flush())
+    await al.flush()
     assert not list(tmp_path.rglob("*.jsonl"))
 
 
