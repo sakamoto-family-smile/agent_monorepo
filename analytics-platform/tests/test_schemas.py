@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from observability.schemas import (
+from pydantic import ValidationError
+
+from analytics_platform.observability.schemas import (
     LlmCallEvent,
     MessageEvent,
     ToolInvocationEvent,
     validate_event,
 )
-from pydantic import ValidationError
 
 
 def _base_common(**override: object) -> dict:

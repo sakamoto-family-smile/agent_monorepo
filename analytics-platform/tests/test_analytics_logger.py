@@ -5,9 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-from observability.analytics_logger import AnalyticsLogger
-from observability.sinks.file_sink import RotatingFileSink
 from pydantic import ValidationError
+
+from analytics_platform.observability.analytics_logger import AnalyticsLogger
+from analytics_platform.observability.sinks.file_sink import RotatingFileSink
 
 
 @dataclass

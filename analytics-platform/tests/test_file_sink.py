@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from observability.sinks.file_sink import RotatingFileSink
+
+from analytics_platform.observability.sinks.file_sink import RotatingFileSink
 
 
 def _mk_line(event_type: str, ts: datetime | None = None) -> str:

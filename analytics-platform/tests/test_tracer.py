@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from observability import tracer as tracer_mod
+
+from analytics_platform.observability import tracer as tracer_mod
 
 
 @pytest.fixture(autouse=True)

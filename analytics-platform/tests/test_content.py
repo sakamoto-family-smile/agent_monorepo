@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from observability.content import ContentRouter, LocalFilePayloadWriter
+from analytics_platform.observability.content import ContentRouter, LocalFilePayloadWriter
 
 
 def _router(tmp_path: Path, threshold: int = 8192) -> ContentRouter:
