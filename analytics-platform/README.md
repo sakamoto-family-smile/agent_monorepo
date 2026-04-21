@@ -88,7 +88,125 @@ make check         # lint + test
 
 ---
 
-## 2. コード構成
+## 2. コンポーネント構成
+
+分析基盤は **6 レイヤー** で構成され、各レイヤーは次のレイヤーにしか依存しない (上→下の一方向)。レイヤー間の境界は Protocol / dataclass で抽象化されており、GCP 版への差替ポイントもここ。
+
+### 2.1 レイヤー全体像
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ L1. Producer (計装される側)                                      │
+│    エージェント / demo_emit.py / 将来の FastAPI 等               │
+└────────────┬──────────────────────────┬──────────────────────────┘
+             │ OTel SDK                 │ AnalyticsLogger.emit()
+             │ (LLM / HTTP / custom)    │ (validate → 内製 JSONL)
+             ▼                          ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ L2. Instrumentation (app/observability/)                         │
+│    tracer.py / context.py / logger.py / schemas.py               │
+│    analytics_logger.py / content.py / hashing.py                 │
+└────────────┬──────────────────────────┬──────────────────────────┘
+             │ OTLP/HTTP                │ JSONL バッチ
+             ▼                          ▼
+┌──────────────────┐       ┌──────────────────────────────────────┐
+│ L3a. Trace Sink  │       │ L3b. File Sink (app/observability/   │
+│   Phoenix        │       │             sinks/file_sink.py)      │
+│   (Docker)       │       │ Hive パーティションで JSONL を追記    │
+│   :6006          │       │   data/raw/service_name=.../...      │
+└──────────────────┘       └─────────────┬────────────────────────┘
+                                         │ raw → uploaded
+                                         │ (失敗時 dead_letter)
+                                         ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ L4. Uploader (app/uploader/local_uploader.py)                    │
+│    Protocol = UploadTransport。ローカルは LocalMoveTransport       │
+│    (単なる os.rename)。GCP 版は GCSTransport に差替可能            │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │ data/uploaded/...
+                         ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ L5. Transform (dbt/models/)                                      │
+│    dbt-duckdb (ローカル) / dbt-bigquery (将来)                      │
+│    raw → staging → marts の 3 層                                  │
+│    成果物: data/analytics.duckdb                                   │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │ SQL / DataFrame
+                         ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ L6. Query / Visualization                                        │
+│    DuckDB CLI / Python client / Metabase (将来) / Phoenix UI      │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 コンポーネント一覧 (1 レイヤー = 複数モジュール)
+
+| # | コンポーネント | 役割 | 主要モジュール | 技術 | 差替点 (GCP 版) |
+|---|---|---|---|---|---|
+| L1 | Producer | 業務アクション / LLM 呼出で span + event を発行 | `scripts/demo_emit.py`, 将来: 各エージェント | OTel SDK + AnalyticsLogger | 変更なし |
+| L2-a | Tracer 初期化 | プロセス起動時に 1 度だけ OTLP exporter を設定 | `app/observability/tracer.py` | `opentelemetry-sdk` + `opentelemetry-exporter-otlp-proto-http` | endpoint / headers / sampler を env で差替 |
+| L2-b | Trace Context | 現行 span から `trace_id` / `span_id` を W3C hex で取出 | `app/observability/context.py` | OTel API | 変更なし |
+| L2-c | Structlog | 構造化ログに `trace_id` を自動注入 | `app/observability/logger.py` | `structlog` | 変更なし |
+| L2-d | Event Schema | 7 種の `event_type` を Pydantic Discriminated Union で型安全化 | `app/observability/schemas.py` | `pydantic` v2 | 変更なし |
+| L2-e | Hashing | `sha256:<hex>` を強制 | `app/observability/hashing.py` | stdlib hashlib | 変更なし |
+| L2-f | Content Router | 大きなコンテンツを inline / URI 参照に振り分け | `app/observability/content.py` | `PayloadWriter` Protocol | `LocalFilePayloadWriter` → `GCSPayloadWriter` |
+| L2-g | AnalyticsLogger | validate → リングバッファ → 非同期フラッシュ | `app/observability/analytics_logger.py` | `pydantic` + `uuid_utils` | 変更なし |
+| L3-a | Trace Sink | OTLP span を表示・保存 | (外部: Phoenix) | `arizephoenix/phoenix` Docker | Langfuse on GKE |
+| L3-b | File Sink | JSONL を Hive パーティションに書き出し | `app/observability/sinks/file_sink.py` | stdlib asyncio + gzip | 同じ構造で GCS に直書きする sink を追加可能 |
+| L4 | Uploader | `raw/` → `uploaded/` を移動、失敗時 `dead_letter/` | `app/uploader/local_uploader.py` | `tenacity` (指数バックオフ) + `UploadTransport` Protocol | `LocalMoveTransport` → `GCSTransport` |
+| L5-a | Raw 層 | JSONL を DuckDB table として物理化 | `dbt/models/raw/raw_agent_events.sql` | `dbt-duckdb` + `read_json_auto` | `dbt-bigquery` + external table |
+| L5-b | Staging 層 | 共通フィールド正規化 + `ingested_at` 付与 + TIMESTAMPTZ 化 | `dbt/models/staging/*.sql` | dbt core | 共通 (adapter だけ切替) |
+| L5-c | Marts 層 | KPI テーブル (`daily_agent_metrics` / `cache_efficiency` / `delivery_health`) | `dbt/models/marts/*.sql` | dbt core | 共通 |
+| L6-a | Query | SQL で直接参照 | DuckDB CLI / Python `duckdb` | DuckDB file | BigQuery クライアント |
+| L6-b | Viz | ダッシュボード (Phase 7 予定) | 未実装 | Metabase / Looker Studio | 同じ |
+| X | CI | PR で pytest + demo + dbt 一気通貫 | `.github/workflows/pr-tests.yml` の `test-analytics-platform` | GitHub Actions + `uv` | 共通 |
+| X | Security Scan | bandit / gitleaks | `security-platform/config/scan.yaml` の `source_directories` | 共通 | 共通 |
+
+### 2.3 依存関係と差替境界
+
+GCP 版に拡張する際は、**L2-f / L3-b / L4 / L5 の 4 箇所**だけ差し替えれば上位のアプリコードは無変更:
+
+```
+L1 (アプリ)         — 変更なし
+L2 (observability) — 変更なし (env で endpoint 切替のみ)
+      ├─ L2-f: PayloadWriter       ← GCSPayloadWriter 実装を注入
+      │
+L3    ├─ L3-a: Phoenix             ← Langfuse on GKE を立て、URL を env で指す
+      └─ L3-b: RotatingFileSink    ← GCS 直書き sink を追加 (or L4 経由で吸収)
+      │
+L4    └─ UploadTransport            ← GCSTransport を実装
+      │
+L5      dbt-duckdb                 ← dbt-bigquery profile 追加、SQL はほぼ共通
+```
+
+差替インターフェース (Protocol):
+
+- `observability/content.py:PayloadWriter.write(service_name, event_id, content, extension) -> str`
+- `observability/sinks/file_sink.py:JsonlSink.write_batch(lines: list[str]) -> None`
+- `uploader/local_uploader.py:UploadTransport.send(src, *, dest_root) -> Path`
+
+### 2.4 データフロー (1 リクエスト分)
+
+1. アプリが `tracer.start_as_current_span("llm.call")` で span 開始 → **L3-a Phoenix** へ OTLP 送信
+2. 同じ span 内で `analytics_logger.emit(event_type="llm_call", ...)` を呼ぶ → Pydantic 検証 → L2-g のリングバッファに append
+3. 大きいコンテンツは **L2-f ContentRouter** が `data/payloads/...` に書き、`content_uri = file://...` を event に詰める
+4. 背景フラッシュ (もしくは明示 `flush()`) が **L3-b RotatingFileSink** を呼び、`data/raw/service_name=.../event_type=.../dt=.../hour=.../*.jsonl` に追記
+5. **L4 LocalUploader** が定期的に `raw/` → `uploaded/` を移動 (今は手動、将来 cron / systemd)
+6. **L5 dbt** が `data/uploaded/**/*.jsonl` を `read_json_auto(hive_partitioning=true)` で読み、raw → staging → marts をリビルド
+7. 分析は **L6 DuckDB** で SQL、トレース UI は **L3-a Phoenix** を見る。`trace_id` で両者を突合
+
+### 2.5 開発フロー上のコンポーネント
+
+| フェーズ | 触るもの |
+|---|---|
+| 新しい event_type を追加 | `observability/schemas.py` に `SomethingEvent` を足し `AnyEvent` に入れる + `dbt/models/staging/stg_something.sql` 追加 |
+| 新しい KPI を追加 | `dbt/models/marts/mart_*.sql` 追加 + `marts/schema.yml` にテスト追加 |
+| GCP へ移行 | §2.3 の 4 箇所のみ差替 |
+| 既存エージェント計装 | producer 側 (`L1`) で `setup_tracer()` + `AnalyticsLogger` を DI するだけ |
+
+---
+
+## 3. コード構成
 
 ```
 analytics-platform/
@@ -132,7 +250,7 @@ analytics-platform/
 
 ---
 
-## 3. 主要な設計判断
+## 4. 主要な設計判断
 
 設計書 (セッション冒頭に貼付) を参照。本 PR で特に重視した点:
 
@@ -145,9 +263,9 @@ analytics-platform/
 
 ---
 
-## 4. 主要 API
+## 5. 主要 API
 
-### 4.1 AnalyticsLogger
+### 5.1 AnalyticsLogger
 
 ```python
 from observability.analytics_logger import AnalyticsLogger
@@ -179,7 +297,7 @@ await logger.flush()
 
 `trace_id` / `span_id` は OTel Context から自動取得される (スパンが無ければ None)。
 
-### 4.2 ContentRouter
+### 5.2 ContentRouter
 
 ```python
 from observability.content import ContentRouter, LocalFilePayloadWriter
@@ -202,7 +320,7 @@ logger.emit(
 )
 ```
 
-### 4.3 tracer.setup_tracer
+### 5.3 tracer.setup_tracer
 
 ```python
 from observability.tracer import setup_tracer
@@ -221,7 +339,7 @@ with tracer.start_as_current_span("llm.call") as span:
 
 ---
 
-## 5. 既知の未対応 (後続 PR 予定)
+## 6. 既知の未対応 (後続 PR 予定)
 
 - **GCP 版**: Langfuse on GKE / BigQuery / GCS Uploader / Cloud Workflows
 - **Enrichment パイプライン**: `content_summary` / `content_keywords` / Vector Search
@@ -231,7 +349,7 @@ with tracer.start_as_current_span("llm.call") as span:
 
 ---
 
-## 6. 環境変数一覧
+## 7. 環境変数一覧
 
 主要なもの。詳細は `.env.example` 参照。
 
