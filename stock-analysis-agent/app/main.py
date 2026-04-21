@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
+from instrumentation import setup_observability, shutdown_observability
 from services.database import init_db
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
@@ -28,8 +29,12 @@ def _ensure_data_dirs() -> None:
 async def lifespan(app: FastAPI):
     _ensure_data_dirs()
     await init_db()
+    setup_observability()
     logger.info("Stock Analysis Agent started (env=%s)", settings.app_env)
-    yield
+    try:
+        yield
+    finally:
+        await shutdown_observability()
 
 
 app = FastAPI(

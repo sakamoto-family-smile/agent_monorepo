@@ -216,6 +216,111 @@ stock-analysis-agent/
 | `MCP_PROXY_URL` | - | セキュリティプラットフォーム MCP プロキシ URL |
 | `APP_ENV` | - | 実行環境（デフォルト: local） |
 | `DB_PATH` | - | SQLite DB パス（デフォルト: data/stock_analysis.db） |
+| `ANALYTICS_ENABLED` | - | `false` で分析基盤への送信を無効化（デフォルト: true） |
+| `ANALYTICS_DATA_DIR` | - | 業務ログ JSONL の出力先（デフォルト: `./data/analytics`） |
+| `ANALYTICS_SERVICE_NAME` | - | service_name（Hive パーティションキー、デフォルト: `stock-analysis-agent`） |
+| `ANALYTICS_COMPRESS` | - | JSONL を gzip するか（デフォルト: false） |
+| `ANALYTICS_CONTENT_INLINE_THRESHOLD_BYTES` | - | コンテンツ inline / URI 振り分け閾値（デフォルト: 8192） |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | - | Phoenix / Langfuse OTLP HTTP エンドポイント（未設定時は span を export しない） |
+| `OTEL_EXPORTER_OTLP_HEADERS` | - | OTLP 認証ヘッダ（`k1=v1,k2=v2` 形式） |
+| `OTEL_SAMPLING_RATIO` | - | OTel サンプリング率 0.0〜1.0（デフォルト: 1.0、業務ログは常に 100%） |
+
+---
+
+## 分析基盤 (analytics-platform) への送信情報
+
+このエージェントは [`../analytics-platform`](../analytics-platform/) に対して、リクエスト 1 本ごとに以下のイベントを業務ログ JSONL として書き出します。`ANALYTICS_DATA_DIR/raw/service_name=stock-analysis-agent/event_type=*/dt=YYYY-MM-DD/hour=HH/*.jsonl` に Hive パーティション形式で蓄積されます。
+
+### 送信されるイベント種別と発火タイミング
+
+| event_type | 発火タイミング | 1 リクエストあたりの典型件数 |
+|---|---|---|
+| `conversation_event` | リクエスト開始時 (`started`)、正常終了時 (`ended`)、例外時 (`aborted`) | 2 |
+| `business_event` (action=`ticker_resolved`) | ticker 解決完了時 | 1 |
+| `business_event` (action=`claude_query_completed`) | Claude Agent SDK の `ResultMessage` 受信時 | 1 |
+| `business_event` (action=`report_saved`) | 分析レポート DB 保存完了時 | 1 |
+| `llm_call` | Claude SDK の `AssistantMessage` 受信ごと | 数十 (turn 数依存) |
+| `tool_invocation` | MCP ツール (`brave-search` 等) の結果受信ごと | 0〜数十 |
+| `message` | アシスタントの本文 `TextBlock` ごと | 数件 |
+| `error_event` | orchestrator 内で例外発生時 | 0 or 1 |
+
+### 各イベントに含まれる主要フィールド
+
+すべて [`analytics_platform.observability.schemas`](../analytics-platform/analytics_platform/observability/schemas.py) で Pydantic 検証されます。共通フィールド (`event_id` / `event_timestamp` / `service_name` / `service_version` / `environment` / `trace_id` / `span_id` / `session_id` / `severity`) に加え、種別ごとに以下が付与されます。
+
+#### `llm_call` — Claude Agent SDK の AssistantMessage ごと
+- `llm_provider` = `"anthropic"`
+- `llm_model` (例: `claude-opus-4-6`)
+- `input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_creation_tokens`
+- `stop_reason`
+
+#### `tool_invocation` — MCP ツール / built-in ツールの結果ごと
+- `tool_name` (例: `mcp__brave-search__search`, `Read`, `Grep`)
+- `duration_ms` (ToolUseBlock 受信時刻 → ToolResultBlock 受信時刻の差)
+- `status` = `success` / `error`
+- `output_size_bytes`
+- `retry_count`
+
+#### `message` — assistant 応答テキストごと
+- `message_id` / `message_role` = `"assistant"` / `message_index`
+- `content_text` (8KB 以下) **または** `content_uri` (8KB 超は `data/analytics/payloads/.../*.txt` に退避し `file://` URI を入れる)
+- `content_hash` (`sha256:<hex>`)
+- `content_preview` (先頭 500 文字)
+- `content_size_bytes` / `content_truncated`
+
+#### `business_event` — ドメインアクション
+- `business_domain` = `"stock_analysis"`
+- `action` = `ticker_resolved` / `claude_query_completed` / `report_saved`
+- `resource_type` / `resource_id`
+- `attributes` (アクション固有の付帯情報、例: `ticker_resolved` には `company_name` / `confidence` / `source`)
+
+#### `conversation_event` — リクエストライフサイクル
+- `conversation_phase` = `started` / `ended` / `aborted`
+- `agent_id` = service_name
+- `initial_query_hash` (`sha256:<hex>`、ユーザー入力の生文字列は保存しない)
+
+#### `error_event` — 例外発生時
+- `error_type` (例: `RuntimeError` / `TimeoutError`)
+- `error_message` (1000 文字まで切詰)
+- `error_category` = `internal`
+- `is_retriable`
+
+### 送信されない情報 (プライバシー / コスト配慮)
+
+- **ユーザー入力の生文字列**: ハッシュ (`initial_query_hash`) のみ
+- **Claude への raw prompt 全文**: 送らない (LLM トレース側で Phoenix を使う想定、§計装図 参照)
+- **API キー / OAuth トークン**: 送らない
+
+### イベント間の突合キー
+
+すべてのイベントには同一リクエスト由来であることを示す `session_id` (例: `analysis_aa782b9ac2da41e8`) が入ります。OTLP endpoint を設定して Phoenix / Langfuse を立てた場合は `trace_id` も入り、LLM トレース側との突合も可能になります。
+
+### 動作モード切替
+
+| `ANALYTICS_ENABLED` | 挙動 |
+|---|---|
+| `true` (既定) | `RotatingFileSink` で JSONL を書き出す |
+| `false` | `NoOpSink` に置換、JSONL は一切書かれない (テスト用 / 緊急遮断用) |
+
+### 実機検証スクリプト
+
+```bash
+# 実 Claude Agent SDK + 実 yfinance を呼んで JSONL が書かれるか検証
+uv run python scripts/integration_check_observability.py
+# → data/_integration_check/raw/ 配下に event_type 別 JSONL が生成され、
+#    末尾に件数サマリ + PASS/FAIL を表示
+```
+
+実行例 (Apple 1 件、約 215 秒、本物の Claude 呼出):
+```
+event_type counts:
+  business_event          : 3
+  conversation_event      : 2
+  llm_call                : 32
+  message                 : 6
+  tool_invocation         : 19
+PASS: 基本イベント (conversation_event / business_event) を確認
+```
 
 ---
 

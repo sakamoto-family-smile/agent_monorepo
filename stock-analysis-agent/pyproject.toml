@@ -14,7 +14,11 @@ dependencies = [
     "claude-agent-sdk",
     "mplfinance>=0.12.9b0",
     "matplotlib>=3.9.0",
+    "analytics-platform",
 ]
+
+[tool.uv.sources]
+analytics-platform = { path = "../analytics-platform" }
 
 [build-system]
 requires = ["hatchling"]
