@@ -54,9 +54,12 @@ async def upload_csv(
             detail="Empty file",
         )
 
+    from instrumentation import emit_business, emit_error
+
     try:
         result = parse_bytes(raw, source_label=file.filename or "<upload>")
     except ValueError as e:
+        emit_error(error=e, category="validation", user_id=household_id, severity="WARN")
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
 
     await ensure_household(session, household_id, name=household_id)
@@ -66,6 +69,27 @@ async def upload_csv(
     logger.info(
         "Upload: household=%s imported=%d inserted=%d updated=%d",
         household_id, result.imported, upsert.inserted, upsert.updated,
+    )
+
+    emit_business(
+        domain="csv_import",
+        action="csv_imported",
+        resource_type="transaction_batch",
+        resource_id=result.source_file,
+        attributes={
+            "encoding": result.encoding,
+            "total_rows": result.total_rows,
+            "imported": result.imported,
+            "inserted": upsert.inserted,
+            "updated": upsert.updated,
+            "unchanged": upsert.unchanged,
+            "skipped_transfer": result.skipped_transfer,
+            "skipped_excluded": result.skipped_excluded,
+            "skipped_invalid": result.skipped_invalid,
+            "duplicates_in_file": result.duplicates_in_file,
+            "size_bytes": len(raw),
+        },
+        user_id=household_id,
     )
 
     return UploadResponse(

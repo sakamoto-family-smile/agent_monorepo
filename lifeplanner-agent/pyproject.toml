@@ -18,7 +18,11 @@ dependencies = [
     "pyyaml>=6.0",
     "anthropic[vertex]>=0.40.0",
     "line-bot-sdk>=3.13",
+    "analytics-platform",
 ]
+
+[tool.uv.sources]
+analytics-platform = { path = "../analytics-platform" }
 
 [build-system]
 requires = ["hatchling"]

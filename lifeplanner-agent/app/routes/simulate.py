@@ -60,6 +60,22 @@ async def simulate_endpoint(
         scenario_id, len(result.rows),
     )
 
+    from instrumentation import emit_business
+
+    emit_business(
+        domain="scenario",
+        action="scenario_simulated",
+        resource_type="scenario",
+        resource_id=str(scenario_id),
+        attributes={
+            "horizon_years": len(result.rows),
+            "total_net_worth_end": str(result.total_net_worth_end),
+            "total_take_home": str(result.total_take_home),
+            "total_event_net": str(result.total_event_net),
+        },
+        user_id=household_id,
+    )
+
     return SimulationOut(
         scenario_id=scenario_id,
         horizon_years=len(result.rows),

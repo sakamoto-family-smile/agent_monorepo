@@ -16,6 +16,10 @@ infra/migrations/versions/__pycache__/
 # ローカル生成物 (Rich menu の dry-run PNG 等)
 logs/
 
+# 分析基盤 (analytics-platform) 出力 + 実機検証スクリプトの作業ディレクトリ
+data/analytics/
+data/_integration_check/
+
 # 認証情報・環境変数
 .env
 .env.local

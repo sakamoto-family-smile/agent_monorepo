@@ -44,6 +44,8 @@ async def chat_endpoint(
     session: AsyncSession = Depends(get_session_dep),
     llm: LLMClient = Depends(get_llm_client),
 ) -> ChatOut:
+    from instrumentation import emit_business, emit_error
+
     try:
         result = await run_chat(
             session=session,
@@ -53,7 +55,7 @@ async def chat_endpoint(
             llm=llm,
         )
     except ValueError as e:
-        # "Scenario not found" は 404、それ以外は 400
+        emit_error(error=e, category="validation", user_id=household_id, severity="WARN")
         msg = str(e)
         status_code = (
             status.HTTP_404_NOT_FOUND
@@ -66,6 +68,21 @@ async def chat_endpoint(
         "Chat: household=%s intent=%s scenarios=%s",
         household_id, result.intent.value, result.scenario_ids,
     )
+
+    emit_business(
+        domain="chat",
+        action="chat_completed",
+        resource_type="scenarios",
+        resource_id=",".join(str(s) for s in result.scenario_ids),
+        attributes={
+            "intent": result.intent.value,
+            "scenario_count": len(result.scenario_ids),
+            "narrative_chars": len(result.narrative or ""),
+            "had_question": payload.question is not None,
+        },
+        user_id=household_id,
+    )
+
     return ChatOut(
         intent=result.intent.value,
         scenario_ids=result.scenario_ids,

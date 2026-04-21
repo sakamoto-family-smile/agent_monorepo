@@ -115,6 +115,21 @@ async def create_scenario_endpoint(
     )
     await session.commit()
     logger.info("Scenario created: id=%d household=%s", scenario.id, household_id)
+
+    from instrumentation import emit_business
+
+    emit_business(
+        domain="scenario",
+        action="scenario_created",
+        resource_type="scenario",
+        resource_id=str(scenario.id),
+        attributes={
+            "name": scenario.name,
+            "has_description": scenario.description is not None,
+        },
+        user_id=household_id,
+    )
+
     return ScenarioOut(
         id=scenario.id,
         household_id=scenario.household_id,

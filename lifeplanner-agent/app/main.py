@@ -5,6 +5,7 @@ from pathlib import Path
 from config import settings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from instrumentation import setup_observability, shutdown_observability
 from services.database import close_db, init_db, init_engine
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
@@ -24,10 +25,12 @@ async def lifespan(app: FastAPI):
     # 本番 (Postgres) では Alembic migration を使う想定のため、非 local では作成しない。
     if settings.app_env == "local":
         await init_db()
+    setup_observability()
     logger.info("Lifeplanner Agent started (env=%s)", settings.app_env)
     try:
         yield
     finally:
+        await shutdown_observability()
         await close_db()
 
 
