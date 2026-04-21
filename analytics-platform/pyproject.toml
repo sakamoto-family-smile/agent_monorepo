@@ -2,7 +2,7 @@
 name = "analytics-platform"
 version = "0.1.0"
 description = "Agent system analytics platform (local-only Phase 1-4: Phoenix + OTel + DuckDB + dbt)"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
   "opentelemetry-api>=1.27.0",
   "opentelemetry-sdk>=1.27.0",
