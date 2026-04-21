@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import re
 
-from observability.context import get_current_trace_context
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
+
+from analytics_platform.observability.context import get_current_trace_context
 
 
 def test_no_span_returns_none() -> None:

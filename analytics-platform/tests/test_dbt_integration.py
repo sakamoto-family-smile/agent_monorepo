@@ -11,8 +11,9 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from observability.analytics_logger import AnalyticsLogger
-from observability.sinks.file_sink import RotatingFileSink
+
+from analytics_platform.observability.analytics_logger import AnalyticsLogger
+from analytics_platform.observability.sinks.file_sink import RotatingFileSink
 
 
 @pytest.fixture

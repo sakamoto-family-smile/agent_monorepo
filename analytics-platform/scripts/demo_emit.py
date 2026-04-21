@@ -12,21 +12,19 @@ from __future__ import annotations
 import argparse
 import asyncio
 import random
-import sys
-from pathlib import Path
 
-# app/ をパスに通す (uv run python scripts/... で呼ばれる想定)
-_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT / "app"))
+from opentelemetry import trace
 
-from config import settings  # noqa: E402
-from observability.analytics_logger import AnalyticsLogger  # noqa: E402
-from observability.content import ContentRouter, LocalFilePayloadWriter  # noqa: E402
-from observability.hashing import sha256_prefixed  # noqa: E402
-from observability.logger import configure_structlog, get_logger  # noqa: E402
-from observability.sinks.file_sink import RotatingFileSink  # noqa: E402
-from observability.tracer import setup_tracer  # noqa: E402
-from opentelemetry import trace  # noqa: E402
+from analytics_platform.config import settings
+from analytics_platform.observability.analytics_logger import AnalyticsLogger
+from analytics_platform.observability.content import (
+    ContentRouter,
+    LocalFilePayloadWriter,
+)
+from analytics_platform.observability.hashing import sha256_prefixed
+from analytics_platform.observability.logger import configure_structlog, get_logger
+from analytics_platform.observability.sinks.file_sink import RotatingFileSink
+from analytics_platform.observability.tracer import setup_tracer
 
 
 def _build_logger() -> AnalyticsLogger:

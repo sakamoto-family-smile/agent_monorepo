@@ -1,4 +1,4 @@
-from observability.hashing import sha256_prefixed, strip_prefix
+from analytics_platform.observability.hashing import sha256_prefixed, strip_prefix
 
 
 def test_sha256_prefixed_returns_prefixed_hex() -> None:

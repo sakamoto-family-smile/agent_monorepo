@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from observability.sinks.file_sink import RotatingFileSink
-from uploader.local_uploader import LocalMoveTransport, LocalUploader
+from analytics_platform.observability.sinks.file_sink import RotatingFileSink
+from analytics_platform.uploader.local_uploader import LocalMoveTransport, LocalUploader
 
 
 async def _seed_raw(tmp_path: Path, n: int = 3) -> RotatingFileSink:
