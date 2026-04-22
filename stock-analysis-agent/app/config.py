@@ -47,6 +47,12 @@ class Settings:
     otel_sampling_ratio: float = float(os.getenv("OTEL_SAMPLING_RATIO", "1.0"))
     service_version: str = os.getenv("SERVICE_VERSION", "0.1.0")
 
+    # ── LINE Bot 連携 (Phase B: stateless) ──
+    # LINE Developers Console > Messaging API > 「チャネル基本設定」「Messaging API」
+    # から取得。両方未設定だと /api/line/webhook は 503 を返す。
+    line_channel_secret: str = os.getenv("LINE_CHANNEL_SECRET", "")
+    line_channel_access_token: str = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+
     @property
     def cors_origins(self):
         if self.app_env == "local":
