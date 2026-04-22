@@ -53,6 +53,7 @@ app.add_middleware(
 
 from routes.analysis import router as analysis_router
 from routes.funds import router as funds_router
+from routes.line import router as line_router
 from routes.reports import router as reports_router
 from routes.screener import router as screener_router
 
@@ -60,6 +61,7 @@ app.include_router(analysis_router, prefix="/api")
 app.include_router(reports_router, prefix="/api")
 app.include_router(screener_router, prefix="/api")
 app.include_router(funds_router, prefix="/api")
+app.include_router(line_router, prefix="/api")
 
 
 @app.get("/health")

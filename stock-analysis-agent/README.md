@@ -156,6 +156,7 @@ CREATE TABLE alerts (
 | GET | `/api/reports/{ticker}` | 過去レポート一覧 |
 | POST | `/api/screen` | 短期上昇候補スクリーニング |
 | POST | `/api/funds/recommend` | 投資信託 (ETF) のオススメランキング |
+| POST | `/api/line/webhook` | LINE Messaging API Webhook 受信 |
 
 **POST /api/analyze リクエスト**:
 
@@ -248,6 +249,8 @@ stock-analysis-agent/
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | - | Phoenix / Langfuse OTLP HTTP エンドポイント（未設定時は span を export しない） |
 | `OTEL_EXPORTER_OTLP_HEADERS` | - | OTLP 認証ヘッダ（`k1=v1,k2=v2` 形式） |
 | `OTEL_SAMPLING_RATIO` | - | OTel サンプリング率 0.0〜1.0（デフォルト: 1.0、業務ログは常に 100%） |
+| `LINE_CHANNEL_SECRET` | - | LINE Messaging API のチャネルシークレット（未設定時 `/api/line/webhook` は 503） |
+| `LINE_CHANNEL_ACCESS_TOKEN` | - | LINE Messaging API のチャネルアクセストークン（未設定時 `/api/line/webhook` は 503） |
 
 ---
 
@@ -264,6 +267,7 @@ stock-analysis-agent/
 | `business_event` (action=`claude_query_completed`) | Claude Agent SDK の `ResultMessage` 受信時 | 1 |
 | `business_event` (action=`report_saved`) | 分析レポート DB 保存完了時 | 1 |
 | `business_event` (action=`funds_recommended`) | `/api/funds/recommend` 完了時 | 0 or 1 |
+| `business_event` (action=`line_webhook_processed`) | `/api/line/webhook` 受信完了時 | 0 or 1 |
 | `llm_call` | Claude SDK の `AssistantMessage` 受信ごと | 数十 (turn 数依存) |
 | `tool_invocation` | MCP ツール (`brave-search` 等) の結果受信ごと | 0〜数十 |
 | `message` | アシスタントの本文 `TextBlock` ごと | 数件 |
@@ -295,9 +299,9 @@ stock-analysis-agent/
 
 #### `business_event` — ドメインアクション
 - `business_domain` = `"stock_analysis"`
-- `action` = `ticker_resolved` / `claude_query_completed` / `report_saved` / `funds_recommended`
+- `action` = `ticker_resolved` / `claude_query_completed` / `report_saved` / `funds_recommended` / `line_webhook_processed`
 - `resource_type` / `resource_id`
-- `attributes` (アクション固有の付帯情報、例: `ticker_resolved` には `company_name` / `confidence` / `source`、`funds_recommended` には `category` / `horizon` / `top_n` / `top_tickers`)
+- `attributes` (アクション固有の付帯情報、例: `ticker_resolved` には `company_name` / `confidence` / `source`、`funds_recommended` には `category` / `horizon` / `top_n` / `top_tickers`、`line_webhook_processed` には `received` / `handled` / `failed`)
 
 #### `conversation_event` — リクエストライフサイクル
 - `conversation_phase` = `started` / `ended` / `aborted`
@@ -450,21 +454,21 @@ curl -X POST http://localhost:8001/api/funds/recommend \
 
 ## ロードマップ
 
-### Phase A — 投資信託レコメンド (本 PR で対応)
+### Phase A — 投資信託レコメンド ✅
 
 - ✅ ETF プロキシによる投資信託ランキング (`POST /api/funds/recommend`)
 - ✅ カテゴリ別 (us_index / global / dividend / sector) スコアリング
 - ✅ 価格時系列ベースの根拠生成 (リターン / σ / DD / SMA / Sharpe-like)
 - ✅ analytics-platform への `business_event(action=funds_recommended)` 連携
 
-### Phase B — LINE Bot 連携 (次 PR)
+### Phase B — LINE Bot 連携 ✅ (本 PR)
 
-- [ ] `POST /api/line/webhook` 受信 + 署名検証 (lifeplanner-agent から流用)
-- [ ] メッセージ → コマンド解釈 (`分析 トヨタ` / `おすすめ` / `スクリーニング JP`)
-- [ ] 非同期処理 (Webhook 5秒制限対策): 即 ack → バックグラウンド分析 → Push API で結果送信
-- [ ] Flex Message でランキング表示
+- ✅ `POST /api/line/webhook` 受信 + 署名検証 (line-bot-sdk v3)
+- ✅ メッセージ → コマンド解釈 (`分析 X` / `おすすめ` / `スクリーニング JP` / `ヘルプ`)
+- ✅ 非同期処理 (Webhook 5秒制限対策): 分析コマンドは即 ack → BackgroundTasks で実行 → Push API で結果送信
+- ✅ Flex Message でランキング / 分析サマリ表示 (失敗時は text にフォールバック)
+- ✅ analytics-platform への `business_event(action=line_webhook_processed)` 連携
 - **ステートレス前提** (ユーザー履歴は持たない)
-- 環境変数: `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`
 
 ### Phase C — 履歴ベースのパーソナルレコメンド (将来)
 
@@ -475,3 +479,55 @@ curl -X POST http://localhost:8001/api/funds/recommend \
 - [ ] DB スキーマ拡張: `line_user_links`, `user_watchlist`, `user_holdings`
 
 > **メモ**: Phase C はユーザー識別が前提のため、Phase B で集める LINE userId をベースに発展させる想定。アラート機能は既存の `alerts` テーブル (現在未使用) を再活用する。
+
+---
+
+## LINE Bot 連携 (Phase B)
+
+### セットアップ
+
+1. [LINE Developers Console](https://developers.line.biz/) で Messaging API チャネルを作成
+2. **チャネル基本設定** から `Channel secret`、**Messaging API 設定** から `Channel access token` を取得
+3. `.env` に設定:
+   ```
+   LINE_CHANNEL_SECRET=...
+   LINE_CHANNEL_ACCESS_TOKEN=...
+   ```
+4. アプリを起動し、公開 URL (ngrok / Cloud Run / 自前 HTTPS など) を取得
+5. LINE 側の Webhook URL に `https://<your-host>/api/line/webhook` を登録 → Verify
+6. Bot を友達追加して動作確認
+
+> 認証情報が未設定の場合 `/api/line/webhook` は 503 を返します。
+
+### サポートコマンド
+
+| 入力例 | 動作 | 応答形式 |
+|---|---|---|
+| `ヘルプ` / `help` / `?` | コマンド一覧表示 | text |
+| `おすすめ` | 全カテゴリの投資信託 Top5 | Flex carousel |
+| `おすすめ 米国` | S&P500 / VTI / QQQ 等 | Flex carousel |
+| `おすすめ 世界` | VT / ACWI / VEA 等 | Flex carousel |
+| `おすすめ 配当` | SCHD / VYM 等 | Flex carousel |
+| `おすすめ セクター` | XLK / SOXX / XLF 等 | Flex carousel |
+| `スクリーニング` | 日本株の短期上昇候補 Top10 | Flex carousel |
+| `スクリーニング JP` / `US` / `ALL` | 市場別スクリーニング | Flex carousel |
+| `分析 トヨタ` / `分析 AAPL` | 個別株分析 (Claude Opus) | ack text + Flex bubble (Push) |
+
+各 Flex bubble の「詳細分析」ボタンを押すと自動で `分析 <ticker>` が送信され、深堀分析がスタートします。
+
+### 非同期分析の仕組み
+
+`分析 X` コマンドは Claude Agent SDK を使うため数十秒〜数分かかります。LINE Webhook の 5秒制限を超えないよう以下の流れで処理します:
+
+1. Webhook 受信 → 署名検証 → イベントパース
+2. ハンドラが「分析を開始しました…」テキストを **Reply API** で即返信
+3. 同時に FastAPI `BackgroundTasks` に分析ジョブを積む
+4. Webhook は `200` を返してリクエスト完了
+5. バックグラウンドジョブが `run_analysis()` を実行 (orchestrator)
+6. 完了後、**Push API** でユーザーに分析サマリ (Flex bubble) を送信
+
+> Push メッセージは LINE 公式アカウントの月間メッセージ数として課金対象になります。スクリーニング・おすすめは秒単位で完了するため Reply API で同期返信します。
+
+### ステートレス設計
+
+Phase B では LINE userId を保存しません。すべてのコマンドは「その場限り」で処理されます。履歴 / お気に入り / 定期通知は Phase C で対応予定です。
