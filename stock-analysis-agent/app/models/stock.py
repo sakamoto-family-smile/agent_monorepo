@@ -104,3 +104,55 @@ class ScreenerResult(BaseModel):
     market: str
     total_scanned: int
     candidates: List[ScreenerCandidate]
+
+
+# --- Fund recommendation models ---
+
+class FundRecommendRequest(BaseModel):
+    """投資信託 (ETF プロキシ) のオススメランキング取得リクエスト。"""
+
+    category: str = Field(
+        default="all",
+        description="対象カテゴリ: us_index / global / dividend / sector / all",
+    )
+    top_n: int = Field(default=5, ge=1, le=20)
+    horizon: str = Field(
+        default="1y",
+        description="トレンド評価期間: 3mo / 6mo / 1y / 3y",
+    )
+    require_uptrend: bool = Field(
+        default=False,
+        description="True にすると SMA50 > SMA200 (ゴールデンクロス継続) を必須化",
+    )
+
+
+class FundCandidate(BaseModel):
+    rank: int
+    ticker: str
+    name: Optional[str] = None
+    category: Optional[str] = None
+    aliases: List[str] = []
+    current_price: float
+    return_1m_pct: Optional[float] = None
+    return_3m_pct: Optional[float] = None
+    return_horizon_pct: Optional[float] = None
+    volatility_pct: Optional[float] = None       # 年率ボラティリティ (%)
+    max_drawdown_pct: Optional[float] = None     # 期間内最大ドローダウン (%, 負値)
+    sharpe_like: Optional[float] = None          # 年率リターン / 年率σ (リスクフリーレートは0近似)
+    sma_50: Optional[float] = None
+    sma_200: Optional[float] = None
+    above_sma_200: Optional[bool] = None
+    score: float
+    rationale: List[str] = []                    # 根拠ポイント (人間可読)
+
+
+class FundRecommendResult(BaseModel):
+    recommended_at: datetime
+    category: str
+    horizon: str
+    total_scanned: int
+    candidates: List[FundCandidate]
+    disclaimer: str = (
+        "本ランキングは情報提供のみを目的としており、投資勧誘や個別の投資助言ではありません。"
+        "投資判断はご自身の責任で行ってください。"
+    )

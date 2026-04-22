@@ -1,0 +1,38 @@
+{
+  "market": "FUNDS",
+  "description": "投資信託レコメンド対象ETF (yfinance で取得可能なものに限定。日本投資信託は ETF プロキシで近似する想定)",
+  "source": "manual curation",
+  "updated": "2026-04-22",
+  "categories": {
+    "us_index": "米国株式インデックス (S&P500 / 全米株式 / NASDAQ100)",
+    "global": "全世界 / 先進国 / 新興国インデックス",
+    "dividend": "高配当 / 連続増配",
+    "sector": "セクター別 (情報技術 / 半導体 / 金融 / エネルギー 等)"
+  },
+  "tickers": [
+    {"ticker": "VOO",  "name": "Vanguard S&P 500 ETF",                "category": "us_index", "aliases": ["eMAXIS Slim 米国株式 (S&P500)", "SBI・V・S&P500", "S&P500"]},
+    {"ticker": "SPY",  "name": "SPDR S&P 500 ETF",                    "category": "us_index", "aliases": ["S&P500"]},
+    {"ticker": "IVV",  "name": "iShares Core S&P 500 ETF",            "category": "us_index", "aliases": ["S&P500"]},
+    {"ticker": "VTI",  "name": "Vanguard Total Stock Market ETF",     "category": "us_index", "aliases": ["楽天・全米株式", "全米株式"]},
+    {"ticker": "QQQ",  "name": "Invesco QQQ Trust (NASDAQ-100)",      "category": "us_index", "aliases": ["NASDAQ100"]},
+    {"ticker": "QQQM", "name": "Invesco NASDAQ-100 ETF",              "category": "us_index", "aliases": ["NASDAQ100"]},
+
+    {"ticker": "VT",   "name": "Vanguard Total World Stock ETF",      "category": "global", "aliases": ["eMAXIS Slim 全世界株式 (オール・カントリー)", "オルカン", "全世界株式"]},
+    {"ticker": "ACWI", "name": "iShares MSCI ACWI ETF",               "category": "global", "aliases": ["MSCI ACWI"]},
+    {"ticker": "VEA",  "name": "Vanguard FTSE Developed Markets ETF", "category": "global", "aliases": ["先進国株式"]},
+    {"ticker": "VWO",  "name": "Vanguard FTSE Emerging Markets ETF",  "category": "global", "aliases": ["新興国株式"]},
+    {"ticker": "VXUS", "name": "Vanguard Total International Stock ETF", "category": "global", "aliases": ["除く米国・全世界"]},
+
+    {"ticker": "SCHD", "name": "Schwab US Dividend Equity ETF",       "category": "dividend", "aliases": ["高配当"]},
+    {"ticker": "VYM",  "name": "Vanguard High Dividend Yield ETF",    "category": "dividend", "aliases": ["高配当"]},
+    {"ticker": "HDV",  "name": "iShares Core High Dividend ETF",      "category": "dividend", "aliases": ["高配当"]},
+    {"ticker": "NOBL", "name": "ProShares S&P 500 Dividend Aristocrats ETF", "category": "dividend", "aliases": ["連続増配"]},
+
+    {"ticker": "XLK", "name": "Technology Select Sector SPDR Fund",   "category": "sector", "aliases": ["情報技術"]},
+    {"ticker": "SOXX","name": "iShares Semiconductor ETF",            "category": "sector", "aliases": ["半導体"]},
+    {"ticker": "XLF", "name": "Financial Select Sector SPDR Fund",    "category": "sector", "aliases": ["金融"]},
+    {"ticker": "XLE", "name": "Energy Select Sector SPDR Fund",       "category": "sector", "aliases": ["エネルギー"]},
+    {"ticker": "XLV", "name": "Health Care Select Sector SPDR Fund",  "category": "sector", "aliases": ["ヘルスケア"]},
+    {"ticker": "XLY", "name": "Consumer Discretionary Select Sector SPDR Fund", "category": "sector", "aliases": ["一般消費財"]}
+  ]
+}
