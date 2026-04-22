@@ -154,6 +154,8 @@ CREATE TABLE alerts (
 | POST | `/api/analyze` | 株価分析実行（SSE ストリーム） |
 | POST | `/api/resolve-ticker` | 企業名→ティッカー変換 |
 | GET | `/api/reports/{ticker}` | 過去レポート一覧 |
+| POST | `/api/screen` | 短期上昇候補スクリーニング |
+| POST | `/api/funds/recommend` | 投資信託 (ETF) のオススメランキング |
 
 **POST /api/analyze リクエスト**:
 
@@ -164,6 +166,28 @@ CREATE TABLE alerts (
   "period": "3mo"
 }
 ```
+
+**POST /api/funds/recommend リクエスト**:
+
+```json
+{
+  "category": "us_index",
+  "horizon": "1y",
+  "top_n": 5,
+  "require_uptrend": false
+}
+```
+
+| フィールド | 説明 |
+|---|---|
+| `category` | `us_index` / `global` / `dividend` / `sector` / `all` |
+| `horizon` | トレンド評価期間: `3mo` / `6mo` / `1y` / `3y` |
+| `top_n` | 上位何件返すか（最大 20） |
+| `require_uptrend` | `true` なら SMA50 > SMA200 (ゴールデンクロス継続) を必須化 |
+
+レスポンスは `candidates[]` がスコア降順にランキングされ、各候補に `rationale[]`（根拠ポイント）と `disclaimer`（情報提供のみである旨）が付与されます。
+
+> **対応範囲**: 第一段は yfinance で取得可能な ETF に限定（VOO / SPY / VTI / QQQ / VT / SCHD / SOXX 等）。日本投資信託（eMAXIS Slim 米国株式 等）は対応する米国 ETF のエイリアスとして近似しています（基準価額の直接取得は将来検討）。
 
 ---
 
@@ -239,6 +263,7 @@ stock-analysis-agent/
 | `business_event` (action=`ticker_resolved`) | ticker 解決完了時 | 1 |
 | `business_event` (action=`claude_query_completed`) | Claude Agent SDK の `ResultMessage` 受信時 | 1 |
 | `business_event` (action=`report_saved`) | 分析レポート DB 保存完了時 | 1 |
+| `business_event` (action=`funds_recommended`) | `/api/funds/recommend` 完了時 | 0 or 1 |
 | `llm_call` | Claude SDK の `AssistantMessage` 受信ごと | 数十 (turn 数依存) |
 | `tool_invocation` | MCP ツール (`brave-search` 等) の結果受信ごと | 0〜数十 |
 | `message` | アシスタントの本文 `TextBlock` ごと | 数件 |
@@ -270,9 +295,9 @@ stock-analysis-agent/
 
 #### `business_event` — ドメインアクション
 - `business_domain` = `"stock_analysis"`
-- `action` = `ticker_resolved` / `claude_query_completed` / `report_saved`
+- `action` = `ticker_resolved` / `claude_query_completed` / `report_saved` / `funds_recommended`
 - `resource_type` / `resource_id`
-- `attributes` (アクション固有の付帯情報、例: `ticker_resolved` には `company_name` / `confidence` / `source`)
+- `attributes` (アクション固有の付帯情報、例: `ticker_resolved` には `company_name` / `confidence` / `source`、`funds_recommended` には `category` / `horizon` / `top_n` / `top_tickers`)
 
 #### `conversation_event` — リクエストライフサイクル
 - `conversation_phase` = `started` / `ended` / `aborted`
@@ -397,6 +422,20 @@ curl -X POST http://localhost:8001/api/resolve-ticker \
 curl http://localhost:8001/api/reports/7203.T
 ```
 
+### 投資信託レコメンド
+
+```bash
+# 米国インデックス ETF を 1年トレンドでランキング
+curl -X POST http://localhost:8001/api/funds/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"category": "us_index", "horizon": "1y", "top_n": 5}'
+
+# 全カテゴリ + ゴールデンクロス継続中のみ
+curl -X POST http://localhost:8001/api/funds/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"category": "all", "horizon": "1y", "top_n": 10, "require_uptrend": true}'
+```
+
 ---
 
 ## LLM 設定
@@ -406,3 +445,33 @@ curl http://localhost:8001/api/reports/7203.T
 - **出力**: 日本語分析レポート（SSE ストリーミング）
 
 セキュリティプラットフォームの MCP プロキシ経由で通信する場合は `MCP_PROXY_URL` を設定してください。
+
+---
+
+## ロードマップ
+
+### Phase A — 投資信託レコメンド (本 PR で対応)
+
+- ✅ ETF プロキシによる投資信託ランキング (`POST /api/funds/recommend`)
+- ✅ カテゴリ別 (us_index / global / dividend / sector) スコアリング
+- ✅ 価格時系列ベースの根拠生成 (リターン / σ / DD / SMA / Sharpe-like)
+- ✅ analytics-platform への `business_event(action=funds_recommended)` 連携
+
+### Phase B — LINE Bot 連携 (次 PR)
+
+- [ ] `POST /api/line/webhook` 受信 + 署名検証 (lifeplanner-agent から流用)
+- [ ] メッセージ → コマンド解釈 (`分析 トヨタ` / `おすすめ` / `スクリーニング JP`)
+- [ ] 非同期処理 (Webhook 5秒制限対策): 即 ack → バックグラウンド分析 → Push API で結果送信
+- [ ] Flex Message でランキング表示
+- **ステートレス前提** (ユーザー履歴は持たない)
+- 環境変数: `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`
+
+### Phase C — 履歴ベースのパーソナルレコメンド (将来)
+
+- [ ] ユーザー (LINE userId) と問合せ・レポート履歴の紐付け
+- [ ] お気に入り銘柄 / ウォッチリストの保存
+- [ ] 履歴と既保有 (申告) を踏まえた銘柄レコメンド (相関の低い銘柄を提案 等)
+- [ ] 価格アラート / 定期レポート Push 配信
+- [ ] DB スキーマ拡張: `line_user_links`, `user_watchlist`, `user_holdings`
+
+> **メモ**: Phase C はユーザー識別が前提のため、Phase B で集める LINE userId をベースに発展させる想定。アラート機能は既存の `alerts` テーブル (現在未使用) を再活用する。
