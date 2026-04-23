@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 from services.llm_client import (
     AnthropicLLMClient,
     MockLLMClient,
+    _system_payload,
     get_llm_client,
     set_llm_client,
 )
@@ -96,3 +99,142 @@ def test_build_default_client_unknown_provider_treated_as_anthropic(monkeypatch)
 
     importlib.reload(llm_mod)
     assert isinstance(llm_mod.build_default_client(), llm_mod.MockLLMClient)
+
+
+# ---------------------------------------------------------------------------
+# Prompt caching
+# ---------------------------------------------------------------------------
+
+
+def test_system_payload_without_cache_returns_plain_string():
+    assert _system_payload("hello", cache=False) == "hello"
+
+
+def test_system_payload_with_cache_returns_blocks_with_cache_control():
+    out = _system_payload("hello", cache=True)
+    assert isinstance(out, list)
+    assert len(out) == 1
+    block = out[0]
+    assert block["type"] == "text"
+    assert block["text"] == "hello"
+    assert block["cache_control"] == {"type": "ephemeral"}
+
+
+@pytest.mark.asyncio
+async def test_mock_client_complete_accepts_cache_system_flag():
+    """MockLLMClient の complete は cache_system を受けても挙動変わらず。"""
+    client = MockLLMClient(fixed_reply="ok")
+    assert await client.complete(system="s", user="u") == "ok"
+    assert await client.complete(system="s", user="u", cache_system=True) == "ok"
+
+
+@pytest.mark.asyncio
+async def test_mock_client_complete_messages_uses_last_user_message():
+    client = MockLLMClient()
+    out = await client.complete_messages(
+        system="s",
+        messages=[
+            {"role": "user", "content": "最初の質問"},
+            {"role": "assistant", "content": "回答1"},
+            {"role": "user", "content": "追加の質問"},
+        ],
+    )
+    assert "追加の質問" in out
+    assert "履歴 3 件" in out
+
+
+@pytest.mark.asyncio
+async def test_mock_client_complete_messages_respects_fixed_reply():
+    client = MockLLMClient(fixed_reply="固定")
+    out = await client.complete_messages(
+        system="s",
+        messages=[{"role": "user", "content": "q"}],
+        cache_system=True,
+    )
+    assert out == "固定"
+
+
+@pytest.mark.asyncio
+async def test_anthropic_client_complete_passes_cache_control_when_requested():
+    """AnthropicLLMClient.complete(cache_system=True) で system が cache_control 付きブロック化される。"""
+    c = AnthropicLLMClient(api_key="sk-test", model="claude-sonnet-4-6", max_tokens=100)
+
+    # resp.content を TextBlock 風にスタブ
+    class _StubBlock:
+        text = "reply"
+
+    class _StubResp:
+        content = [_StubBlock()]
+        usage = None
+        stop_reason = "end_turn"
+
+    mock_create = AsyncMock(return_value=_StubResp())
+    c._client.messages.create = mock_create  # type: ignore[assignment]
+
+    out = await c.complete(system="SYS", user="USER", cache_system=True)
+    assert out == "reply"
+
+    mock_create.assert_awaited_once()
+    kwargs = mock_create.call_args.kwargs
+    assert kwargs["model"] == "claude-sonnet-4-6"
+    assert kwargs["max_tokens"] == 100
+    assert kwargs["system"] == [
+        {
+            "type": "text",
+            "text": "SYS",
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+    assert kwargs["messages"] == [{"role": "user", "content": "USER"}]
+
+
+@pytest.mark.asyncio
+async def test_anthropic_client_complete_defaults_to_plain_system_string():
+    """cache_system を省略すると system は既存通り str のままで渡る (後方互換)。"""
+    c = AnthropicLLMClient(api_key="sk-test", model="claude-sonnet-4-6", max_tokens=100)
+
+    class _StubBlock:
+        text = "reply"
+
+    class _StubResp:
+        content = [_StubBlock()]
+        usage = None
+        stop_reason = None
+
+    mock_create = AsyncMock(return_value=_StubResp())
+    c._client.messages.create = mock_create  # type: ignore[assignment]
+
+    await c.complete(system="SYS", user="USER")
+
+    kwargs = mock_create.call_args.kwargs
+    assert kwargs["system"] == "SYS"
+
+
+@pytest.mark.asyncio
+async def test_anthropic_client_complete_messages_forwards_messages_and_cache():
+    """complete_messages が会話履歴をそのまま渡し、cache_system で system をブロック化する。"""
+    c = AnthropicLLMClient(api_key="sk-test", model="claude-sonnet-4-6", max_tokens=100)
+
+    class _StubBlock:
+        text = "reply"
+
+    class _StubResp:
+        content = [_StubBlock()]
+        usage = None
+        stop_reason = None
+
+    mock_create = AsyncMock(return_value=_StubResp())
+    c._client.messages.create = mock_create  # type: ignore[assignment]
+
+    history = [
+        {"role": "user", "content": "過去1"},
+        {"role": "assistant", "content": "応答1"},
+        {"role": "user", "content": "今回"},
+    ]
+    out = await c.complete_messages(system="SYS", messages=history, cache_system=True)
+    assert out == "reply"
+
+    kwargs = mock_create.call_args.kwargs
+    assert kwargs["messages"] == history
+    assert isinstance(kwargs["system"], list)
+    assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
