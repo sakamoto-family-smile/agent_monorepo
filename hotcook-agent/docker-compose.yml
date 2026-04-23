@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8000"
+    environment:
+      - APP_ENV=local
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION:-us-east5}
+      - DB_PATH=/app/data/local/hotcook.db
+      - DATA_DIR=/app/data
+      - MENU_CATALOG_PATH=/app/data/skills/hotcook-recipes/menu-catalog.json
+      - LOG_LEVEL=debug
+      - ANALYTICS_ENABLED=${ANALYTICS_ENABLED:-true}
+      - ANALYTICS_DATA_DIR=/app/data/analytics
+      - ANALYTICS_SERVICE_NAME=hotcook-agent
+    volumes:
+      - hotcook_data:/app/data/local
+      - hotcook_analytics:/app/data/analytics
+    restart: unless-stopped
+
+volumes:
+  hotcook_data:
+  hotcook_analytics:
