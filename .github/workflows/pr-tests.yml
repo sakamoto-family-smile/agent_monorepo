@@ -14,6 +14,7 @@ jobs:
       kanie_lab_agent:      ${{ steps.detect.outputs.kanie_lab_agent }}
       stock_analysis_agent: ${{ steps.detect.outputs.stock_analysis_agent }}
       lifeplanner_agent:    ${{ steps.detect.outputs.lifeplanner_agent }}
+      hotcook_agent:        ${{ steps.detect.outputs.hotcook_agent }}
       analytics_platform:   ${{ steps.detect.outputs.analytics_platform }}
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +50,12 @@ jobs:
             echo "lifeplanner_agent=true" >> "$GITHUB_OUTPUT"
           else
             echo "lifeplanner_agent=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -q '^hotcook-agent/'; then
+            echo "hotcook_agent=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "hotcook_agent=false" >> "$GITHUB_OUTPUT"
           fi
 
           if echo "$CHANGED" | grep -q '^analytics-platform/'; then
@@ -266,6 +273,47 @@ jobs:
         with:
           name: test-results-lifeplanner-agent
           path: lifeplanner-agent/.pytest_cache/
+          retention-days: 7
+
+  # ── hotcook-agent ──────────────────────────────────────────────────────────
+  test-hotcook-agent:
+    name: Test / hotcook-agent
+    needs: detect-changes
+    if: needs.detect-changes.outputs.hotcook_agent == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hotcook-agent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run tests
+        env:
+          APP_ENV: "local"
+          # Phase 1 は agent モード未使用なので Claude キーは不要
+          ANALYTICS_ENABLED: "false"
+        run: |
+          uv run pytest tests/ \
+            --tb=short -v --no-header
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-hotcook-agent
+          path: hotcook-agent/.pytest_cache/
           retention-days: 7
 
   # ── analytics-platform ─────────────────────────────────────────────────────
