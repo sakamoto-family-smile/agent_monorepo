@@ -1,22 +1,64 @@
 """Anthropic Claude API の薄いラッパー。
 
 設計方針:
-  - プロトコル `LLMClient.complete(system, user)` を公開
+  - プロトコル `LLMClient.complete(system, user)` と
+    `LLMClient.complete_messages(system, messages)` を公開
   - 実装は `AnthropicLLMClient` (Anthropic API 直), `VertexAnthropicLLMClient` (GCP Vertex AI 経由), `MockLLMClient` (テスト・オフライン)
   - LLM_MOCK_MODE=true またはプロバイダ認証情報が欠落時は MockLLMClient にフォールバック
   - LLM_PROVIDER で anthropic / vertex を切替 (既定: anthropic)
   - 返り値は plain text (マークダウン想定)
+
+Prompt caching (2026-04 追加):
+  - `cache_system=True` を渡すと system プロンプトを cache_control=ephemeral 化
+  - 長い静的 system prompt (>= 1024 tokens 目安) を複数呼出しで再利用する相談系機能向け
+  - キャッシュヒット/ミスは analytics-platform の llm_call.cache_read_tokens /
+    cache_creation_tokens に記録される
+  - 会話履歴ありのケースは `complete_messages()` を使う
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import Protocol
+from typing import Any, Literal, Protocol, TypedDict
 
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# 型
+# ---------------------------------------------------------------------------
+
+
+class ChatMessage(TypedDict):
+    """複数ターン会話用のメッセージ型。"""
+
+    role: Literal["user", "assistant"]
+    content: str
+
+
+def _system_payload(system: str, *, cache: bool) -> str | list[dict[str, Any]]:
+    """system 文字列を Anthropic API の system 引数形式に変換する。
+
+    - cache=False → そのまま str を返す (既存動作)
+    - cache=True  → [{"type":"text", "text":..., "cache_control":{"type":"ephemeral"}}]
+    """
+    if not cache:
+        return system
+    return [
+        {
+            "type": "text",
+            "text": system,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
+# ---------------------------------------------------------------------------
+# analytics emit
+# ---------------------------------------------------------------------------
 
 
 def _emit_llm_call_event(
@@ -79,22 +121,53 @@ def _emit_llm_call_event(
         logger.exception("failed to emit llm_call event (non-fatal)")
 
 
+# ---------------------------------------------------------------------------
+# Protocol
+# ---------------------------------------------------------------------------
+
+
 class LLMClient(Protocol):
     """LLM 呼出抽象。テストで差し替え可能。"""
 
-    async def complete(self, *, system: str, user: str) -> str: ...
+    async def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        cache_system: bool = False,
+    ) -> str: ...
+
+    async def complete_messages(
+        self,
+        *,
+        system: str,
+        messages: list[ChatMessage],
+        cache_system: bool = False,
+    ) -> str: ...
+
+
+# ---------------------------------------------------------------------------
+# Mock
+# ---------------------------------------------------------------------------
 
 
 class MockLLMClient:
     """オフライン/テスト用の決定論モック。
 
     system / user の先頭をエコーしつつ、既定の要約テンプレで返す。
+    `cache_system` は受け取るが挙動には影響しない。
     """
 
     def __init__(self, fixed_reply: str | None = None) -> None:
         self._fixed = fixed_reply
 
-    async def complete(self, *, system: str, user: str) -> str:
+    async def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        cache_system: bool = False,
+    ) -> str:
         if self._fixed is not None:
             return self._fixed
         # 入力のごく一部だけ引用し、決定論的な文面を返す
@@ -104,6 +177,33 @@ class MockLLMClient:
             f"{preview[:80]}\n"
             "この応答はモックであり、実際の LLM 出力ではありません。"
         )
+
+    async def complete_messages(
+        self,
+        *,
+        system: str,
+        messages: list[ChatMessage],
+        cache_system: bool = False,
+    ) -> str:
+        if self._fixed is not None:
+            return self._fixed
+        last_user = ""
+        for m in reversed(messages):
+            if m["role"] == "user":
+                last_user = m["content"]
+                break
+        preview = last_user.strip().splitlines()[0] if last_user.strip() else ""
+        return (
+            "【モック応答】最後のユーザー発話を確認しました: "
+            f"{preview[:80]}\n"
+            f"(履歴 {len(messages)} 件)\n"
+            "この応答はモックであり、実際の LLM 出力ではありません。"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 共通ヘルパ
+# ---------------------------------------------------------------------------
 
 
 def _extract_text(resp) -> str:
@@ -116,8 +216,15 @@ def _extract_text(resp) -> str:
     return "".join(parts).strip()
 
 
+# ---------------------------------------------------------------------------
+# Anthropic 直
+# ---------------------------------------------------------------------------
+
+
 class AnthropicLLMClient:
     """Anthropic Python SDK ラッパー (Anthropic API 直)。"""
+
+    _PROVIDER = "anthropic"
 
     def __init__(self, *, api_key: str, model: str, max_tokens: int) -> None:
         # 依存を関数内で解決 (オフライン時にも起動できるよう遅延 import)
@@ -127,18 +234,37 @@ class AnthropicLLMClient:
         self._model = model
         self._max_tokens = max_tokens
 
-    async def complete(self, *, system: str, user: str) -> str:
+    async def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        cache_system: bool = False,
+    ) -> str:
+        return await self.complete_messages(
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            cache_system=cache_system,
+        )
+
+    async def complete_messages(
+        self,
+        *,
+        system: str,
+        messages: list[ChatMessage],
+        cache_system: bool = False,
+    ) -> str:
         started = time.monotonic()
         try:
             resp = await self._client.messages.create(
                 model=self._model,
                 max_tokens=self._max_tokens,
-                system=system,
-                messages=[{"role": "user", "content": user}],
+                system=_system_payload(system, cache=cache_system),
+                messages=list(messages),
             )
         except Exception as e:
             _emit_llm_call_event(
-                provider="anthropic",
+                provider=self._PROVIDER,
                 model=self._model,
                 resp=None,
                 latency_ms=int((time.monotonic() - started) * 1000),
@@ -146,13 +272,18 @@ class AnthropicLLMClient:
             )
             raise
         _emit_llm_call_event(
-            provider="anthropic",
+            provider=self._PROVIDER,
             model=self._model,
             resp=resp,
             latency_ms=int((time.monotonic() - started) * 1000),
             error=None,
         )
         return _extract_text(resp)
+
+
+# ---------------------------------------------------------------------------
+# Vertex
+# ---------------------------------------------------------------------------
 
 
 class VertexAnthropicLLMClient:
@@ -164,6 +295,8 @@ class VertexAnthropicLLMClient:
     モデル名は Vertex 形式 (例: `claude-sonnet-4-6@20250929`) を指定する。
     """
 
+    _PROVIDER = "vertex"
+
     def __init__(self, *, project_id: str, region: str, model: str, max_tokens: int) -> None:
         from anthropic import AsyncAnthropicVertex
 
@@ -171,18 +304,37 @@ class VertexAnthropicLLMClient:
         self._model = model
         self._max_tokens = max_tokens
 
-    async def complete(self, *, system: str, user: str) -> str:
+    async def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        cache_system: bool = False,
+    ) -> str:
+        return await self.complete_messages(
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            cache_system=cache_system,
+        )
+
+    async def complete_messages(
+        self,
+        *,
+        system: str,
+        messages: list[ChatMessage],
+        cache_system: bool = False,
+    ) -> str:
         started = time.monotonic()
         try:
             resp = await self._client.messages.create(
                 model=self._model,
                 max_tokens=self._max_tokens,
-                system=system,
-                messages=[{"role": "user", "content": user}],
+                system=_system_payload(system, cache=cache_system),
+                messages=list(messages),
             )
         except Exception as e:
             _emit_llm_call_event(
-                provider="vertex",
+                provider=self._PROVIDER,
                 model=self._model,
                 resp=None,
                 latency_ms=int((time.monotonic() - started) * 1000),
@@ -190,13 +342,18 @@ class VertexAnthropicLLMClient:
             )
             raise
         _emit_llm_call_event(
-            provider="vertex",
+            provider=self._PROVIDER,
             model=self._model,
             resp=resp,
             latency_ms=int((time.monotonic() - started) * 1000),
             error=None,
         )
         return _extract_text(resp)
+
+
+# ---------------------------------------------------------------------------
+# ファクトリ
+# ---------------------------------------------------------------------------
 
 
 def build_default_client() -> LLMClient:
