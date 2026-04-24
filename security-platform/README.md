@@ -8,7 +8,7 @@ This platform provides:
 
 - **Vulnerability collection** from NVD, GitHub Advisory, OSV, and VulnerableMCP
 - **Inventory matching** against your registered MCP servers and packages
-- **Notifications** via Slack, LINE Notify, and email
+- **Notifications** via Slack, LINE Messaging API (Bot), and email
 - **MCP Proxy** with rate limiting, tool pinning (rug-pull detection), and DLP
 - **Web dashboard** at `http://localhost:8000`
 - **Red team testing** via Promptfoo
@@ -99,6 +99,25 @@ Enable/disable notification channels and configure severity thresholds.
 
 ### `config/.env`
 API keys and secrets. Copy from `.env.example`. Never commit this file.
+
+### LINE notifications
+
+本プラットフォームの LINE 通知は **LINE Messaging API (Bot channel)** を使う。LINE Notify は 2025/03/31 にサービス終了済のため、旧 `LINE_NOTIFY_TOKEN` 設定は無視される (起動時に deprecation 警告)。
+
+**セットアップ手順**:
+
+1. [LINE Developers Console](https://developers.line.biz/console/) で新規 Provider + Messaging API channel を作成
+2. 以下の値を `config/.env` にセット:
+   - `LINE_CHANNEL_SECRET` — Channel basic settings → Channel secret
+   - `LINE_CHANNEL_ACCESS_TOKEN` — Messaging API 設定 → Channel access token (long-lived)
+   - `LINE_USER_IDS` — Bot を友だち追加した LINE ユーザの userId を CSV で列挙 (例: `Uxxxx,Uyyyy`)
+3. `config/notification.yaml` の `channels.line.enabled` を `true` に
+4. 動作確認:
+   ```bash
+   uv run python -c "import asyncio; from src.notifier.line import send_message; asyncio.run(send_message('security-platform test notification'))"
+   ```
+
+通知は Push Message で送られる (Free tier は月間通数制限あり)。将来 tech-news-agent Phase 3 で Flex Message 対応の共通 `line-publisher/` モジュールへ移行予定。
 
 ## Applying Security Layers to an Agent System
 
