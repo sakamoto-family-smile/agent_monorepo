@@ -41,10 +41,12 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     notification_email: str = ""
 
-    # Server settings
-    dashboard_host: str = "0.0.0.0"
+    # Server settings — コンテナ / dev サーバで全 interface にバインドするのが
+    # 既定値 (本番は env で上書き or リバースプロキシ前提)。bandit B104 は
+    # 意図的なので nosec で明示的に抑止する。
+    dashboard_host: str = "0.0.0.0"  # nosec B104
     dashboard_port: int = 8000
-    proxy_host: str = "0.0.0.0"
+    proxy_host: str = "0.0.0.0"  # nosec B104
     proxy_port: int = 8080
 
 
