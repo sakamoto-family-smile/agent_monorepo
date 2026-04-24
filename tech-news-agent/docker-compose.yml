@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    env_file: .env
+    ports:
+      - "8300:8300"
+    volumes:
+      - ./data:/app/data
+      - ../analytics-platform/data:/analytics-platform/data
+    environment:
+      - ANALYTICS_DATA_DIR=/analytics-platform/data
+
+  # Phase 1 は手動で `curl -X POST http://localhost:8300/internal/run-pipeline`
+  # cron 化は Phase 1.5 以降、本番は Cloud Scheduler に置き換える想定。

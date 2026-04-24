@@ -1,0 +1,40 @@
+# Phase 1 初期: 主要 5 ソース + arXiv 3 カテゴリ
+# priority: 3(★★★)=一次情報/信頼度高→weight 1.5 / 2(★★)=品質中→weight 1.0 / 1(★)=ノイズ多→weight 0.7
+# Phase 1.5 で Netflix / Uber / Airbnb / Zenn 他 topic / Qiita / はてブ / Reddit / GitHub Trending/Releases を追加予定
+
+domain: data_platform
+
+sources:
+  - name: google_cloud_data_analytics
+    type: rss
+    url: https://cloud.google.com/blog/products/data-analytics/rss
+    priority: 3
+
+  - name: aws_big_data
+    type: rss
+    url: https://aws.amazon.com/blogs/big-data/feed/
+    priority: 3
+
+  - name: databricks
+    type: rss
+    url: https://www.databricks.com/blog/feed
+    priority: 3
+
+  - name: snowflake
+    type: rss
+    url: https://www.snowflake.com/blog/feed/
+    priority: 3
+
+  - name: zenn_bigquery
+    type: rss
+    url: https://zenn.dev/topics/bigquery/feed
+    priority: 2
+
+  - name: arxiv
+    type: arxiv
+    categories: [cs.DB, cs.DC, cs.IR]
+    # rate limit: 3 秒に 1 リクエスト (arXiv 公式ガイドライン)
+    rate_limit_seconds: 3
+    # Phase 1 では当日分に絞る (検索結果の先頭数十件から関連度の高いものだけ使う)
+    max_results: 50
+    priority: 3
