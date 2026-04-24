@@ -184,22 +184,188 @@ make run
 
 ## 6. 残課題と次フェーズ
 
-### Phase 1.5 (次の PR)
+MVP (Phase 1) がマージ済。本節は **次回着手時に planning コストをかけず着手できるレベルの詳細タスク** を記載する。hotcook-agent のロードマップ流儀 (PR #32) に準拠。
 
-- グラフ可視化 5 種 (ミルク / 睡眠 / 体重 / ヒートマップ / ダッシュボード)
-- `取り消し` / `undo` コマンドで直近バッチの `rolled_back_at` をセット
+### Phase 1 残 TODO (MVP 後のフォロー)
 
-### Phase 2
+Phase 1 の Definition of Done に対して、実機運用で顕在化しうる項目:
 
-- リッチメニュー (Postback) 対応
-- `scripts/setup_richmenu.py` で画像生成 + LINE API 登録
+- [ ] **実機 dogfooding**: LINE Developers Console で Channel 作成 → `.env` 設定 → 自分の LINE userId を `FAMILY_USER_IDS` に登録 → ngrok で webhook を立てる → 過去 1 週間分の .txt で取り込み確認
+- [ ] **Noto Sans CJK フォント**: Phase 1.5 のグラフで必須。hotcook-agent / lifeplanner-agent が既に使っている置き場所 (`analytics-platform` 共通 or 各エージェント内) を確認し、fontconfig の探索パスを揃える
+- [ ] **`setup_database.sh`**: SQLite の初期化を手動で打てる形に。Phase 1 は lifespan 経由で自動初期化しているが、ops 用途で欲しい
+- [ ] **LINE userId 確認手順の README 明記**: 現状は「webhook ログから拾う」記載のみ。LINE Developers の User ID 取得方法をもう少し丁寧に書く
+- [ ] **コマンド aliases 検証**: `today` / `week` が意図通り半角・全角空白両方でマッチするかを実機で
+- [ ] **Phoenix トレース動作確認** (analytics-platform 起動時): `OTEL_EXPORTER_OTLP_ENDPOINT` を設定した場合に span が Phoenix UI で見えるか
 
-### Phase 3
+---
 
-- Claude 相談機能 (`lifeplanner-agent/services/llm_client.py` の prompt caching API を活用)
-- 緊急キーワードゲート (`#8000` 誘導)
-- `sessions` / `conversations` テーブル (SQLite)
-- consulting mode 切替
+### Phase 1.5 (次の PR): グラフ + ロールバック
+
+**目標**: LINE でグラフ画像を返せる状態 + 誤って取り込んだ .txt をコマンドで無効化できる状態。
+
+#### グラフ可視化 (matplotlib)
+
+- [ ] `app/services/visualizer.py` を新設し、以下 5 種の純関数を実装:
+  - [ ] `milk_timeline(events, period)` — ミルク回数と量の時系列棒グラフ + 3 日移動平均線
+  - [ ] `sleep_timeline(events, period)` — 1 日毎の合計睡眠 (日中 / 夜間スタック)
+  - [ ] `weight_height_timeline(events, period)` — 体重・身長・頭囲の折れ線 (右 Y 軸で頭囲)
+  - [ ] `feeding_heatmap(events, period)` — 曜日 × 時間帯 (1 時間刻み) の授乳ヒートマップ
+  - [ ] `dashboard(events, period)` — 1 枚に上記 4 種を 2x2 サブプロット集約
+- [ ] テーマ: Paper Cream #FAF6F0 背景 / Deep Ink #2B2825 文字 / Peach #F4A896 / Sage #A9C4A0 / Butter #F5D680 / Sky #A4C5D8
+- [ ] Noto Sans CJK JP (日本語ラベル崩れ防止)
+- [ ] 出力: PNG bytes (GCS 不使用、メモリ返しから直接 LINE Content Message で送信 — Phase 1.5 はまだ GCS 連携しない)
+
+#### LINE からのグラフ取得
+
+- [ ] `command_router` に以下を追加 (テキストコマンドから起動):
+  - `ミルク` / `milk` → milk_timeline
+  - `睡眠` / `sleep` → sleep_timeline
+  - `体重` / `weight` → weight_height_timeline
+  - `時間帯` / `heatmap` → feeding_heatmap
+  - `ダッシュボード` / `dashboard` → dashboard
+- [ ] LINE Content Message で画像送信 (`ImageMessage`, `originalContentUrl` / `previewImageUrl`)
+- [ ] 画像は一時公開 URL が必要。Phase 1.5 はローカル開発優先なので **ngrok 経由で `/api/line/image/{id}.png` を公開** する route を追加 (Phase 4 GCP 時に GCS Signed URL へ切替)
+- [ ] 生成済み画像の TTL 管理 (メモリ LRU 50 枚 or ディスク自動削除)
+
+#### ロールバック
+
+- [ ] `app/services/command_router.py` に `取り消し` / `undo` コマンド追加
+- [ ] `EventRepo.rollback_latest_batch(family_id) -> ImportBatch | None` を追加
+  - `import_batches` テーブルの直近 `rolled_back_at IS NULL` なバッチを 1 件、`rolled_back_at = now` で更新
+  - 戻り値はロールバック対象のバッチ (event_count, imported_at) → ユーザへの確認メッセージ用
+- [ ] 集計クエリ (`fetch_events_in_range`) は既に `rolled_back_at IS NULL` で絞っているため SQL 追加変更なし
+- [ ] ユニットテスト: rollback 直後に同 .txt を再 import できる (dedup 制約が `rolled_back_at IS NULL` 付きの partial unique なので OK)
+
+#### テスト
+
+- [ ] `tests/test_visualizer.py`: 各グラフ関数が PNG bytes を返すこと、ラベル文字列に期待値が含まれること (画像差分比較はしない)
+- [ ] `tests/test_rollback.py`: rollback 後 count_events が減ること、再 import が成功すること
+- [ ] E2E: LINE webhook → `ミルク` → 画像 push → ログに `ImageMessage` 送信が記録される
+
+**マイルストーン**: LINE の `ミルク` / `睡眠` / `体重` / `時間帯` / `ダッシュボード` でグラフ画像が返り、`取り消し` で直近取り込みが無効化される。
+
+---
+
+### Phase 2: リッチメニュー (Postback)
+
+**目標**: メニュータップだけで「今日」「ミルク」「相談」などを起動できる状態。テキストコマンドも併存 (音声入力・慣れユーザ向け)。
+
+#### 画像生成 + LINE 登録
+
+- [ ] `scripts/setup_richmenu.py` 新設:
+  - [ ] Pillow で 2500×1686 キャンバス作成、クリーム背景・4×2 グリッド・絵文字 + 日本語ラベル
+  - [ ] normal mode メニュー (📊今日 / 📈ミルク / 💤睡眠 / ⚖️体重 / 📅週間 / 🔥ヒートマップ / 💬相談 / ❓ヘルプ)
+  - [ ] consulting mode メニュー (💬相談 が 🚪相談終了 に差し替え、他は共通)
+  - [ ] LINE API で `/v2/bot/richmenu` 登録 → rich_menu_id を取得
+  - [ ] デフォルトメニューに `setDefaultRichMenu` で登録
+  - [ ] 標準出力に `RICH_MENU_ID_NORMAL=...` / `RICH_MENU_ID_CONSULTING=...` を print → ops が `.env` に反映
+
+#### Postback ハンドラ
+
+- [ ] `app/services/line_client.py` の DTO に `LinePostbackEvent` を追加
+- [ ] `line_client.parse_events` が `PostbackEvent` も拾う
+- [ ] `app/services/postback_router.py` 新設:
+  - `action=summary&period=today|week` → command_router 経由で summary 実行
+  - `action=chart&kind=milk|sleep|weight|heatmap|dashboard` → visualizer 経由でグラフ
+  - `action=consult&op=enter|exit` → Phase 3 で実装される consulting mode 切替 (Phase 2 段階では no-op + stub)
+  - `action=help` → HELP_TEXT
+- [ ] `line_handler.handle_event` で `LinePostbackEvent` 分岐を追加
+- [ ] 既存 `command_router` を Postback からも再利用できる形にリファクタ (サブ関数化)
+
+#### 友だち追加時 Welcome
+
+- [ ] `FollowEvent` を parse_events で拾う
+- [ ] `handle_event` で Welcome テキスト + デフォルトメニュー紐付け
+- [ ] 許可リスト外ユーザは「利用できません」と返すだけ
+
+#### テスト
+
+- [ ] `tests/test_postback_router.py`: action → handler 振分
+- [ ] `tests/test_setup_richmenu.py`: 画像生成が失敗しない (LINE API 呼出は monkeypatch で stub)
+- [ ] 実機: 2 人の LINE でメニューが表示され、タップで正しい結果が返る
+
+**マイルストーン**: メニュータップだけでサマリとグラフが取れる。テキストコマンドも引き続き動く。
+
+---
+
+### Phase 3: Claude 相談機能
+
+**目標**: `相談` ボタンから文脈依存の育児相談ができ、緊急キーワードで #8000 / 119 に誘導される。
+
+#### Session / Conversation ストア (SQLite)
+
+- [ ] `app/repositories/schema.sql` に追加:
+  ```sql
+  CREATE TABLE sessions (line_user_id TEXT PK, mode TEXT, consulting_since TEXT,
+                         current_conversation_id TEXT);
+  CREATE TABLE conversations (conversation_id TEXT PK, family_id TEXT, line_user_id TEXT,
+                              started_at TEXT, ended_at TEXT, message_count INT,
+                              summary TEXT, system_prompt_version TEXT);
+  CREATE TABLE conversation_messages (message_id TEXT PK, conversation_id TEXT FK,
+                                      role TEXT, content TEXT, created_at TEXT,
+                                      claude_model TEXT, input_tokens INT,
+                                      output_tokens INT, cache_read_tokens INT);
+  ```
+- [ ] `app/repositories/session_repo.py` 新設: `get_mode`, `set_mode`, `start_conversation`, `append_message`, `close_conversation`, `fetch_history(limit=20)`
+
+#### Context Builder
+
+- [ ] `app/services/context_builder.py` 新設:
+  - [ ] 子の月齢 (BIRTH_DATE 環境変数 or `.txt` 内 age から推定)
+  - [ ] 直近 72h のイベントサマリ (analytics.summarize を内部利用)
+  - [ ] 直近 7 日の日次サマリ (day × type のピボット)
+  - [ ] 体重 / 身長 / 体温の最新値と推移傾向
+  - [ ] 直近の症状記録 (体温 >= 37.5°C の行) と投薬記録
+  - [ ] 最終出力: 500〜1500 tokens の日本語テキスト 1 本
+
+#### Emergency Gate
+
+- [ ] `app/services/emergency_gate.py` 新設:
+  - [ ] regex: `高熱|40度|39度|ひきつけ|けいれん|痙攣|呼吸(しない|苦しい|おかしい)|意識(ない|朦朧)|ぐったり|反応がない|チアノーゼ|唇が紫|大量出血|頭を打った|嘔吐(止まらない|緑|血)` 等
+  - [ ] `check(text) -> EmergencyMatch | None` を返す純関数 (ユーザ文字列への依存のみ、Claude 呼ばず)
+  - [ ] マッチ時の定型メッセージ: #8000 / 119 / 医師受診誘導
+- [ ] `tests/test_emergency_gate.py`: 全キーワード・誤検知しないケース (「今日は元気でした」等)
+
+#### Claude 連携
+
+- [ ] `app/services/consultation.py` 新設:
+  - [ ] SYSTEM_PROMPT 定数 (2000 tokens 程度、医療診断しない・共感的・断定避け・情報源提示)
+  - [ ] `LLMClient` (lifeplanner-agent の `services.llm_client`) を遅延 import で DI
+  - [ ] `complete_messages(system=SYSTEM_PROMPT, messages=[RECENT_CONTEXT_USER, ASST_ACK, ...history, user_q], cache_system=True)`
+  - [ ] 20 ターン超過時は古い履歴を Claude に要約させて `conversations.summary` に格納
+- [ ] prompt regression テストケース集 (`tests/test_consultation_prompts.py`):
+  - [ ] 診断要求→ 診断しない旨の返答
+  - [ ] 発熱相談 → #8000 誘導を含むか
+  - [ ] 日常相談 → RECENT_CONTEXT に基づく具体的応答
+
+#### リッチメニュー / モード切替
+
+- [ ] `相談 / consult` コマンド / Postback `action=consult&op=enter` で:
+  - [ ] `sessions.mode = "consulting"` に更新
+  - [ ] `linkRichMenuIdToUser` で consulting menu に切替
+  - [ ] 開始メッセージ返信 (#8000 / 119 を添える)
+- [ ] `相談終了 / exit` / `op=exit` で normal に戻す
+- [ ] consulting mode 中のテキストメッセージ:
+  - [ ] まず emergency_gate
+  - [ ] 通らなければ `consultation.reply` を呼び結果を返信
+  - [ ] 全ターン Firestore ではなく SQLite に保存
+
+#### セキュリティ・コスト管理
+
+- [ ] userId はコンテキストに入れない (Claude に流さない)
+- [ ] 1 セッション単位のトークン超過監視 (`conversations.message_count` > 40 で警告)
+- [ ] Anthropic API Key は `.env` / 本番は Secret Manager
+
+#### テスト
+
+- [ ] `tests/test_session_repo.py`
+- [ ] `tests/test_context_builder.py`: ダミーイベントから期待コンテキスト生成
+- [ ] `tests/test_consultation.py`: Mock LLMClient で end-to-end (history + cache_system の引数を検証)
+- [ ] 実機 dogfooding 2 週間 → プロンプト調整
+
+**マイルストーン**: 「相談」ボタンから文脈依存の育児相談ができ、緊急キーワードで #8000 に誘導される状態。
+
+---
 
 ### 複数子対応 (将来)
 
