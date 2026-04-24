@@ -37,9 +37,12 @@ def build_event_id(
 
     同じ family が同じタイムスタンプで同じ raw の行を再送しても、
     同一 event_id になるので INSERT OR IGNORE で吸収できる。
+
+    SHA1 を使うのは衝突耐性より決定論的 ID 生成の短さを優先したため。
+    `usedforsecurity=False` で用途を明示し、bandit B324 を抑止する。
     """
     key = f"{family_id}|{event_timestamp}|{event_type}|{raw_text}"
-    return hashlib.sha1(key.encode("utf-8")).hexdigest()  # noqa: S324 (not used for security)
+    return hashlib.sha1(key.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def compute_raw_text_hash(raw_text: str) -> str:
