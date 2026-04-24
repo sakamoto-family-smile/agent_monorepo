@@ -150,6 +150,11 @@ python_packages:
     version: "2.0.0"
     ecosystem: "pip"
 
+  # piyolog-analytics
+  - name: "line-bot-sdk"
+    version: "3.11.0"
+    ecosystem: "pip"
+
 agent_frameworks:
   - name: "anthropic-claude-code"
     version: "latest"

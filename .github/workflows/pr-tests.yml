@@ -15,6 +15,7 @@ jobs:
       stock_analysis_agent: ${{ steps.detect.outputs.stock_analysis_agent }}
       lifeplanner_agent:    ${{ steps.detect.outputs.lifeplanner_agent }}
       hotcook_agent:        ${{ steps.detect.outputs.hotcook_agent }}
+      piyolog_analytics:    ${{ steps.detect.outputs.piyolog_analytics }}
       analytics_platform:   ${{ steps.detect.outputs.analytics_platform }}
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +57,12 @@ jobs:
             echo "hotcook_agent=true" >> "$GITHUB_OUTPUT"
           else
             echo "hotcook_agent=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -q '^piyolog-analytics/'; then
+            echo "piyolog_analytics=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "piyolog_analytics=false" >> "$GITHUB_OUTPUT"
           fi
 
           if echo "$CHANGED" | grep -q '^analytics-platform/'; then
@@ -314,6 +321,52 @@ jobs:
         with:
           name: test-results-hotcook-agent
           path: hotcook-agent/.pytest_cache/
+          retention-days: 7
+
+  # ── piyolog-analytics ──────────────────────────────────────────────────────
+  test-piyolog-analytics:
+    name: Test / piyolog-analytics
+    needs: detect-changes
+    if: needs.detect-changes.outputs.piyolog_analytics == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: piyolog-analytics
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run tests
+        env:
+          APP_ENV: "local"
+          ANALYTICS_ENABLED: "false"
+          LINE_CHANNEL_SECRET: ""
+          LINE_CHANNEL_ACCESS_TOKEN: ""
+          FAMILY_USER_IDS: "Utest1,Utest2"
+        run: |
+          uv run pytest tests/ \
+            --tb=short -v --no-header
+
+      - name: Run ruff
+        run: uv run ruff check app tests
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-piyolog-analytics
+          path: piyolog-analytics/.pytest_cache/
           retention-days: 7
 
   # ── analytics-platform ─────────────────────────────────────────────────────
