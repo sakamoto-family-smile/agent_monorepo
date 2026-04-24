@@ -30,9 +30,18 @@ logger = logging.getLogger(__name__)
 
 
 class UploadTransport(Protocol):
-    """raw ファイル 1 本を宛先に送る最小インターフェース。"""
+    """raw ファイル 1 本を宛先に送る最小インターフェース。
 
-    async def send(self, src: Path, *, dest_root: Path) -> Path: ...
+    戻り値は「送信先識別子」:
+      - ローカル実装: 移動先の `Path`
+      - GCS 実装: `gs://bucket/key` 形式の str
+
+    `str | Path` にしているのは Python の `Path` が `gs://` のような複数スラッシュ
+    URI を 1 スラッシュに折り畳んでしまい、純粋な Path では GCS URI を無損失に
+    表現できないため。
+    """
+
+    async def send(self, src: Path, *, dest_root: Path) -> str | Path: ...
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +81,7 @@ class LocalMoveTransport:
 
 @dataclass(frozen=True)
 class UploadOutcome:
-    uploaded: list[Path]
+    uploaded: list[str | Path]
     dead_letter: list[Path]
 
     @property
@@ -111,7 +120,7 @@ class LocalUploader:
             result.append(path)
         return result
 
-    async def _try_upload(self, src: Path) -> Path:
+    async def _try_upload(self, src: Path) -> str | Path:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(self.max_attempts),
             wait=wait_exponential(multiplier=self.backoff_multiplier, max=self.backoff_max),
@@ -135,7 +144,7 @@ class LocalUploader:
         self.uploaded_root.mkdir(parents=True, exist_ok=True)
         self.dead_letter_root.mkdir(parents=True, exist_ok=True)
 
-        uploaded: list[Path] = []
+        uploaded: list[str | Path] = []
         dead: list[Path] = []
         for src in self._list_raw_files():
             try:

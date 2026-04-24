@@ -168,6 +168,11 @@ python_packages:
     version: "9.0.0"
     ecosystem: "pip"
 
+  # analytics-platform (GCP extra)
+  - name: "google-cloud-storage"
+    version: "2.18.0"
+    ecosystem: "pip"
+
 agent_frameworks:
   - name: "anthropic-claude-code"
     version: "latest"
