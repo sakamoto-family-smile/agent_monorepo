@@ -13,6 +13,7 @@
 | [`piyolog-analytics`](./piyolog-analytics/) | 実装 | ぴよログ (育児記録) を LINE Bot 経由で取り込んで家族で横断サマリ共有 (Phase 1) | ✅ 連携済 (本 PR) |
 | [`security-platform`](./security-platform/) | 基盤 | 全エージェント共通のセキュリティ基盤（MCP Proxy / CVE 監視 / DLP / Red Team） | — (基盤側) |
 | [`analytics-platform`](./analytics-platform/) | 基盤 | 全エージェント横断の分析基盤（OTel + Phoenix + JSONL + DuckDB + dbt、ローカル版のみ） | — (基盤側、Phase 1-4 完了 / Phase 5+ 未着手) |
+| [`llm-client`](./llm-client/) | 基盤 | 薄い Anthropic Claude API ラッパ (prompt caching / 複数ターン / on_call フック)。モノレポ横断で再利用 | — (基盤側) |
 | [`agent-system-1`](./agent-system-1/) | ダミー | 雛形（Research Assistant スキル用スケルトン） | — |
 | [`agent-system-2`](./agent-system-2/) | ダミー | 雛形（Code Helper スキル用スケルトン） | — |
 

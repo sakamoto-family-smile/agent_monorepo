@@ -26,6 +26,7 @@ targets:
     - "hotcook-agent/app/"
     - "piyolog-analytics/app/"
     - "analytics-platform/analytics_platform/"
+    - "llm-client/llm_client/"
 
 # CVSS thresholds
 cvss_thresholds:
