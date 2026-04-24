@@ -678,7 +678,61 @@ make lint
 
 ---
 
-## 15. 参考資料
+## 15. 将来統合ポイント — security-platform
+
+モノレポの `security-platform` は既に自プロジェクトのセキュリティ関連情報収集・配信機能を持つ:
+
+| レイヤ | 既存機能 |
+|---|---|
+| Collector | NVD / GitHub Advisory / OSV / VulnerableMCP から **CVE** 収集 |
+| Analyzer | `config/inventory.yaml` の monorepo 部品と CVE 照合 → 自スタックにヒットするものだけ抽出 |
+| Notifier | Slack / LINE Notify / Email の daily/weekly digest |
+| Dashboard | `http://localhost:8000` で可視化 |
+
+### 15.1 tech-news-agent との棲み分け
+
+| 項目 | security-platform | tech-news-agent (Phase 3 security) |
+|---|---|---|
+| 対象 | **自プロジェクトに影響する脆弱性** | **業界の一般セキュリティニュース** |
+| データソース | CVE DB (NVD/Advisory/OSV/VulnerableMCP) | RSS 記事 (OWASP/Snyk Blog 等) |
+| 粒度 | 個別 CVE | 記事 (how-to / 解説) |
+| アクション性 | 高 (要対応) | 低 (情報共有・学習) |
+
+両者は役割が直交するため、**片方に吸収するのではなく連携する**方針。
+
+### 15.2 連携シナリオ (Phase 3 セキュリティドメイン着手時)
+
+採用案: **中疎結合 (CVE データを tech-news が取り込み、自スタックヒット CVE + 業界ニュースを一つの Flex Message carousel で配信)**
+
+具体タスク (tech-news-agent Phase 3 のセキュリティドメイン追加と同時に実施):
+
+- [ ] `line-publisher/` モジュールを monorepo root に切り出し (Flex Message builder + Messaging API ラッパの共通化)
+- [ ] tech-news-agent Collector に `SecurityPlatformCVECollector` 追加:
+  - 入力: security-platform の SQLite `vulnerabilities` テーブル (path dep 参照、または analytics-platform 経由で subscribe)
+  - 自スタック影響あり (inventory 照合済み) フラグを `attributes` に保持
+- [ ] tech-news Publisher で自スタックヒット CVE は **バッジ「⚠️ 自スタック影響あり」** を Flex バブルに付与、優先配信
+- [ ] security-platform の既存 Notifier (`src/notifier/digest.py`) は段階的に tech-news に委譲、または並走 (Slack/Email は security-platform のまま、LINE は tech-news に寄せる)
+
+### 15.3 LINE Notify 終了問題 (先行対処が必要)
+
+**⚠️ security-platform の LINE 通知は `LINE Notify` を使っているが、LINE Notify は 2025/03/31 にサービス終了済**。`src/notifier/line.py` は現時点で動作不能。
+
+PR #36 マージ後、**tech-news-agent Phase 1 着手前**に以下を別 PR で先行対処:
+
+- [ ] `security-platform/src/notifier/line.py` を LINE Notify API → LINE Messaging API に移行
+  - 既存の `LineBotClient` パターン (`stock-analysis-agent` / `piyolog-analytics` 参照) を踏襲
+  - Push Message で CVE digest を配信
+  - LINE Channel secret / access token の Secret Manager / `.env` 管理
+- [ ] `security-platform/config/` に `LINE_CHANNEL_SECRET` / `LINE_CHANNEL_ACCESS_TOKEN` 追加
+- [ ] 既存の `LINE_NOTIFY_TOKEN` 設定は廃止予定フラグを立てる
+- [ ] LINE 通知が出るテスト (monkeypatch で送信先を stub)
+- [ ] README / `.env.example` 更新
+
+この移行で使う LINE クライアントは、Phase 3 で `line-publisher/` に共通化する前提 (最初は security-platform 内に薄く書き、Phase 3 統合時にリファクタ)。
+
+---
+
+## 16. 参考資料
 
 - arXiv API: https://info.arxiv.org/help/api/index.html
 - LINE Flex Message: https://developers.line.biz/ja/docs/messaging-api/using-flex-messages/
