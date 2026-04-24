@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Sample Data Blog</title>
+    <link>https://example.com/blog</link>
+    <description>Test feed</description>
+    <item>
+      <title>BigQuery Iceberg Integration Now GA</title>
+      <link>https://example.com/blog/bq-iceberg-ga?utm_source=rss&amp;utm_medium=feed</link>
+      <author>alice@example.com</author>
+      <pubDate>Wed, 23 Apr 2026 10:00:00 +0000</pubDate>
+      <description>Google Cloud announced GA of Iceberg integration for BigQuery, enabling unified lakehouse queries.</description>
+    </item>
+    <item>
+      <title>dbt Cloud New Pricing</title>
+      <link>https://example.com/blog/dbt-cloud-pricing/</link>
+      <pubDate>Tue, 22 Apr 2026 14:30:00 +0000</pubDate>
+      <description>dbt Labs introduced a new pricing tier focused on medium-sized teams.</description>
+    </item>
+  </channel>
+</rss>

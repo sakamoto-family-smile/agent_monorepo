@@ -1,0 +1,20 @@
+domain: data_platform
+sources:
+  - name: test_rss_a
+    type: rss
+    url: https://example.com/a.rss
+    priority: 3
+  - name: test_rss_b
+    type: rss
+    url: https://example.com/b.rss
+    priority: 2
+  - name: test_arxiv
+    type: arxiv
+    categories: [cs.DB, cs.DC]
+    rate_limit_seconds: 3
+    max_results: 20
+    priority: 3
+  - name: unknown_source
+    type: unknown_type
+    url: whatever
+    priority: 1

@@ -10,6 +10,7 @@ targets:
     # lifeplanner-agent: MCP 未使用
     # hotcook-agent: MCP 未使用 (Phase 1)
     # piyolog-analytics: MCP 未使用
+    # tech-news-agent: MCP 未使用 (Phase 1-2)、Phase 3 で BigQuery MCP 検討
 
   skills_directories:
     - "agent-system-1/skills/"
@@ -25,6 +26,7 @@ targets:
     - "lifeplanner-agent/app/"
     - "hotcook-agent/app/"
     - "piyolog-analytics/app/"
+    - "tech-news-agent/app/"
     - "analytics-platform/analytics_platform/"
     - "llm-client/llm_client/"
 
