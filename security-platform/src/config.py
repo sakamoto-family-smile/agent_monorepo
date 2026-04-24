@@ -25,7 +25,16 @@ class Settings(BaseSettings):
 
     # Notifications
     slack_webhook_url: str = ""
+
+    # LINE Messaging API (Bot channel) — used by src/notifier/line.py
+    line_channel_secret: str = ""
+    line_channel_access_token: str = ""
+    line_user_ids: str = ""  # CSV of LINE userId (recipients of push notifications)
+
+    # LINE Notify (DEPRECATED — サービスは 2025/03/31 に終了)。
+    # 後方互換のため設定自体は残し、notifier 側で deprecation 警告を出す。
     line_notify_token: str = ""
+
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_user: str = ""

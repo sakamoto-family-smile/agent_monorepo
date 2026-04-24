@@ -9,8 +9,12 @@ channels:
     mention_high: "@here"
 
   line:
-    enabled: false  # Set to true after configuring LINE_NOTIFY_TOKEN in .env
-    token: "${LINE_NOTIFY_TOKEN}"
+    # LINE Messaging API (Bot) を使う。LINE Notify は 2025/03/31 に終了済。
+    # 必要な env: LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, LINE_USER_IDS
+    enabled: false
+    channel_secret: "${LINE_CHANNEL_SECRET}"
+    channel_access_token: "${LINE_CHANNEL_ACCESS_TOKEN}"
+    user_ids: "${LINE_USER_IDS}"  # CSV of LINE userId (push 宛先)
 
   email:
     enabled: false  # Set to true after configuring SMTP settings in .env
