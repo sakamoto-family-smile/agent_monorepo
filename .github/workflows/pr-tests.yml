@@ -16,6 +16,7 @@ jobs:
       lifeplanner_agent:    ${{ steps.detect.outputs.lifeplanner_agent }}
       hotcook_agent:        ${{ steps.detect.outputs.hotcook_agent }}
       piyolog_analytics:    ${{ steps.detect.outputs.piyolog_analytics }}
+      llm_client:           ${{ steps.detect.outputs.llm_client }}
       analytics_platform:   ${{ steps.detect.outputs.analytics_platform }}
     steps:
       - uses: actions/checkout@v4
@@ -63,6 +64,12 @@ jobs:
             echo "piyolog_analytics=true" >> "$GITHUB_OUTPUT"
           else
             echo "piyolog_analytics=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -q '^llm-client/'; then
+            echo "llm_client=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "llm_client=false" >> "$GITHUB_OUTPUT"
           fi
 
           if echo "$CHANGED" | grep -q '^analytics-platform/'; then
@@ -367,6 +374,44 @@ jobs:
         with:
           name: test-results-piyolog-analytics
           path: piyolog-analytics/.pytest_cache/
+          retention-days: 7
+
+  # ── llm-client ─────────────────────────────────────────────────────────────
+  test-llm-client:
+    name: Test / llm-client
+    needs: detect-changes
+    if: needs.detect-changes.outputs.llm_client == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: llm-client
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run tests
+        run: uv run pytest tests/ --tb=short -v --no-header
+
+      - name: Run ruff
+        run: uv run ruff check llm_client tests
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-llm-client
+          path: llm-client/.pytest_cache/
           retention-days: 7
 
   # ── analytics-platform ─────────────────────────────────────────────────────

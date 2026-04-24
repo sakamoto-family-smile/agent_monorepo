@@ -5,10 +5,14 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
+
+# `_system_payload` は llm-client パッケージに移行。shim は public 名 `system_payload`
+# を経由せず、テストでは直接パッケージから取得する (shim の詳細スキーマテストは
+# llm-client/tests/test_client.py に移設済)。
+from llm_client import system_payload as _system_payload
 from services.llm_client import (
     AnthropicLLMClient,
     MockLLMClient,
-    _system_payload,
     get_llm_client,
     set_llm_client,
 )

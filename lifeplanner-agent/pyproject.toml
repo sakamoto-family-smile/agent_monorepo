@@ -19,10 +19,12 @@ dependencies = [
     "anthropic[vertex]>=0.40.0",
     "line-bot-sdk>=3.13",
     "analytics-platform",
+    "llm-client",
 ]
 
 [tool.uv.sources]
 analytics-platform = { path = "../analytics-platform" }
+llm-client = { path = "../llm-client" }
 
 [build-system]
 requires = ["hatchling"]
