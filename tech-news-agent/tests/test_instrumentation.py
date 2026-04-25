@@ -91,6 +91,7 @@ async def test_shutdown_flushes_buffer(monkeypatch, tmp_path: Path):
 def test_setup_with_local_backend_uses_local_payload_writer(monkeypatch, tmp_path: Path):
     """既定 (`ANALYTICS_STORAGE_BACKEND=local`) では LocalFilePayloadWriter。"""
     from analytics_platform.observability.content import LocalFilePayloadWriter
+
     from config import settings
 
     monkeypatch.setenv("ANALYTICS_STORAGE_BACKEND", "local")
@@ -109,6 +110,7 @@ def test_setup_with_gcs_backend_falls_back_when_bucket_missing(
 ):
     """`backend=gcs` でも `ANALYTICS_GCS_BUCKET` 未設定なら local にフォールバック。"""
     from analytics_platform.observability.content import LocalFilePayloadWriter
+
     from config import settings
 
     monkeypatch.setenv("ANALYTICS_STORAGE_BACKEND", "gcs")
@@ -125,6 +127,7 @@ def test_setup_with_gcs_backend_falls_back_when_bucket_missing(
 
 def test_setup_creates_uploader_when_analytics_enabled(monkeypatch, tmp_path: Path):
     from analytics_platform.uploader.local_uploader import LocalUploader
+
     from config import settings
 
     monkeypatch.setenv("ANALYTICS_STORAGE_BACKEND", "local")
