@@ -1,4 +1,4 @@
-.PHONY: install install-gcp phoenix-up phoenix-down demo dbt-run dbt-test dbt-parse-bq dbt-run-bq dbt-test-bq etl gcp-bootstrap docker-build docker-parse docker-run docker-test docker-shell test lint format check clean help
+.PHONY: install install-gcp phoenix-up phoenix-down demo dbt-run dbt-test dbt-parse-bq dbt-run-bq dbt-test-bq etl gcp-bootstrap docker-build docker-parse docker-run docker-test docker-shell deploy-orchestration trigger-workflow test lint format check clean help
 
 IMAGE_NAME ?= analytics-platform-dbt
 IMAGE_TAG ?= local
@@ -28,6 +28,10 @@ help:
 	@echo "  docker-run     - run \`dbt run\` inside the image (requires gcloud ADC mount)"
 	@echo "  docker-test    - run \`dbt test\` inside the image"
 	@echo "  docker-shell   - drop into bash for debugging"
+	@echo ""
+	@echo "Targets (orchestration / Cloud Workflows + Scheduler):"
+	@echo "  deploy-orchestration - deploy Cloud Workflow + Scheduler (idempotent)"
+	@echo "  trigger-workflow     - manually trigger the deployed Workflow"
 	@echo ""
 	@echo "Targets (other):"
 	@echo "  test           - run pytest"
@@ -101,6 +105,19 @@ docker-test:
 
 docker-shell:
 	$(DOCKER_RUN_BASE) shell
+
+# ---- Orchestration (Cloud Workflows + Cloud Scheduler) ----
+# Step 8: 既存の Cloud Run Job を Cloud Workflows で起動し、Scheduler で定期実行する。
+# `deploy-orchestration` は Workflow と Scheduler を同時に create/update する idempotent コマンド。
+# 必須 env: ANALYTICS_GCP_PROJECT。詳細は scripts/deploy_orchestration.sh のヘッダ参照。
+deploy-orchestration:
+	bash scripts/deploy_orchestration.sh
+
+trigger-workflow:
+	gcloud workflows execute $${ANALYTICS_WORKFLOW_NAME:-analytics-platform-dbt-pipeline} \
+	  --project=$${ANALYTICS_GCP_PROJECT} \
+	  --location=$${ANALYTICS_WORKFLOW_LOCATION:-us-central1} \
+	  --data='{"project":"$${ANALYTICS_GCP_PROJECT}","location":"$${ANALYTICS_DBT_JOB_LOCATION:-us-central1}","job_name":"$${ANALYTICS_DBT_JOB_NAME:-analytics-platform-dbt}","dbt_command":"$${ANALYTICS_DBT_COMMAND:-run-and-test}"}'
 
 test:
 	$(PYTHON) pytest tests/ -v
