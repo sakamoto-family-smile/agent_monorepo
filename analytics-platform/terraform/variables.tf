@@ -104,3 +104,35 @@ variable "gcs_raw_prefix" {
   description = "GCS prefix (under raw bucket) where JSONL is uploaded by analytics-platform consumers."
   default     = "uploaded"
 }
+
+# ---- Cloud Monitoring (Step 9) ----
+
+variable "enable_alerts" {
+  type        = bool
+  description = "Whether to create Cloud Monitoring alert policies. Set false for sandbox/dev to avoid noise."
+  default     = true
+}
+
+variable "notification_email" {
+  type        = string
+  description = "Email address that receives alert pages. Empty string disables the email channel."
+  default     = ""
+}
+
+variable "workflow_name_for_filter" {
+  type        = string
+  description = "Cloud Workflows name used in alert filters. Must match the name deployed by scripts/deploy_orchestration.sh."
+  default     = "analytics-platform-dbt-pipeline"
+}
+
+variable "cloud_run_job_name_for_filter" {
+  type        = string
+  description = "Cloud Run Job name used in alert filters. Must match the name deployed in Step 7."
+  default     = "analytics-platform-dbt"
+}
+
+variable "dbt_job_max_duration_seconds" {
+  type        = number
+  description = "Threshold for the dbt Cloud Run Job duration alert. 0 disables the duration alert."
+  default     = 1800 # 30 分
+}

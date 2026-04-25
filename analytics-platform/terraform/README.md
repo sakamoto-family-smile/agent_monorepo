@@ -7,6 +7,7 @@ Phase 5 GCP 運用基盤の IaC。本ディレクトリで管理するもの:
 | Step 3 | GCS bucket × 3 (raw / payloads / dead_letter) + lifecycle | `gcs.tf` |
 | Step 1 | Artifact Registry Docker repo | `artifact_registry.tf` |
 | Step 4 | BigQuery dataset × 3 (raw / staging / marts) + external table | `bigquery.tf` |
+| Step 9 | Cloud Monitoring alert policy × 3 + email notification channel | `monitoring.tf` |
 | 共通 | Service Account × 4 + IAM bindings | `iam.tf` |
 
 管理しないもの (現時点):
@@ -120,6 +121,29 @@ source .env.gcp
 set +a
 make deploy-orchestration
 ```
+
+---
+
+## Step 9 Cloud Monitoring アラート
+
+`monitoring.tf` で 3 個の alert policy を作成 (詳細は §3.5.2 of root README)。
+
+| policy | 検知 | しきい値 | 重要度 |
+|---|---|---|---|
+| `workflow_failed` | Cloud Workflows execution が FAILED | 5 分間に 1 件以上 | high |
+| `dbt_job_failed` | Cloud Run Job が failed で完了 | 5 分間に 1 件以上 | high |
+| `dbt_job_slow` | Cloud Run Job duration > `dbt_job_max_duration_seconds` (default 30 分) | 1 分継続 | medium |
+
+通知は email channel (`notification_email` 必須)。`enable_alerts = false` で全部スキップ可能。
+
+```bash
+# 通知先 email を terraform.tfvars に設定 → apply
+echo 'notification_email = "alerts@example.com"' >> terraform.tfvars
+make tf-plan
+make tf-apply
+```
+
+Slack に飛ばしたいときは Step 8 の Workflow 内 webhook (`ANALYTICS_SLACK_WEBHOOK_URL`) を使うか、Pub/Sub → Cloud Run の通知ブリッジを別途立てる。
 
 ---
 

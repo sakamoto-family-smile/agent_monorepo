@@ -63,6 +63,22 @@ output "sa_scheduler_email" {
   value       = google_service_account.scheduler.email
 }
 
+# ---- Monitoring (Step 9) ----
+
+output "alert_policies" {
+  description = "Cloud Monitoring alert policy ids (Step 9)."
+  value = compact([
+    length(google_monitoring_alert_policy.workflow_failed) > 0 ? google_monitoring_alert_policy.workflow_failed[0].id : "",
+    length(google_monitoring_alert_policy.dbt_job_failed) > 0 ? google_monitoring_alert_policy.dbt_job_failed[0].id : "",
+    length(google_monitoring_alert_policy.dbt_job_slow) > 0 ? google_monitoring_alert_policy.dbt_job_slow[0].id : "",
+  ])
+}
+
+output "alert_email_channel" {
+  description = "Email notification channel id (empty if notification_email was not set)."
+  value       = length(google_monitoring_notification_channel.email) > 0 ? google_monitoring_notification_channel.email[0].id : null
+}
+
 # 既存の env テンプレート (.env.example) と対応する一括出力。
 # `terraform output -json env_for_dotenv | jq -r 'to_entries[]|"\(.key)=\(.value)"'`
 output "env_for_dotenv" {
