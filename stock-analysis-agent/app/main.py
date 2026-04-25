@@ -6,7 +6,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
-from instrumentation import setup_observability, shutdown_observability
+from instrumentation import (
+    setup_observability,
+    shutdown_observability,
+    start_upload_loop,
+)
 from services.database import init_db
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
@@ -30,6 +34,7 @@ async def lifespan(app: FastAPI):
     _ensure_data_dirs()
     await init_db()
     setup_observability()
+    await start_upload_loop()
     logger.info("Stock Analysis Agent started (env=%s)", settings.app_env)
     try:
         yield

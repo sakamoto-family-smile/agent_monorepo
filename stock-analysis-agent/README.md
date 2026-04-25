@@ -249,6 +249,12 @@ stock-analysis-agent/
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | - | Phoenix / Langfuse OTLP HTTP エンドポイント（未設定時は span を export しない） |
 | `OTEL_EXPORTER_OTLP_HEADERS` | - | OTLP 認証ヘッダ（`k1=v1,k2=v2` 形式） |
 | `OTEL_SAMPLING_RATIO` | - | OTel サンプリング率 0.0〜1.0（デフォルト: 1.0、業務ログは常に 100%） |
+| `ANALYTICS_STORAGE_BACKEND` | - | `local` (既定) または `gcs`。Phase 5 Step 10 で導入、`gcs` で Cloud Run + Workload Identity 経由 GCS 連携 |
+| `ANALYTICS_GCS_BUCKET` | - | `gcs` backend 時必須。`analytics-platform/terraform` の `raw_bucket` の出力値 |
+| `ANALYTICS_GCS_RAW_PREFIX` | `uploaded/` | `gcs` backend 時の raw JSONL prefix |
+| `ANALYTICS_GCS_PAYLOAD_PREFIX` | `payloads/` | `gcs` backend 時の大容量 payload prefix |
+| `ANALYTICS_GCP_PROJECT` | (ADC から自動推論) | `gcs` backend 時の GCP project id。Cloud Run + Workload Identity なら省略可 |
+| `ANALYTICS_UPLOAD_INTERVAL_SECONDS` | `300` | 周期 upload 間隔。0 以下なら shutdown 時のみ upload |
 | `LINE_CHANNEL_SECRET` | - | LINE Messaging API のチャネルシークレット（未設定時 `/api/line/webhook` は 503） |
 | `LINE_CHANNEL_ACCESS_TOKEN` | - | LINE Messaging API のチャネルアクセストークン（未設定時 `/api/line/webhook` は 503） |
 
@@ -330,6 +336,47 @@ stock-analysis-agent/
 |---|---|
 | `true` (既定) | `RotatingFileSink` で JSONL を書き出す |
 | `false` | `NoOpSink` に置換、JSONL は一切書かれない (テスト用 / 緊急遮断用) |
+
+### ローカル / GCP backend 切替 (Phase 5 Step 10)
+
+| `ANALYTICS_STORAGE_BACKEND` | 挙動 |
+|---|---|
+| `local` (既定) | JSONL は `ANALYTICS_DATA_DIR/raw/` に書かれ、`LocalUploader` が定期的に `uploaded/` へ move (本番では分析基盤側 dbt が DuckDB で読む) |
+| `gcs` | JSONL は同じく local FS にバッファされた後、`LocalUploader` が `GCSTransport` で `gs://${ANALYTICS_GCS_BUCKET}/${ANALYTICS_GCS_RAW_PREFIX}` に upload。大容量 payload も `GCSPayloadWriter` で直接 `gs://...` に書く |
+
+切替に必要なコード変更はゼロ。`.env` (Cloud Run なら環境変数) で:
+
+```bash
+ANALYTICS_STORAGE_BACKEND=gcs
+ANALYTICS_GCS_BUCKET=analytics-raw                         # terraform output raw_bucket
+ANALYTICS_GCP_PROJECT=your-gcp-project                     # 省略時 ADC から推論
+ANALYTICS_GCS_RAW_PREFIX=uploaded/
+ANALYTICS_GCS_PAYLOAD_PREFIX=payloads/
+ANALYTICS_UPLOAD_INTERVAL_SECONDS=300
+```
+
+#### Cloud Run + Workload Identity デプロイ手順
+
+```bash
+# 1. analytics-platform 側で TF apply 済 + sa-uploader が作られている前提
+SA="sa-uploader@${PROJECT}.iam.gserviceaccount.com"
+
+# 2. Cloud Run service にこの SA を紐付ける
+gcloud run services update stock-analysis-agent \
+  --region=us-central1 \
+  --service-account="${SA}"
+
+# 3. env を Cloud Run に反映 (terraform output env_for_dotenv の値を流用)
+gcloud run services update stock-analysis-agent --region=us-central1 \
+  --update-env-vars=ANALYTICS_STORAGE_BACKEND=gcs,ANALYTICS_GCS_BUCKET=analytics-raw,ANALYTICS_GCP_PROJECT=${PROJECT},ANALYTICS_GCS_RAW_PREFIX=uploaded/,ANALYTICS_GCS_PAYLOAD_PREFIX=payloads/
+
+# 4. デプロイ後の動作確認
+#   - Cloud Logging で `[upload] cycle: uploaded=N dead_letter=0` が定期的に出る
+#   - GCS bucket に `uploaded/service_name=stock-analysis-agent/event_type=*/dt=*/hour=*/*.jsonl` が増える
+#   - BigQuery: SELECT COUNT(*) FROM analytics_raw.agent_events_external WHERE service_name='stock-analysis-agent'
+```
+
+`sa-uploader` には `analytics-platform/terraform/iam.tf` で raw / payloads / dead_letter bucket への `objectAdmin` が事前に紐付いている。
 
 ### 実機検証スクリプト
 
