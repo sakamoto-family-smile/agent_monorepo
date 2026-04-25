@@ -17,7 +17,9 @@ dependencies = [
     "pyyaml>=6.0.2",
     "line-bot-sdk>=3.11.0",
     "llm-client",
-    "analytics-platform",
+    # `[gcs]` extra で google-cloud-storage を入れる。
+    # ANALYTICS_STORAGE_BACKEND=gcs のとき GCSPayloadWriter / GCSTransport が import される。
+    "analytics-platform[gcs]",
 ]
 
 [tool.uv.sources]

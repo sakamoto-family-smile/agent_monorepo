@@ -45,6 +45,17 @@ class Settings(BaseSettings):
     analytics_compress: bool = False
     analytics_content_inline_threshold_bytes: int = 8192
 
+    # --- analytics GCP backend (Phase 5 Step 10) ---
+    # `local` (既定) | `gcs`。`gcs` のとき content payload と JSONL の upload 先が
+    # GCS に切り替わる。残りの GCS 設定は analytics_platform.gcp_config が env から読む:
+    #   ANALYTICS_GCS_BUCKET / ANALYTICS_GCS_RAW_PREFIX / ANALYTICS_GCS_PAYLOAD_PREFIX
+    #   ANALYTICS_GCP_PROJECT
+    analytics_storage_backend: str = "local"
+    # 周期的に LocalUploader.run_once() を回す間隔 (秒)。0 以下なら定期 upload 無効。
+    analytics_upload_interval_seconds: int = 300
+    # 書込直後の file を upload しないためのヒステリシス (秒)。テストは 0。
+    analytics_uploader_min_age_seconds: float = 30.0
+
     # --- OTel ---
     otel_exporter_otlp_endpoint: str = ""
     otel_exporter_otlp_headers: str = ""

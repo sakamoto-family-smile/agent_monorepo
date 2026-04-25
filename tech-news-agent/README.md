@@ -624,6 +624,16 @@ ANALYTICS_SERVICE_NAME=tech-news-agent
 ANALYTICS_DATA_DIR=../analytics-platform/data
 ANALYTICS_COMPRESS=false
 
+# --- analytics GCP backend (Phase 5 Step 10) ---
+# `local` (既定) / `gcs` (Cloud Run + Workload Identity)
+ANALYTICS_STORAGE_BACKEND=local
+# 以下は STORAGE_BACKEND=gcs 時のみ意味を持つ
+ANALYTICS_GCS_BUCKET=                    # terraform output raw_bucket
+ANALYTICS_GCP_PROJECT=                   # 省略時 ADC から推論
+ANALYTICS_GCS_RAW_PREFIX=uploaded/
+ANALYTICS_GCS_PAYLOAD_PREFIX=payloads/
+ANALYTICS_UPLOAD_INTERVAL_SECONDS=300    # 周期 upload 間隔 (秒)。0 以下なら shutdown 時のみ
+
 # --- Embedding ---
 EMBEDDING_PROVIDER=local        # local | vertex
 EMBEDDING_MODEL=intfloat/multilingual-e5-base
@@ -654,6 +664,46 @@ make lint
 - `analytics-platform` の DuckDB で `llm_call` / `business_event` を見る
 - `mart_source_coverage` で日次ソース別取得件数
 - Phoenix (OTel) で LLM 呼出トレース
+
+### 13.4 ローカル / GCP backend 切替 (Phase 5 Step 10)
+
+| `ANALYTICS_STORAGE_BACKEND` | 挙動 |
+|---|---|
+| `local` (既定) | JSONL は `ANALYTICS_DATA_DIR/raw/` に書かれ、`LocalUploader` が定期的に `uploaded/` へ move |
+| `gcs` | JSONL は同じく local FS にバッファされた後、`LocalUploader` が `GCSTransport` で `gs://${ANALYTICS_GCS_BUCKET}/${ANALYTICS_GCS_RAW_PREFIX}` に upload。大容量 payload も `GCSPayloadWriter` で直接 GCS に書く |
+
+`gcs` 切替に必要なコード変更はゼロ。`.env` (Cloud Run なら環境変数) で:
+
+```bash
+ANALYTICS_STORAGE_BACKEND=gcs
+ANALYTICS_GCS_BUCKET=analytics-raw           # terraform output raw_bucket
+ANALYTICS_GCP_PROJECT=your-gcp-project       # 省略時 ADC から推論
+ANALYTICS_GCS_RAW_PREFIX=uploaded/
+ANALYTICS_GCS_PAYLOAD_PREFIX=payloads/
+ANALYTICS_UPLOAD_INTERVAL_SECONDS=300
+```
+
+#### Cloud Run + Workload Identity デプロイ手順
+
+```bash
+# 1. analytics-platform 側で TF apply 済 + sa-uploader が作られている前提
+SA="sa-uploader@${PROJECT}.iam.gserviceaccount.com"
+
+# 2. Cloud Run service にこの SA を紐付ける (Cloud Run Job の場合は run jobs update)
+gcloud run services update tech-news-agent \
+  --region=us-central1 --service-account="${SA}"
+
+# 3. env を反映 (terraform output env_for_dotenv の値を流用)
+gcloud run services update tech-news-agent --region=us-central1 \
+  --update-env-vars=ANALYTICS_STORAGE_BACKEND=gcs,ANALYTICS_GCS_BUCKET=analytics-raw,ANALYTICS_GCP_PROJECT=${PROJECT}
+
+# 4. 動作確認
+#   - Cloud Logging で `[upload] cycle: uploaded=N` ログ
+#   - GCS bucket に uploaded/service_name=tech-news-agent/... が増える
+#   - BQ: SELECT COUNT(*) FROM analytics_raw.agent_events_external WHERE service_name='tech-news-agent'
+```
+
+`sa-uploader` には `analytics-platform/terraform/iam.tf` で raw / payloads / dead_letter bucket への `objectAdmin` が事前に紐付いている。
 
 ---
 
