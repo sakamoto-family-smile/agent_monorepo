@@ -1,0 +1,21 @@
+version: 2
+
+# BigQuery target でのみ参照される external source。
+# DuckDB target は raw_agent_events.sql 内で `read_json_auto` 経由で読むため未使用。
+#
+# 事前に `scripts/gcp_bootstrap.sh` で external table を作成しておく:
+#   bq mk --external_table_definition=...  {project}:{dataset}.{table}
+# データセット / テーブル名は env で上書き可能:
+#   ANALYTICS_BQ_RAW_DATASET   (default: analytics_raw)
+#   ANALYTICS_BQ_RAW_TABLE     (default: agent_events_external)
+sources:
+  - name: analytics_raw_external
+    description: GCS Hive パーティションの JSONL を指す BigQuery external table。
+    database: "{{ env_var('ANALYTICS_BQ_PROJECT', target.project | default('')) }}"
+    schema: "{{ env_var('ANALYTICS_BQ_RAW_DATASET', 'analytics_raw') }}"
+    tables:
+      - name: agent_events_external
+        identifier: "{{ env_var('ANALYTICS_BQ_RAW_TABLE', 'agent_events_external') }}"
+        description: >
+          gs://{bucket}/uploaded/service_name=.../event_type=.../dt=.../hour=.../*.jsonl
+          を Hive partitioning で外部参照するテーブル。

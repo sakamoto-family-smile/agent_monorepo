@@ -1,14 +1,32 @@
 analytics_platform:
   target: local
   outputs:
+    # ローカル: DuckDB (data/analytics.duckdb)
     local:
       type: duckdb
       # `DBT_DUCKDB_PATH` を envvar で上書き可。未指定時はリポジトリの data/ 配下。
       path: "{{ env_var('DBT_DUCKDB_PATH', '../data/analytics.duckdb') }}"
-      # dbt-duckdb は `external_root` をモデル内 `external_location` で参照できる。
       extensions:
         - httpfs
         - parquet
-      # read_json_auto で JSONL を外部テーブルとして読むために、
-      # raw データのルートを変数として渡す。モデル側で `var('raw_root')` を参照する。
       threads: 4
+
+    # GCP: BigQuery
+    # 認証は ADC (Cloud Run / GKE は Workload Identity 推奨、ローカルは
+    # `gcloud auth application-default login`)。
+    # 必須 env:
+    #   ANALYTICS_BQ_PROJECT       — GCP project id
+    #   ANALYTICS_BQ_LOCATION      — BQ location (default: US)
+    #   ANALYTICS_BQ_RAW_DATASET   — raw dataset (default: analytics_raw)
+    #   ANALYTICS_BQ_STAGING_DATASET — staging dataset (default: analytics_staging)
+    #   ANALYTICS_BQ_MARTS_DATASET — marts dataset (default: analytics_marts)
+    gcp:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('ANALYTICS_BQ_PROJECT') }}"
+      dataset: "{{ env_var('ANALYTICS_BQ_DEFAULT_DATASET', 'analytics_staging') }}"
+      location: "{{ env_var('ANALYTICS_BQ_LOCATION', 'US') }}"
+      threads: 4
+      timeout_seconds: 300
+      priority: interactive
+      retries: 2
