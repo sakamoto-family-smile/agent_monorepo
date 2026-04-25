@@ -17,6 +17,13 @@ dependencies = [
   "dbt-duckdb>=1.8.0",
 ]
 
+[project.optional-dependencies]
+# GCP 連携 (GCS upload / payload write 等) を使う consumer は `[gcs]` extra を
+# 有効にする。analytics-platform 本体は Cloud 無しでも動く。
+gcs = [
+  "google-cloud-storage>=2.18.0",
+]
+
 [dependency-groups]
 dev = [
   "pytest>=8.2.0",
