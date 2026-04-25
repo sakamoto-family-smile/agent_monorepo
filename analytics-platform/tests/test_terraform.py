@@ -27,6 +27,7 @@ REQUIRED_FILES = [
     "artifact_registry.tf",
     "bigquery.tf",
     "iam.tf",
+    "monitoring.tf",
     "README.md",
     "terraform.tfvars.example",
     ".gitignore",
@@ -69,6 +70,20 @@ def test_terraform_fmt_check() -> None:
         check=False,
     )
     assert proc.returncode == 0, f"terraform fmt -check failed:\n{proc.stdout}\n{proc.stderr}"
+
+
+def test_monitoring_alerts_have_step9_label() -> None:
+    """alert policy が user_labels.step = "9" を持つことで、本 PR 由来のリソースが追跡可能。"""
+    body = (TF_DIR / "monitoring.tf").read_text()
+    # 3 個の alert policy がすべて step = "9" を持つ
+    assert body.count("step      = \"9\"") >= 3
+
+
+def test_monitoring_email_channel_is_optional() -> None:
+    """notification_email が空文字なら email channel を作らない gating が効いていること。"""
+    body = (TF_DIR / "monitoring.tf").read_text()
+    assert "var.notification_email != \"\"" in body
+    assert "count = local.email_channel_enabled" in body
 
 
 @pytest.mark.skipif(shutil.which("terraform") is None, reason="terraform CLI not installed")

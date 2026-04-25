@@ -25,3 +25,18 @@ create_bq_external_table = true
 
 # 開発環境で terraform destroy したい場合のみ true (本番は false 推奨)
 gcs_force_destroy = false
+
+# ---- Cloud Monitoring (Step 9) ----
+
+# false にすると alert / notification channel の作成をスキップ (sandbox / dev 用)
+enable_alerts = true
+
+# email 通知先。空文字なら email channel は作らない (alert は作るが通知先なしで動く)。
+# notification_email = "alerts@example.com"
+
+# Workflow / Cloud Run Job 名は scripts/deploy_orchestration.sh / Step 7 と合わせる
+# workflow_name_for_filter      = "analytics-platform-dbt-pipeline"
+# cloud_run_job_name_for_filter = "analytics-platform-dbt"
+
+# 0 にすると duration alert を作らない (Workflow + failed alert だけで運用も可能)
+# dbt_job_max_duration_seconds = 1800
