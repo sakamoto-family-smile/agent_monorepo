@@ -48,15 +48,17 @@ gcloud services enable \
 
 ## Apply 手順
 
+ルートの `Makefile` に `tf-*` ターゲットがあるので、リポジトリルートから呼ぶのが基本:
+
 ```bash
-cd analytics-platform/terraform
+cd analytics-platform
 
 # 1. tfvars を準備
-cp terraform.tfvars.example terraform.tfvars
-$EDITOR terraform.tfvars     # project_id を埋める
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+$EDITOR terraform/terraform.tfvars     # project_id を埋める
 
-# 2. backend.tf でバケット名を指定 (もしくは backend を環境変数経由で渡す)
-cat >backend.tf <<'EOF'
+# 2. backend.tf でバケット名を指定
+cat >terraform/backend.tf <<'EOF'
 terraform {
   backend "gcs" {
     bucket = "your-gcp-project-id-tfstate"
@@ -66,10 +68,30 @@ terraform {
 EOF
 
 # 3. init / plan / apply
+make tf-init       # ≡ cd terraform && terraform init
+make tf-plan       # ≡ terraform plan -out=tfplan
+make tf-apply      # ≡ terraform apply tfplan
+
+# 4. 出力された env を .env.gcp に流し込む
+make tf-output-env  # → analytics-platform/.env.gcp
+```
+
+直接 `terraform` を呼びたい場合:
+
+```bash
+cd analytics-platform/terraform
 terraform init
 terraform plan -out=tfplan
 terraform apply tfplan
 ```
+
+**追加の make ターゲット**:
+
+| target | 内容 |
+|---|---|
+| `make tf-fmt` | `terraform fmt -recursive` (auto-fix) |
+| `make tf-fmt-check` | `terraform fmt -check -recursive` (CI 用) |
+| `make tf-validate` | `terraform init -backend=false && terraform validate` (認証不要) |
 
 > **ヒント**: 初回は `create_bq_external_table = false` にして apply →
 > consumer が JSONL を GCS に流し始めたあとで `true` に変えて再 apply するのが安全。
@@ -83,17 +105,18 @@ terraform apply tfplan
 
 ```bash
 # 個別の値
+cd terraform
 terraform output -raw raw_bucket
 terraform output -raw sa_uploader_email
 
-# .env 形式で一括出力
-terraform output -json env_for_dotenv \
-  | jq -r 'to_entries[] | "\(.key)=\(.value)"' \
-  > ../.env.gcp
+# .env 形式で一括出力 (Makefile 経由が楽)
+cd ..
+make tf-output-env                          # → analytics-platform/.env.gcp
+make tf-output-env TF_ENV_FILE=.env.dev     # 出力先を変えたいとき
 
 # consumer / dbt / workflow に env を読み込ませる
 set -a
-source ../.env.gcp
+source .env.gcp
 set +a
 make deploy-orchestration
 ```

@@ -487,22 +487,19 @@ terraform {
 EOF
 
 # 4. apply (初回は create_bq_external_table=false で apply 推奨)
-terraform init
-terraform plan -out=tfplan
-terraform apply tfplan
+cd ..
+make tf-init
+make tf-plan
+make tf-apply
 ```
 
 #### consumer / dbt / workflow への env 流し込み
 
-`terraform output -json env_for_dotenv` から `.env` を生成できる:
-
 ```bash
-terraform output -json env_for_dotenv \
-  | jq -r 'to_entries[] | "\(.key)=\(.value)"' \
-  > ../.env.gcp
+make tf-output-env       # → analytics-platform/.env.gcp
 ```
 
-詳細手順 / drift 検知 / import / トラブルシュートは [`terraform/README.md`](./terraform/README.md) 参照。
+`Makefile` には他にも `tf-fmt` / `tf-fmt-check` / `tf-validate` がある (`make help` 参照)。詳細手順 / drift 検知 / import / トラブルシュートは [`terraform/README.md`](./terraform/README.md) 参照。
 
 ### 3.4 BigQuery データセット構成
 
