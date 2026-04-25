@@ -23,6 +23,12 @@ dependencies = [
 gcs = [
   "google-cloud-storage>=2.18.0",
 ]
+# BigQuery で dbt を実行する場合の extra。`uv sync --extra gcp`。
+gcp = [
+  "google-cloud-storage>=2.18.0",
+  "google-cloud-bigquery>=3.20.0",
+  "dbt-bigquery>=1.8.0",
+]
 
 [dependency-groups]
 dev = [

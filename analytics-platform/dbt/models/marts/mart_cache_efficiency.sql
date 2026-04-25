@@ -2,10 +2,10 @@
 
 WITH agg AS (
   SELECT
-    DATE(event_timestamp) AS dt,
+    {{ date_from_timestamp('event_timestamp') }} AS dt,
     llm_model,
-    SUM(input_tokens)        AS input_tokens_total,
-    SUM(cache_read_tokens)   AS cache_read_total,
+    SUM(input_tokens)          AS input_tokens_total,
+    SUM(cache_read_tokens)     AS cache_read_total,
     SUM(cache_creation_tokens) AS cache_creation_total
   FROM {{ ref('stg_llm_calls') }}
   GROUP BY 1, 2
@@ -18,6 +18,6 @@ SELECT
   cache_creation_total,
   CASE
     WHEN input_tokens_total = 0 THEN 0.0
-    ELSE CAST(cache_read_total AS DOUBLE) / input_tokens_total
+    ELSE CAST(cache_read_total AS {{ dbt.type_float() }}) / input_tokens_total
   END AS cache_hit_ratio
 FROM agg

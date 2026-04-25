@@ -20,10 +20,10 @@ SELECT
   input_args_hash,
   input_args_uri,
   output_uri,
-  CAST(output_size_bytes AS BIGINT) AS output_size_bytes,
-  CAST(duration_ms AS BIGINT) AS duration_ms,
+  CAST(output_size_bytes AS {{ dbt.type_bigint() }}) AS output_size_bytes,
+  CAST(duration_ms AS {{ dbt.type_bigint() }}) AS duration_ms,
   status,
   error_type,
   error_message,
-  CAST(retry_count AS BIGINT) AS retry_count
+  CAST(retry_count AS {{ dbt.type_bigint() }}) AS retry_count
 FROM base
