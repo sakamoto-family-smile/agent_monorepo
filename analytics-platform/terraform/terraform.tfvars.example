@@ -1,0 +1,27 @@
+################################################################################
+# terraform.tfvars 例。`cp terraform.tfvars.example terraform.tfvars` で複製し、
+# 実際の値で埋めること。`terraform.tfvars` は git に commit しない (.gitignore 済)。
+################################################################################
+
+# 必須
+project_id = "your-gcp-project-id"
+
+# 推奨デフォルト (必要に応じて上書き)
+region              = "us-central1"
+bq_location         = "US"
+gcs_bucket_location = "US"
+name_prefix         = "analytics"
+
+# ライフサイクル (本番は default のままで OK、開発環境は短く)
+# lifecycle_nearline_days = 30
+# lifecycle_coldline_days = 90
+# lifecycle_archive_days  = 365
+# lifecycle_dead_letter_delete_days = 90
+
+# 初回 apply 時に GCS にデータが無いと external table 作成が失敗するため、
+# まず create_bq_external_table = false で apply → consumer が JSONL を流し始めた後に
+# true に切り替えて再 apply する手順が安全。
+create_bq_external_table = true
+
+# 開発環境で terraform destroy したい場合のみ true (本番は false 推奨)
+gcs_force_destroy = false
