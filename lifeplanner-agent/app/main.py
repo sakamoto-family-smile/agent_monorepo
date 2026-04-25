@@ -5,7 +5,11 @@ from pathlib import Path
 from config import settings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from instrumentation import setup_observability, shutdown_observability
+from instrumentation import (
+    setup_observability,
+    shutdown_observability,
+    start_upload_loop,
+)
 from services.database import close_db, init_db, init_engine
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
@@ -26,6 +30,7 @@ async def lifespan(app: FastAPI):
     if settings.app_env == "local":
         await init_db()
     setup_observability()
+    await start_upload_loop()
     logger.info("Lifeplanner Agent started (env=%s)", settings.app_env)
     try:
         yield

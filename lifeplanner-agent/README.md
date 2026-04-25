@@ -147,6 +147,12 @@ curl -X POST http://127.0.0.1:8001/api/chat \
 | `ANALYTICS_COMPRESS` | `false` | JSONL を gzip するか |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | - | Phoenix / Langfuse OTLP HTTP endpoint (未設定時は span 未送信、業務ログは出る) |
 | `OTEL_SAMPLING_RATIO` | `1.0` | OTel サンプリング率 0.0〜1.0 |
+| `ANALYTICS_STORAGE_BACKEND` | `local` | `gcs` で Cloud Run + Workload Identity 経由 GCS 連携 (Phase 5 Step 10) |
+| `ANALYTICS_GCS_BUCKET` | - | `gcs` backend 時必須。`analytics-platform/terraform` の `raw_bucket` 出力値 |
+| `ANALYTICS_GCS_RAW_PREFIX` | `uploaded/` | `gcs` backend 時の raw JSONL prefix |
+| `ANALYTICS_GCS_PAYLOAD_PREFIX` | `payloads/` | `gcs` backend 時の大容量 payload prefix |
+| `ANALYTICS_GCP_PROJECT` | (ADC から自動推論) | `gcs` backend 時の GCP project id (Workload Identity なら省略可) |
+| `ANALYTICS_UPLOAD_INTERVAL_SECONDS` | `300` | 周期 upload 間隔。0 以下なら shutdown 時のみ upload |
 
 ### 0.7 LINE Bot セットアップ (Phase 3b)
 
@@ -244,6 +250,46 @@ curl -X POST http://127.0.0.1:8001/api/chat \
 |---|---|
 | `true` (既定) | `RotatingFileSink` で JSONL を書き出す |
 | `false` | `NoOpSink` に置換、JSONL は一切書かれない (テスト用 / 緊急遮断用) |
+
+### ローカル / GCP backend 切替 (Phase 5 Step 10)
+
+| `ANALYTICS_STORAGE_BACKEND` | 挙動 |
+|---|---|
+| `local` (既定) | JSONL は `ANALYTICS_DATA_DIR/raw/` に書かれ、`LocalUploader` が定期的に `uploaded/` へ move |
+| `gcs` | JSONL は同じく local FS にバッファされた後、`LocalUploader` が `GCSTransport` で `gs://${ANALYTICS_GCS_BUCKET}/${ANALYTICS_GCS_RAW_PREFIX}` に upload。大容量 payload も `GCSPayloadWriter` で直接 GCS に書く |
+
+`gcs` 切替に必要なコード変更はゼロ。`.env` (Cloud Run なら環境変数) で:
+
+```bash
+ANALYTICS_STORAGE_BACKEND=gcs
+ANALYTICS_GCS_BUCKET=analytics-raw           # terraform output raw_bucket
+ANALYTICS_GCP_PROJECT=your-gcp-project       # 省略時 ADC から推論
+ANALYTICS_GCS_RAW_PREFIX=uploaded/
+ANALYTICS_GCS_PAYLOAD_PREFIX=payloads/
+ANALYTICS_UPLOAD_INTERVAL_SECONDS=300
+```
+
+#### Cloud Run + Workload Identity デプロイ手順
+
+```bash
+# 1. analytics-platform 側で TF apply 済 + sa-uploader が作られている前提
+SA="sa-uploader@${PROJECT}.iam.gserviceaccount.com"
+
+# 2. Cloud Run service にこの SA を紐付ける
+gcloud run services update lifeplanner-agent \
+  --region=us-central1 --service-account="${SA}"
+
+# 3. env を反映 (terraform output env_for_dotenv の値を流用)
+gcloud run services update lifeplanner-agent --region=us-central1 \
+  --update-env-vars=ANALYTICS_STORAGE_BACKEND=gcs,ANALYTICS_GCS_BUCKET=analytics-raw,ANALYTICS_GCP_PROJECT=${PROJECT}
+
+# 4. 動作確認
+#   - Cloud Logging で `[upload] cycle: uploaded=N` ログ
+#   - GCS bucket に uploaded/service_name=lifeplanner-agent/... が増える
+#   - BQ: SELECT COUNT(*) FROM analytics_raw.agent_events_external WHERE service_name='lifeplanner-agent'
+```
+
+`sa-uploader` には `analytics-platform/terraform/iam.tf` で raw / payloads / dead_letter bucket への `objectAdmin` が事前に紐付いている。
 
 ### 実機検証スクリプト
 
