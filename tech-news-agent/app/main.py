@@ -6,7 +6,11 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from instrumentation import setup_observability, shutdown_observability
+from instrumentation import (
+    setup_observability,
+    shutdown_observability,
+    start_upload_loop,
+)
 from routes.health import router as health_router
 from routes.pipeline import get_dedup_repo
 from routes.pipeline import router as pipeline_router
@@ -20,6 +24,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_observability()
+    await start_upload_loop()
     repo = get_dedup_repo()
     await repo.initialize()
     logger.info(
