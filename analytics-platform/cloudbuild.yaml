@@ -1,0 +1,59 @@
+# Cloud Build pipeline for analytics-platform dbt Cloud Run Job image.
+#
+# 使い方 (手動):
+#   gcloud builds submit \
+#     --config analytics-platform/cloudbuild.yaml \
+#     --substitutions=_LOCATION=us-central1,_REPO=analytics-platform,_IMAGE=dbt \
+#     analytics-platform/
+#
+# Cloud Build Trigger で main 後の自動 build もこの設定で動く。
+#
+# 必要な substitutions:
+#   _LOCATION  Artifact Registry の region (例: us-central1, asia-northeast1)
+#   _REPO      Artifact Registry リポジトリ名 (要事前作成)
+#   _IMAGE     image 名 (default: analytics-platform-dbt)
+#
+# 出力 image:
+#   ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${SHORT_SHA}
+#   ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+
+substitutions:
+  _LOCATION: us-central1
+  _REPO: analytics-platform
+  _IMAGE: analytics-platform-dbt
+
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY
+
+images:
+  - "${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${SHORT_SHA}"
+  - "${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest"
+
+steps:
+  # 1. BuildKit でマルチステージ build (キャッシュ活用)
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - "--tag=${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${SHORT_SHA}"
+      - "--tag=${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest"
+      - "--cache-from=${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest"
+      - "--build-arg=BUILDKIT_INLINE_CACHE=1"
+      - "--file=Dockerfile"
+      - "."
+
+  # 2. dbt parse の sanity check (image が import path 解決できるか確認)
+  - id: smoke-parse
+    name: "${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${SHORT_SHA}"
+    env:
+      - "ANALYTICS_BQ_PROJECT=cloudbuild-smoke"
+      - "ANALYTICS_BQ_LOCATION=US"
+      - "DBT_TARGET=gcp"
+    args:
+      - parse
+
+# build に失敗したら fail-fast。タイムアウトは 20 分。
+timeout: 1200s
