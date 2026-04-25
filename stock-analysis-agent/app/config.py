@@ -47,6 +47,25 @@ class Settings:
     otel_sampling_ratio: float = float(os.getenv("OTEL_SAMPLING_RATIO", "1.0"))
     service_version: str = os.getenv("SERVICE_VERSION", "0.1.0")
 
+    # ── 分析基盤 GCP backend (Phase 5 Step 10) ──
+    # `local` (既定) | `gcs`。`gcs` のとき content payload と JSONL の upload 先が
+    # GCS に切り替わる。残りの GCS 設定は analytics_platform.gcp_config が env から読む:
+    #   ANALYTICS_GCS_BUCKET / ANALYTICS_GCS_RAW_PREFIX / ANALYTICS_GCS_PAYLOAD_PREFIX
+    #   ANALYTICS_GCP_PROJECT
+    analytics_storage_backend: str = os.getenv(
+        "ANALYTICS_STORAGE_BACKEND", "local"
+    ).lower()
+    # 周期的に LocalUploader.run_once() を回す間隔 (秒)。0 以下なら定期 upload 無効
+    # (shutdown 時のみ 1 回 upload する)。`gcs` backend のときに意味を持つ。
+    analytics_upload_interval_seconds: int = int(
+        os.getenv("ANALYTICS_UPLOAD_INTERVAL_SECONDS", "300")
+    )
+    # LocalUploader の min_age_seconds。書込直後の file を upload しないためのヒステリシス。
+    # default 30 秒。テストでは 0 にすると即時 upload できる。
+    analytics_uploader_min_age_seconds: float = float(
+        os.getenv("ANALYTICS_UPLOADER_MIN_AGE_SECONDS", "30")
+    )
+
     # ── LINE Bot 連携 (Phase B: stateless) ──
     # LINE Developers Console > Messaging API > 「チャネル基本設定」「Messaging API」
     # から取得。両方未設定だと /api/line/webhook は 503 を返す。
