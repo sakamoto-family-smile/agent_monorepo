@@ -22,7 +22,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# 本番（GCS / BigQuery 駆動）。analytics-platform 側の `[gcs]` extra も
+# 明示的に有効化することで、path source 経由で GCS 依存が確実に引き継がれる。
 gcs = [
+    "analytics-platform[gcs]",
     "google-cloud-storage>=2.18.0",
     "google-cloud-bigquery>=3.25.0",
 ]

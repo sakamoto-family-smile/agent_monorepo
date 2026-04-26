@@ -451,10 +451,12 @@ LINE User ID は Bot（Messaging API チャネル）ごとに異なる。複数 
 
 ### 9.3 模擬試験モード
 
-| ゴール | 問題数 | 制限時間 | 合格基準 |
+| ゴール | 問題数 | 制限時間 | 合格基準（暫定） |
 |---|---|---|---|
 | 仮免 | 50 問 | 30 分 | 90%（45 問正解） |
 | 本免 | 95 問 | 50 分 | 90%（86 問正解） |
+
+> **注**: 本免の実試験は一般に「100 問満点中 90 点以上で合格」（文章問題 90 問 × 1 点 + イラスト問題 5 問 × 2 点）と運用されている。本サービスはイラスト問題（複合配点）を Phase 1〜5 では採用せず、文章問題ベースで合格率を 90% 相当に揃えている。配点を含む完全な再現は Phase 6 以降の検討事項とし、合格基準の根拠は [docs/DATA_SOURCES.md](./DATA_SOURCES.md) の各都道府県警察 / 警察庁公表資料への参照と整合させる（Phase 0 で要確認）。
 
 - セッション `expires_at` で制限時間を管理
 - LINE では 1 問ずつ Quick Reply で進行
@@ -673,17 +675,18 @@ quiz_session (root)
 
 ```yaml
 mcp_servers:
-  - name: "driving-license-bot/law-mcp"
+  # 既存 inventory のフォーマット（kanie-lab `google-search-mcp` 等）に合わせ、
+  # name はベアネーム、プロジェクト識別は tags で行う。
+  - name: "law-mcp"
     version: "0.1.0"
-    source: "internal"
+    source: "local"
     config_path: "driving-license-bot/.mcp.json"
     server_key: "law"
-    tags: ["driving-license", "law"]
-  - name: "driving-license-bot/signs-mcp"
-    # ... 同様に signs / question-bank / firestore / bigquery
+    tags: ["law", "e-gov", "driving-license"]
+  # ... 同様に signs-mcp / question-bank-mcp / firestore-mcp / bigquery-mcp
 ```
 
-依存パッケージ（`line-bot-sdk`、`google-cloud-firestore`、`google-cloud-bigquery`、`anthropic` 等）も `npm_packages` / `python_packages` に登録し、CVE 監視対象に含める。
+依存 Python パッケージ（`google-cloud-firestore`、`google-cloud-bigquery`、`google-cloud-aiplatform`、`google-cloud-tasks`、`google-cloud-secret-manager` など）も `python_packages` に登録し、CVE 監視対象に含める。`line-bot-sdk` / `anthropic` は他エージェント由来で既に登録済。
 
 #### 15.2.2 Scan target 登録
 
