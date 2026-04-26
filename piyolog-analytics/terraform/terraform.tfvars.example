@@ -1,10 +1,11 @@
 ################################################################################
 # terraform.tfvars 例。`cp terraform.tfvars.example terraform.tfvars` で複製し、
 # 実際の値で埋めること。`terraform.tfvars` は git に commit しない (.gitignore 済)。
+#
+# 注意: `project_id` はこのファイルでは指定しない。env で渡す。
+#       `export TF_VAR_project_id=$PROJECT_ID` (Terraform が自動で var に流す)
+#       これにより同じ tfvars で複数 project (dev / prod) を切替可能。
 ################################################################################
-
-# 必須
-project_id = "your-gcp-project-id"
 
 # 推奨デフォルト (必要に応じて上書き)
 region      = "us-central1"

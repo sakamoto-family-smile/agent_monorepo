@@ -42,12 +42,14 @@ gcloud services enable \
 
 ## Apply 手順
 
+`project_id` は env で渡し、tfvars に書かない (複数 project 切替を簡単にするため)。
+
 ```bash
 cd piyolog-analytics
 
-# 1. tfvars を準備
+# 1. tfvars を準備 (project_id は env で渡すので、tfvars には書かない)
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-$EDITOR terraform/terraform.tfvars     # project_id を埋める
+# region / name_prefix / cloud_sql_* 等を必要なら編集
 
 # 2. backend.tf を作る (state を GCS で管理)
 cat >terraform/backend.tf <<EOF
@@ -59,11 +61,24 @@ terraform {
 }
 EOF
 
-# 3. init / plan / apply
+# 3. project_id を env で渡しつつ init / plan / apply
+export TF_VAR_project_id="$PROJECT"
 make tf-init
 make tf-plan
 make tf-apply
 ```
+
+**dev / prod 切替**:
+
+```bash
+# dev project
+TF_VAR_project_id=my-dev-project make tf-plan
+
+# prod project
+TF_VAR_project_id=my-prod-project make tf-plan
+```
+
+同じ tfvars + backend.tf で project を切り替えられる (state は GCS bucket 名 + prefix が dev/prod で別になる前提)。
 
 ---
 
@@ -97,6 +112,102 @@ PIYOLOG_FAMILY_USER_IDS="Uxxx,Uyyy" \
 PIYOLOG_IMAGE_TAG=latest \
 make deploy-cloud-run
 ```
+
+---
+
+## CI: PR plan-only + 週次 drift 検知
+
+`apply` 自動化は意図せぬ destroy のリスクがあるため、CI は **plan-only** + **drift 通知** に留める方針:
+
+| 用途 | yaml | trigger |
+|---|---|---|
+| PR で plan を確認 | `terraform/cloudbuild-plan.yaml` | Pull request イベント |
+| 週次 drift 検知 | `terraform/cloudbuild-drift.yaml` | Cloud Scheduler (cron) |
+
+apply は引き続き手動 (`make tf-apply` をローカルから実行)。
+
+### 1. Cloud Build SA を専用に作る (read-only)
+
+```bash
+PROJECT="your-gcp-project-id"
+gcloud iam service-accounts create tf-cloud-build-sa --project=$PROJECT
+
+SA="tf-cloud-build-sa@${PROJECT}.iam.gserviceaccount.com"
+for role in \
+  roles/storage.objectViewer \
+  roles/cloudsql.viewer \
+  roles/secretmanager.viewer \
+  roles/iam.serviceAccountViewer \
+  roles/artifactregistry.reader \
+  roles/logging.logWriter \
+; do
+  gcloud projects add-iam-policy-binding $PROJECT \
+    --member="serviceAccount:${SA}" --role="$role"
+done
+
+# state bucket への read 権限 (state 取得が必要なため)
+gsutil iam ch serviceAccount:${SA}:objectViewer gs://${PROJECT}-tfstate
+```
+
+> apply 権限 (writer / admin) は付与しない。これにより万が一の誤発火でも実害ゼロ。
+
+### 2. PR plan-only trigger
+
+```bash
+gcloud builds triggers create github \
+  --project=$PROJECT \
+  --name=piyolog-analytics-tf-plan \
+  --repo-name=agent_monorepo \
+  --repo-owner=sakamoto-family-smile \
+  --pull-request-pattern="^main$" \
+  --build-config=piyolog-analytics/terraform/cloudbuild-plan.yaml \
+  --service-account="projects/${PROJECT}/serviceAccounts/${SA}" \
+  --substitutions="_TF_PROJECT_ID=${PROJECT},_TF_STATE_BUCKET=${PROJECT}-tfstate" \
+  --included-files="piyolog-analytics/terraform/**"
+```
+
+`--included-files` を指定して terraform/ 以下が変わった PR だけ走らせる (アプリ変更だけの PR では発火しない)。
+
+### 3. 週次 drift 検知 trigger
+
+```bash
+# Cloud Build trigger を manual で作る
+gcloud builds triggers create manual \
+  --project=$PROJECT \
+  --name=piyolog-analytics-tf-drift \
+  --repo=https://github.com/sakamoto-family-smile/agent_monorepo \
+  --repo-type=GITHUB \
+  --branch=main \
+  --build-config=piyolog-analytics/terraform/cloudbuild-drift.yaml \
+  --service-account="projects/${PROJECT}/serviceAccounts/${SA}" \
+  --substitutions="_TF_PROJECT_ID=${PROJECT},_TF_STATE_BUCKET=${PROJECT}-tfstate"
+
+# Cloud Scheduler から週次起動 (毎週月曜 09:00 JST)
+TRIGGER_ID=$(gcloud builds triggers describe piyolog-analytics-tf-drift \
+  --project=$PROJECT --format='value(id)')
+
+gcloud scheduler jobs create http piyolog-tf-drift-weekly \
+  --project=$PROJECT \
+  --location=us-central1 \
+  --schedule="0 9 * * 1" \
+  --time-zone="Asia/Tokyo" \
+  --uri="https://cloudbuild.googleapis.com/v1/projects/${PROJECT}/triggers/${TRIGGER_ID}:run" \
+  --http-method=POST \
+  --headers="Content-Type=application/json" \
+  --message-body='{"branchName":"main"}' \
+  --oauth-service-account-email="${SA}"
+```
+
+### 4. 失敗通知
+
+Cloud Build → Pub/Sub `cloud-builds` topic を購読する小さな関数を立てて Slack に投げるのが定番。`piyolog-analytics-tf-drift` の build status が FAILURE (= drift 検知 = exit 2) のときだけ通知すれば、drift 発生時にだけ Slack が鳴る。
+
+これで:
+- **手動変更が紛れ込んだら週次で気付ける**
+- **apply は自分で打つので destroy 事故も防げる**
+- **Cloud Build SA は read-only なので万が一の誤発火でも実害ゼロ**
+
+の 3 点が揃う。
 
 ---
 

@@ -1,0 +1,91 @@
+# Drift detection Cloud Build pipeline.
+#
+# 用途:
+#   Cloud Scheduler から定期実行 (例: 毎週月曜 09:00 JST) し、
+#   `terraform plan -detailed-exitcode` を打つ。exit code:
+#     0 = drift なし (no changes)
+#     1 = error
+#     2 = drift あり (= 手動変更が混入している)
+#   exit=2 のときに Cloud Build を fail させて Cloud Build の通知設定 (email / Slack)
+#   を発火させる。
+#
+# Trigger 設定:
+#   - Event:    Manual + Cloud Scheduler
+#   - Schedule: 0 9 * * 1   (毎週月曜 09:00 JST)
+#   - Config:   piyolog-analytics/terraform/cloudbuild-drift.yaml
+#   - Substitutions:
+#       _TF_PROJECT_ID   = ${PROJECT_ID}
+#       _TF_STATE_BUCKET = ${PROJECT_ID}-tfstate
+#   - SA:       同上 (read-only でよい)
+#
+# Cloud Build trigger を Pub/Sub 通知に接続すれば失敗時に Slack に飛ばせる。
+
+substitutions:
+  _TF_PROJECT_ID: ""
+  _TF_STATE_BUCKET: ""
+  _TF_VERSION: "1.10.3"
+  _TF_DIR: piyolog-analytics/terraform
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - id: gen-backend
+    name: alpine
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -e
+        if [ -z "${_TF_PROJECT_ID}" ] || [ -z "${_TF_STATE_BUCKET}" ]; then
+          echo "ERROR: _TF_PROJECT_ID / _TF_STATE_BUCKET substitutions are required"
+          exit 1
+        fi
+        cat >${_TF_DIR}/backend.tf <<EOF
+        terraform {
+          backend "gcs" {
+            bucket = "${_TF_STATE_BUCKET}"
+            prefix = "piyolog-analytics"
+          }
+        }
+        EOF
+
+  - id: drift-check
+    name: hashicorp/terraform:${_TF_VERSION}
+    entrypoint: sh
+    env:
+      - "TF_VAR_project_id=${_TF_PROJECT_ID}"
+      - "TF_IN_AUTOMATION=1"
+      - "TF_INPUT=0"
+    args:
+      - -c
+      - |
+        set -e
+        cd ${_TF_DIR}
+        terraform init -input=false -no-color
+        # -detailed-exitcode: 0=no changes / 1=error / 2=drift
+        set +e
+        terraform plan -no-color -input=false -detailed-exitcode -out=tfplan
+        EXIT=$?
+        set -e
+        case $EXIT in
+          0)
+            echo "[drift] OK: state matches infra"
+            ;;
+          1)
+            echo "[drift] ERROR: terraform plan failed"
+            exit 1
+            ;;
+          2)
+            echo "[drift] DRIFT DETECTED — manual changes need reconciliation"
+            echo
+            terraform show -no-color tfplan | head -200
+            exit 2
+            ;;
+          *)
+            echo "[drift] unexpected exit code: $EXIT"
+            exit 1
+            ;;
+        esac
+
+timeout: 600s
