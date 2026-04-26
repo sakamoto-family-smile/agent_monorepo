@@ -58,10 +58,44 @@ make run
 
 ---
 
-### 0.5.1 Cloud Run デプロイ (B 案 Step 2: 本格 GCP 化)
+### 0.5.1 Cloud Run デプロイ (B 案 Step 2-3: 本格 GCP 化)
 
-> **ステータス**: B2 (本 PR) は Docker 化 + Cloud Build + デプロイ scripts まで。Cloud SQL や IAM (`sa-piyolog`) は B3 (Terraform) で建てる。
-> 開通までの完全手順は B4 で実施。
+> **ステータス**: B2 (Docker 化 + Cloud Build + デプロイ scripts) ✅、B3 (Terraform で Cloud SQL / Secret Manager / sa-piyolog) ✅。完全開通 (B4: LINE webhook URL 切替) は次 PR。
+
+#### Step B3: Terraform で前提インフラを建てる
+
+```bash
+# 1. state バケット (一度だけ) と必要 API
+gsutil mb -p $PROJECT -l US gs://${PROJECT}-tfstate || true
+gsutil versioning set on gs://${PROJECT}-tfstate
+gcloud services enable sqladmin.googleapis.com secretmanager.googleapis.com \
+  artifactregistry.googleapis.com run.googleapis.com cloudbuild.googleapis.com \
+  iam.googleapis.com iamcredentials.googleapis.com --project=$PROJECT
+
+# 2. tfvars + backend.tf 準備
+cd terraform
+cp terraform.tfvars.example terraform.tfvars        # project_id 等を埋める
+cat >backend.tf <<EOF
+terraform { backend "gcs" { bucket = "${PROJECT}-tfstate" prefix = "piyolog-analytics" } }
+EOF
+
+# 3. apply (Cloud SQL + Secret Manager 3 個 + sa-piyolog + Artifact Registry が立ち上がる)
+cd ..
+make tf-init
+make tf-plan
+make tf-apply
+
+# 4. LINE secrets を投入 (LINE Developers Console から取得した値)
+echo -n "$LINE_CHANNEL_SECRET" | \
+  gcloud secrets versions add piyolog-line-channel-secret --data-file=- --project=$PROJECT
+echo -n "$LINE_CHANNEL_ACCESS_TOKEN" | \
+  gcloud secrets versions add piyolog-line-channel-access-token --data-file=- --project=$PROJECT
+
+# 5. deploy_cloud_run.sh 用の env を一括出力
+make tf-output-env                                   # → ../.env.deploy
+```
+
+詳細は [`terraform/README.md`](./terraform/README.md) 参照。
 
 #### Image build (ローカル)
 
@@ -106,12 +140,14 @@ make cloudbuild-submit
   - `piyolog-database-url` (`postgresql+asyncpg://user:pass@/dbname?host=/cloudsql/<conn>`)
 
 ```bash
-PIYOLOG_GCP_PROJECT=$PROJECT \
-PIYOLOG_AR_LOCATION=us-central1 \
-PIYOLOG_AR_REPO=piyolog-analytics \
+# B3 で出した env を読み込み (project / region / sa / cloud_sql_instance を自動セット)
+set -a; source .env.deploy; set +a
+
+# image を Cloud Build で push
+PIYOLOG_GCP_PROJECT=$PROJECT make cloudbuild-submit
+
+# 残りの env (LINE 関連 + 家族 userId) を渡してデプロイ
 PIYOLOG_IMAGE_TAG=latest \
-PIYOLOG_CLOUD_SQL_INSTANCE="$PROJECT:us-central1:piyolog" \
-PIYOLOG_CLOUD_RUN_SA="sa-piyolog@$PROJECT.iam.gserviceaccount.com" \
 PIYOLOG_FAMILY_USER_IDS="Uxxx,Uyyy" \
 PIYOLOG_FAMILY_ID=default \
 make deploy-cloud-run

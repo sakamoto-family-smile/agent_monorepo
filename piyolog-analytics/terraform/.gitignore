@@ -1,0 +1,18 @@
+# Terraform 内部ファイル
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# 個別環境固有 (秘匿の可能性があるため commit 禁止)
+terraform.tfvars
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# crash log
+crash.log
+crash.*.log
