@@ -1,4 +1,10 @@
-.PHONY: install test lint format check run migrate migrate-down migrate-revision
+.PHONY: install test lint format check run migrate migrate-down migrate-revision \
+        docker-build docker-run docker-shell cloudbuild-submit deploy-cloud-run help
+
+IMAGE_NAME ?= piyolog-analytics
+IMAGE_TAG ?= local
+# build context = リポジトリルート (path dep `../analytics-platform` を解決するため)
+REPO_ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || cd .. && pwd)
 
 install:
 	uv sync
@@ -30,3 +36,59 @@ migrate-down:
 # 例: make migrate-revision MSG="add column foo"
 migrate-revision:
 	uv run alembic revision --autogenerate -m "$${MSG:?set MSG=...}"
+
+# ---- Docker / Cloud Run ----
+# build context は repo root (path dep `../analytics-platform` を解決するため)。
+# `make docker-build` は自動的に repo root から build を打つ。
+docker-build:
+	cd $(REPO_ROOT) && DOCKER_BUILDKIT=1 docker build \
+	  -f piyolog-analytics/Dockerfile \
+	  -t $(IMAGE_NAME):$(IMAGE_TAG) \
+	  .
+
+# ローカルで起動して LINE webhook を ngrok で公開する用。
+# DATABASE_URL を渡さないと SQLite ファイルベース (data/piyolog.db) で動く。
+docker-run:
+	docker run --rm -p 8200:8200 \
+	  -e LINE_CHANNEL_SECRET \
+	  -e LINE_CHANNEL_ACCESS_TOKEN \
+	  -e FAMILY_USER_IDS \
+	  -e FAMILY_ID \
+	  -e APP_ENV \
+	  -e DATABASE_URL \
+	  -e DB_AUTO_CREATE \
+	  $(IMAGE_NAME):$(IMAGE_TAG)
+
+docker-shell:
+	docker run --rm -it --entrypoint sh $(IMAGE_NAME):$(IMAGE_TAG)
+
+# Cloud Build 経由で Artifact Registry に push。
+# 例: PIYOLOG_GCP_PROJECT=youyaku-ai PIYOLOG_AR_LOCATION=us-central1 make cloudbuild-submit
+cloudbuild-submit:
+	cd $(REPO_ROOT) && gcloud builds submit \
+	  --project=$${PIYOLOG_GCP_PROJECT:?set PIYOLOG_GCP_PROJECT} \
+	  --config=piyolog-analytics/cloudbuild.yaml \
+	  --substitutions=_LOCATION=$${PIYOLOG_AR_LOCATION:-us-central1},_REPO=$${PIYOLOG_AR_REPO:-piyolog-analytics} \
+	  .
+
+# Cloud Run service にデプロイ。詳細 env は scripts/deploy_cloud_run.sh のヘッダ参照。
+deploy-cloud-run:
+	bash scripts/deploy_cloud_run.sh
+
+help:
+	@echo "Targets:"
+	@echo "  install              - uv sync"
+	@echo "  test / lint / format / check"
+	@echo "  run                  - 直接 uvicorn でローカル起動"
+	@echo ""
+	@echo "Targets (DB / Alembic):"
+	@echo "  migrate              - alembic upgrade head"
+	@echo "  migrate-down         - alembic downgrade -1"
+	@echo "  migrate-revision MSG=... - 新規 migration"
+	@echo ""
+	@echo "Targets (Docker / Cloud Run、Step B2):"
+	@echo "  docker-build         - $(IMAGE_NAME):$(IMAGE_TAG) を build (context = repo root)"
+	@echo "  docker-run           - container 起動 (ローカル + env で接続情報を渡す)"
+	@echo "  docker-shell         - container 内 shell でデバッグ"
+	@echo "  cloudbuild-submit    - Cloud Build → Artifact Registry に push"
+	@echo "  deploy-cloud-run     - Cloud Run service にデプロイ (要 secrets / Cloud SQL)"

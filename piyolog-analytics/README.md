@@ -58,6 +58,75 @@ make run
 
 ---
 
+### 0.5.1 Cloud Run デプロイ (B 案 Step 2: 本格 GCP 化)
+
+> **ステータス**: B2 (本 PR) は Docker 化 + Cloud Build + デプロイ scripts まで。Cloud SQL や IAM (`sa-piyolog`) は B3 (Terraform) で建てる。
+> 開通までの完全手順は B4 で実施。
+
+#### Image build (ローカル)
+
+`pyproject.toml` に path dep (`../analytics-platform`) があるため、build context は **リポジトリルート** で固定:
+
+```bash
+make docker-build               # = piyolog-analytics:local
+
+# ローカル起動 (SQLite + 自分の LINE channel secret)
+LINE_CHANNEL_SECRET=... \
+LINE_CHANNEL_ACCESS_TOKEN=... \
+FAMILY_USER_IDS=Uxxx,Uyyy \
+make docker-run
+```
+
+#### Cloud Build → Artifact Registry
+
+```bash
+# 事前: Artifact Registry repo を作成
+gcloud artifacts repositories create piyolog-analytics \
+  --repository-format=docker --location=us-central1 \
+  --project=$PROJECT
+
+# Cloud Build 経由で push (リポジトリルートを context に submit する)
+PIYOLOG_GCP_PROJECT=$PROJECT \
+PIYOLOG_AR_LOCATION=us-central1 \
+PIYOLOG_AR_REPO=piyolog-analytics \
+make cloudbuild-submit
+# → ${LOCATION}-docker.pkg.dev/${PROJECT}/piyolog-analytics/piyolog-analytics:{SHORT_SHA, latest}
+```
+
+#### Cloud Run service デプロイ
+
+前提 (B3 Terraform で作成想定):
+- Cloud SQL (Postgres) instance
+- Service Account `sa-piyolog@${PROJECT}.iam.gserviceaccount.com`
+  - `roles/cloudsql.client`
+  - `roles/secretmanager.secretAccessor`
+- Secret Manager に 3 つのシークレット:
+  - `piyolog-line-channel-secret` (LINE Messaging API channel secret)
+  - `piyolog-line-channel-access-token` (LINE Messaging API access token)
+  - `piyolog-database-url` (`postgresql+asyncpg://user:pass@/dbname?host=/cloudsql/<conn>`)
+
+```bash
+PIYOLOG_GCP_PROJECT=$PROJECT \
+PIYOLOG_AR_LOCATION=us-central1 \
+PIYOLOG_AR_REPO=piyolog-analytics \
+PIYOLOG_IMAGE_TAG=latest \
+PIYOLOG_CLOUD_SQL_INSTANCE="$PROJECT:us-central1:piyolog" \
+PIYOLOG_CLOUD_RUN_SA="sa-piyolog@$PROJECT.iam.gserviceaccount.com" \
+PIYOLOG_FAMILY_USER_IDS="Uxxx,Uyyy" \
+PIYOLOG_FAMILY_ID=default \
+make deploy-cloud-run
+```
+
+`deploy_cloud_run.sh` は:
+- Cloud SQL connector を `--add-cloudsql-instances` で attach
+- Secret Manager の 3 つを env としてマウント
+- 残りの平文 env (`APP_ENV`, `FAMILY_ID`, `FAMILY_USER_IDS`, `ANALYTICS_*`) は `--update-env-vars` で渡す
+- `--allow-unauthenticated` (LINE webhook はアプリ側で HMAC 検証するため、GCP 認証は不要)
+
+デプロイ完了時に Cloud Run service URL と LINE webhook URL (`${URL}/api/line/webhook`) が出力される。LINE Developers Console の Webhook URL に登録すれば開通。
+
+---
+
 ### 0.5 DB 切替 (B 案 Step 1: Postgres 化)
 
 `DATABASE_URL` で SQLAlchemy URL を指定する。同一コードが両 backend で動く。

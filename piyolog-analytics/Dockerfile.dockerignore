@@ -1,0 +1,47 @@
+# piyolog-analytics の Dockerfile はリポジトリルートを context にする (path dep のため)。
+# このファイルは BuildKit が `<Dockerfile>.dockerignore` 規約で自動拾いする。
+
+# --- 他エージェントのディレクトリは丸ごと除外 (build context に持ち込まない) ---
+agent-system-1/
+agent-system-2/
+hotcook-agent/
+kanie-lab-agent/
+lifeplanner-agent/
+llm-client/
+security-platform/
+stock-analysis-agent/
+tech-news-agent/
+
+# --- analytics-platform は使うが、不要なものは除外 ---
+analytics-platform/.venv/
+analytics-platform/data/
+analytics-platform/.pytest_cache/
+analytics-platform/.ruff_cache/
+analytics-platform/dbt/target/
+analytics-platform/dbt/logs/
+analytics-platform/tests/
+analytics-platform/.git/
+
+# --- piyolog-analytics 自身の不要物 ---
+piyolog-analytics/.venv/
+piyolog-analytics/data/
+piyolog-analytics/.pytest_cache/
+piyolog-analytics/.ruff_cache/
+piyolog-analytics/tests/
+piyolog-analytics/docs/
+piyolog-analytics/docker-compose.yml
+piyolog-analytics/Dockerfile
+piyolog-analytics/Dockerfile.dockerignore
+piyolog-analytics/.env
+piyolog-analytics/.env.example
+piyolog-analytics/Makefile
+
+# --- リポジトリ全体共通の除外 ---
+.git/
+.github/
+.claude/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.DS_Store
+**/.DS_Store
