@@ -1,6 +1,7 @@
 .PHONY: install test lint format check run migrate migrate-down migrate-revision \
         docker-build docker-run docker-shell cloudbuild-submit deploy-cloud-run \
-        tf-init tf-fmt tf-fmt-check tf-validate tf-plan tf-apply tf-output-env help
+        tf-init tf-fmt tf-fmt-check tf-validate tf-plan tf-apply tf-output-env \
+        bootstrap-gcp help
 
 IMAGE_NAME ?= piyolog-analytics
 IMAGE_TAG ?= local
@@ -80,6 +81,14 @@ cloudbuild-submit:
 # Cloud Run service にデプロイ。詳細 env は scripts/deploy_cloud_run.sh のヘッダ参照。
 deploy-cloud-run:
 	bash scripts/deploy_cloud_run.sh
+
+# ---- B4 (実機開通) ----
+# `bootstrap-gcp` は GCP project の最初の準備 (state bucket + API enable) を行う。
+# 必須 env: PIYOLOG_GCP_PROJECT
+# 実行後、TF apply → image push → Cloud Run deploy → LINE Webhook 登録 の順で進む。
+# 詳細は README §0.5.2 「開通手順 (B4)」を参照。
+bootstrap-gcp:
+	bash scripts/bootstrap_gcp.sh
 
 # ---- Terraform IaC (Step B3) ----
 # Cloud SQL / Secret Manager / sa-piyolog / Artifact Registry を Terraform で管理。

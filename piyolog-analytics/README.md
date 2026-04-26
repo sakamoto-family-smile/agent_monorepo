@@ -189,6 +189,142 @@ make run
 
 ---
 
+### 0.5.2 開通手順 (B 案 Step 4: 実機 dogfood)
+
+家族の LINE bot として常時稼働させるための **9 ステップ walkthrough**。各ステップは idempotent なので途中で詰まったら同じコマンドを再実行できる。
+
+#### Step 1. GCP project の準備
+
+```bash
+export PROJECT="your-gcp-project-id"
+gcloud config set project "$PROJECT"
+gcloud auth login
+gcloud auth application-default login
+
+# state bucket + 必要 API をまとめて有効化
+PIYOLOG_GCP_PROJECT="$PROJECT" make bootstrap-gcp
+```
+
+#### Step 2. Terraform でインフラ作成 (Cloud SQL + Secret Manager + SA + Artifact Registry)
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars      # region / name_prefix を必要なら編集
+cat >backend.tf <<EOF
+terraform {
+  backend "gcs" {
+    bucket = "${PROJECT}-tfstate"
+    prefix = "piyolog-analytics"
+  }
+}
+EOF
+cd ..
+
+export TF_VAR_project_id="$PROJECT"
+make tf-init
+make tf-plan       # 内容確認 (Cloud SQL instance / 3 secrets / SA / AR repo が plan に出る)
+make tf-apply      # 5〜8 分かかる (Cloud SQL の起動が遅い)
+```
+
+#### Step 3. LINE Messaging API channel の作成
+
+[LINE Developers Console](https://developers.line.biz/console/) で:
+1. プロバイダー作成 (家族用)
+2. **Messaging API** チャンネル作成
+3. 「Messaging API設定」タブで:
+   - `Channel access token (long-lived)` を発行
+   - `Channel secret` を「チャンネル基本設定」からメモ
+
+#### Step 4. LINE secret を Secret Manager に投入
+
+```bash
+echo -n "$LINE_CHANNEL_SECRET" | \
+  gcloud secrets versions add piyolog-line-channel-secret --data-file=- --project=$PROJECT
+
+echo -n "$LINE_CHANNEL_ACCESS_TOKEN" | \
+  gcloud secrets versions add piyolog-line-channel-access-token --data-file=- --project=$PROJECT
+
+# DATABASE_URL は TF が既に投入済 (確認だけ)
+gcloud secrets versions list piyolog-database-url --project=$PROJECT
+```
+
+#### Step 5. image を Cloud Build → Artifact Registry に push
+
+```bash
+PIYOLOG_GCP_PROJECT="$PROJECT" \
+PIYOLOG_AR_LOCATION="us-central1" \
+PIYOLOG_AR_REPO="piyolog-analytics" \
+make cloudbuild-submit
+# → ${LOCATION}-docker.pkg.dev/${PROJECT}/piyolog-analytics/piyolog-analytics:{SHORT_SHA, latest}
+```
+
+#### Step 6. **bootstrap mode** で Cloud Run deploy (許可リスト空)
+
+家族の LINE userId を取得するため、最初は `FAMILY_USER_IDS` を空のまま deploy する。bootstrap mode では受信した userId を Cloud Logging に WARN レベルで出すだけで、メッセージへの応答はしない。
+
+```bash
+# TF output から env を流し込む
+make tf-output-env                                # → ../.env.deploy
+set -a; source .env.deploy; set +a
+
+# 残り env (空の userId 許可リスト)
+PIYOLOG_IMAGE_TAG="latest" \
+PIYOLOG_FAMILY_USER_IDS="" \
+PIYOLOG_FAMILY_ID="default" \
+make deploy-cloud-run
+# → 出力された Cloud Run service URL を控える
+#    例: https://piyolog-analytics-xxxxxxx.a.run.app
+```
+
+#### Step 7. LINE Webhook URL を Console に登録
+
+LINE Developers Console > Messaging API > 「Webhook URL」に:
+```
+https://piyolog-analytics-xxxxxxx.a.run.app/api/line/webhook
+```
+
+「Webhookの利用」を **ON**、「応答メッセージ」を **OFF** に切替。「検証」ボタンで疎通確認 (200 が返れば OK)。
+
+#### Step 8. 自分の LINE userId を取得して `FAMILY_USER_IDS` 更新
+
+家族メンバー全員に bot を **友だち追加** してもらい、各自から bot に何かテキスト (例: `hi`) を送ってもらう。Cloud Logging で:
+
+```bash
+gcloud logging read \
+  'resource.type="cloud_run_revision" AND
+   resource.labels.service_name="piyolog-analytics" AND
+   textPayload=~"\\[bootstrap\\] FAMILY_USER_IDS unset"' \
+  --project=$PROJECT --limit=20 --format='value(textPayload)'
+```
+
+`line_user_id=Uxxxxxxxxxxxxxxxxxxxxxxxxxxxx` の userId を全員分集めて CSV で繋ぎ、`FAMILY_USER_IDS` を埋めて再 deploy:
+
+```bash
+PIYOLOG_IMAGE_TAG="latest" \
+PIYOLOG_FAMILY_USER_IDS="Uaaaaaaa...,Ubbbbbbb..." \
+make deploy-cloud-run
+```
+
+#### Step 9. 実機テスト
+
+家族メンバーが順番に LINE で bot に:
+- ぴよログから export した `.txt` を添付 → 取り込み完了の push が返る
+- `今日` / `週間` / `月間` でサマリ確認
+
+Cloud Logging で `[upload] cycle: uploaded=N` のログ (= analytics-platform に JSONL を流せている) も確認。1〜2 週間 dogfood して使い勝手を確認する。
+
+#### よくある詰まりどころ
+
+| 症状 | 原因 / 対処 |
+|---|---|
+| Webhook 検証で 401 | LINE channel secret が Secret Manager と Console で食い違っている |
+| Webhook 検証で 503 | `LINE_CHANNEL_SECRET` か `LINE_CHANNEL_ACCESS_TOKEN` が secret に投入されていない |
+| 自分の userId が log に出ない | bootstrap mode で deploy できていない (`FAMILY_USER_IDS` を空にして再 deploy) |
+| `.txt` 添付しても応答ゼロ | `FAMILY_USER_IDS` に自分の userId が入っていない (Step 8 をやり直す) |
+| Cloud SQL に接続できない | `sa-piyolog` の SA が deploy 時に紐付いているか (`gcloud run services describe ...` で確認) |
+
+---
+
 ## 1. アーキテクチャ (Phase 1)
 
 ```
