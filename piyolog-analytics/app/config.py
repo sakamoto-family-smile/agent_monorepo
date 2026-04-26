@@ -19,8 +19,25 @@ class Settings(BaseSettings):
     service_version: str = "0.1.0"
     log_level: str = "INFO"
 
-    # --- SQLite ---
+    # --- DB ---
+    # 優先: `DATABASE_URL` (SQLAlchemy URL)
+    #   sqlite+aiosqlite:///./data/piyolog.db   (dev/test 既定)
+    #   postgresql+asyncpg://user:pass@host:5432/dbname   (Cloud SQL prod)
+    # 後方互換: `PIYOLOG_DB_PATH` だけ設定された場合は sqlite に落とす。
+    database_url: str = ""
     piyolog_db_path: str = "./data/piyolog.db"
+
+    @property
+    def resolved_database_url(self) -> str:
+        """`database_url` を最終的な SQLAlchemy URL に解決する。"""
+        if self.database_url:
+            return self.database_url
+        # legacy: piyolog_db_path → sqlite+aiosqlite:///{path}
+        return f"sqlite+aiosqlite:///{self.piyolog_db_path}"
+
+    # スキーマ作成方法。`metadata_create_all` は dev/SQLite 向け、
+    # 本番 Postgres は `alembic` (= 起動時 create_all をスキップ) を使う想定。
+    db_auto_create: bool = True
 
     # --- LINE ---
     line_channel_secret: str = ""

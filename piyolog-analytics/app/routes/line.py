@@ -63,10 +63,13 @@ _repo_singleton: EventRepo | None = None
 
 
 def get_repo() -> EventRepo:
-    """プロセス内 EventRepo シングルトン (テストで差し替え可)。"""
+    """プロセス内 EventRepo シングルトン (テストで差し替え可)。
+
+    `DATABASE_URL` 優先、未設定なら `PIYOLOG_DB_PATH` から SQLite URL を生成。
+    """
     global _repo_singleton
     if _repo_singleton is None:
-        _repo_singleton = EventRepo(db_path=settings.piyolog_db_path)
+        _repo_singleton = EventRepo(database_url=settings.resolved_database_url)
     return _repo_singleton
 
 

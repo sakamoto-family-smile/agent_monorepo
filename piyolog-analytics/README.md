@@ -58,6 +58,32 @@ make run
 
 ---
 
+### 0.5 DB 切替 (B 案 Step 1: Postgres 化)
+
+`DATABASE_URL` で SQLAlchemy URL を指定する。同一コードが両 backend で動く。
+
+| 用途 | URL |
+|---|---|
+| dev / test (既定) | `sqlite+aiosqlite:///./data/piyolog.db` |
+| 本番 (Cloud SQL) | `postgresql+asyncpg://user:pass@host:5432/piyolog` |
+
+```bash
+# dev: 起動時 create_all で自動初期化 (DB_AUTO_CREATE=true、既定)
+make run
+
+# Postgres 接続例 (Cloud SQL Proxy + Alembic で migration)
+DATABASE_URL=postgresql+asyncpg://piyolog:secret@127.0.0.1:5432/piyolog \
+DB_AUTO_CREATE=false \
+make migrate
+DATABASE_URL=postgresql+asyncpg://piyolog:secret@127.0.0.1:5432/piyolog \
+DB_AUTO_CREATE=false \
+make run
+```
+
+`PIYOLOG_DB_PATH` (旧) 単独設定でも `DATABASE_URL` が空なら自動的に SQLite として解決する (後方互換)。Alembic migration は `alembic/README.md` 参照。
+
+---
+
 ## 1. アーキテクチャ (Phase 1)
 
 ```
@@ -80,11 +106,11 @@ make run
 └──────────────────────────────────────────┘
        │                   │
        ▼                   ▼
- ┌────────────┐      ┌─────────────────┐
- │ SQLite     │      │ analytics-      │
- │ piyolog.db │      │ platform        │
- │            │      │ JSONL → DuckDB  │
- └────────────┘      └─────────────────┘
+ ┌──────────────────┐  ┌─────────────────┐
+ │ SQLite (dev/test)│  │ analytics-      │
+ │ Postgres (prod)  │  │ platform        │
+ │   via SQLAlchemy │  │ JSONL → DuckDB  │
+ └──────────────────┘  └─────────────────┘
 ```
 
 主要コンポーネント:

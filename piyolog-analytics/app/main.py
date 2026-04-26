@@ -19,18 +19,22 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_observability()
-    # SQLite スキーマを初期化 (初回のみ DDL 流し込み)
     repo = get_repo()
-    await repo.initialize()
+    if settings.db_auto_create:
+        # dev/test (SQLite) は create_all で初期化。本番 Postgres は alembic を使うため
+        # `DB_AUTO_CREATE=false` にして起動時 DDL を打たない。
+        await repo.initialize()
     logger.info(
-        "piyolog-analytics started (env=%s, family_id=%s)",
+        "piyolog-analytics started (env=%s, family_id=%s, db=%s)",
         settings.app_env,
         settings.family_id,
+        repo.dialect,
     )
     try:
         yield
     finally:
         await shutdown_observability()
+        await repo.dispose()
 
 
 def create_app() -> FastAPI:
