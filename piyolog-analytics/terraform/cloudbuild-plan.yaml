@@ -1,0 +1,80 @@
+# Plan-only Cloud Build pipeline.
+#
+# 用途:
+#   PR を作成すると Cloud Build trigger が起動し、`terraform plan` を実行して
+#   変更差分を Cloud Build ログに出す。**自動 apply はしない**。
+#   レビュアーが Cloud Build ログを見て plan 内容を確認 → 承認後にローカルから
+#   `make tf-apply` で本番反映する運用。
+#
+# Trigger 設定 (Cloud Console / gcloud で 1 回作る):
+#   - Event:    Pull request
+#   - Source:   このリポジトリ + branch=^main$
+#   - Config:   Cloud Build configuration file
+#   - Path:     piyolog-analytics/terraform/cloudbuild-plan.yaml
+#   - Substitutions:
+#       _TF_PROJECT_ID  = ${PROJECT_ID}              (apply 対象の project)
+#       _TF_STATE_BUCKET = ${PROJECT_ID}-tfstate      (state を読める権限が必要)
+#   - SA:       projects/${PROJECT}/serviceAccounts/tf-cloud-build-sa@...
+#                必要 role:
+#                  roles/storage.objectViewer        on state bucket
+#                  roles/cloudsql.viewer             (plan 比較用)
+#                  roles/secretmanager.viewer
+#                  roles/iam.serviceAccountViewer
+#                  roles/artifactregistry.reader
+#                ※ apply 権限は不要 (plan のみ)
+#
+# 注意:
+#   - state bucket / API は事前に作っておく前提 (詳細は terraform/README.md)
+#   - PR がマージされても自動 apply は走らない → 必ずローカルで `make tf-apply` 実行
+
+substitutions:
+  _TF_PROJECT_ID: ""           # 必須。Trigger で project id を渡す
+  _TF_STATE_BUCKET: ""         # 必須。state bucket 名
+  _TF_VERSION: "1.10.3"        # piyolog-analytics tests/test_terraform.py が要求するバージョンに揃える
+  _TF_DIR: piyolog-analytics/terraform
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  # 1. backend.tf を動的生成 (state bucket 名は trigger substitution で受ける)
+  - id: gen-backend
+    name: alpine
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -e
+        if [ -z "${_TF_PROJECT_ID}" ] || [ -z "${_TF_STATE_BUCKET}" ]; then
+          echo "ERROR: _TF_PROJECT_ID / _TF_STATE_BUCKET substitutions are required"
+          exit 1
+        fi
+        cat >${_TF_DIR}/backend.tf <<EOF
+        terraform {
+          backend "gcs" {
+            bucket = "${_TF_STATE_BUCKET}"
+            prefix = "piyolog-analytics"
+          }
+        }
+        EOF
+
+  # 2. terraform plan (-no-color = ログ可読)
+  - id: plan
+    name: hashicorp/terraform:${_TF_VERSION}
+    entrypoint: sh
+    env:
+      - "TF_VAR_project_id=${_TF_PROJECT_ID}"
+      - "TF_IN_AUTOMATION=1"
+      - "TF_INPUT=0"
+    args:
+      - -c
+      - |
+        set -e
+        cd ${_TF_DIR}
+        terraform init -input=false -no-color
+        terraform plan -no-color -input=false -out=tfplan
+        echo
+        echo "--- Plan summary ---"
+        terraform show -no-color tfplan | head -200
+
+timeout: 600s

@@ -1,10 +1,16 @@
 .PHONY: install test lint format check run migrate migrate-down migrate-revision \
-        docker-build docker-run docker-shell cloudbuild-submit deploy-cloud-run help
+        docker-build docker-run docker-shell cloudbuild-submit deploy-cloud-run \
+        tf-init tf-fmt tf-fmt-check tf-validate tf-plan tf-apply tf-output-env help
 
 IMAGE_NAME ?= piyolog-analytics
 IMAGE_TAG ?= local
 # build context = リポジトリルート (path dep `../analytics-platform` を解決するため)
 REPO_ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || cd .. && pwd)
+
+# Terraform CLI workdir。`make tf-* TF_DIR=...` で上書き可能。
+TF_DIR ?= terraform
+# `make tf-output-env` の出力先 (deploy_cloud_run.sh が読む env)
+TF_ENV_FILE ?= .env.deploy
 
 install:
 	uv sync
@@ -75,6 +81,38 @@ cloudbuild-submit:
 deploy-cloud-run:
 	bash scripts/deploy_cloud_run.sh
 
+# ---- Terraform IaC (Step B3) ----
+# Cloud SQL / Secret Manager / sa-piyolog / Artifact Registry を Terraform で管理。
+# 詳細手順は terraform/README.md を参照。
+# 初回は state バケットを手動作成し、backend.tf と terraform.tfvars を準備してから
+# `make tf-init` → `make tf-plan` → `make tf-apply`。
+tf-init:
+	cd $(TF_DIR) && terraform init -input=false
+
+tf-fmt:
+	cd $(TF_DIR) && terraform fmt -recursive
+
+tf-fmt-check:
+	cd $(TF_DIR) && terraform fmt -check -recursive -diff
+
+# 認証不要 (-backend=false なので state も触らない)
+tf-validate:
+	cd $(TF_DIR) && terraform init -backend=false -input=false -no-color >/dev/null && terraform validate -no-color
+
+tf-plan:
+	cd $(TF_DIR) && terraform plan -out=tfplan -input=false
+
+tf-apply:
+	cd $(TF_DIR) && terraform apply -input=false tfplan
+
+# `terraform output env_for_deploy` を `.env.deploy` に書き出す。
+# `set -a; source .env.deploy; set +a` で deploy_cloud_run.sh に流せる。
+tf-output-env:
+	cd $(TF_DIR) && terraform output -json env_for_deploy \
+	  | jq -r 'to_entries[] | "\(.key)=\(.value)"' \
+	  > ../$(TF_ENV_FILE)
+	@echo "[tf-output-env] wrote $(TF_ENV_FILE)"
+
 help:
 	@echo "Targets:"
 	@echo "  install              - uv sync"
@@ -92,3 +130,10 @@ help:
 	@echo "  docker-shell         - container 内 shell でデバッグ"
 	@echo "  cloudbuild-submit    - Cloud Build → Artifact Registry に push"
 	@echo "  deploy-cloud-run     - Cloud Run service にデプロイ (要 secrets / Cloud SQL)"
+	@echo ""
+	@echo "Targets (Terraform IaC、Step B3):"
+	@echo "  tf-init              - terraform init"
+	@echo "  tf-fmt / tf-fmt-check - terraform fmt"
+	@echo "  tf-validate          - terraform init -backend=false + validate (no creds)"
+	@echo "  tf-plan / tf-apply   - 通常の plan / apply (要 backend.tf + tfvars)"
+	@echo "  tf-output-env        - terraform output env_for_deploy -> $(TF_ENV_FILE)"
