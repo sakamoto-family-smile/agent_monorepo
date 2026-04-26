@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "law": {
+      "transport": "http",
+      "url": "http://localhost:8080/law"
+    },
+    "signs": {
+      "transport": "http",
+      "url": "http://localhost:8080/signs"
+    },
+    "question-bank": {
+      "transport": "http",
+      "url": "http://localhost:8080/question-bank"
+    },
+    "firestore": {
+      "transport": "http",
+      "url": "http://localhost:8080/firestore"
+    },
+    "bigquery": {
+      "transport": "http",
+      "url": "http://localhost:8080/bigquery"
+    }
+  },
+  "_comment": "All MCP traffic is intentionally routed through security-platform's MCP Proxy (port 8080). Direct MCP access is prohibited. See docs/INTEGRATIONS.md and docs/DESIGN.md §15.2.3."
+}

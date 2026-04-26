@@ -60,6 +60,43 @@ mcp_servers:
     server_key: "brave-search"
     tags: ["search", "web", "news", "sentiment", "stock-analysis"]
 
+  # driving-license-bot
+  # 全 MCP は internal (project 内で実装) で、security-platform の MCP Proxy 経由で呼ばれる。
+  - name: "law-mcp"
+    version: "0.1.0"
+    source: "local"
+    config_path: "driving-license-bot/.mcp.json"
+    server_key: "law"
+    tags: ["law", "e-gov", "driving-license"]
+
+  - name: "signs-mcp"
+    version: "0.1.0"
+    source: "local"
+    config_path: "driving-license-bot/.mcp.json"
+    server_key: "signs"
+    tags: ["catalog", "driving-license"]
+
+  - name: "question-bank-mcp"
+    version: "0.1.0"
+    source: "local"
+    config_path: "driving-license-bot/.mcp.json"
+    server_key: "question-bank"
+    tags: ["vector-search", "driving-license"]
+
+  - name: "firestore-mcp"
+    version: "0.1.0"
+    source: "local"
+    config_path: "driving-license-bot/.mcp.json"
+    server_key: "firestore"
+    tags: ["state", "driving-license"]
+
+  - name: "bigquery-mcp"
+    version: "0.1.0"
+    source: "local"
+    config_path: "driving-license-bot/.mcp.json"
+    server_key: "bigquery"
+    tags: ["analytics", "driving-license"]
+
 skills:
   # kanie-lab-agent
   - name: "research-design"
@@ -171,6 +208,27 @@ python_packages:
   # analytics-platform (GCP extra)
   - name: "google-cloud-storage"
     version: "2.18.0"
+    ecosystem: "pip"
+
+  # driving-license-bot
+  - name: "google-cloud-aiplatform"
+    version: "1.60.0"
+    ecosystem: "pip"
+
+  - name: "google-cloud-firestore"
+    version: "2.16.0"
+    ecosystem: "pip"
+
+  - name: "google-cloud-tasks"
+    version: "2.16.0"
+    ecosystem: "pip"
+
+  - name: "google-cloud-secret-manager"
+    version: "2.20.0"
+    ecosystem: "pip"
+
+  - name: "google-cloud-bigquery"
+    version: "3.25.0"
     ecosystem: "pip"
 
 agent_frameworks:

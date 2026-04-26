@@ -6,6 +6,7 @@ targets:
     - "agent-system-1/.mcp.json"
     - "agent-system-2/.mcp.json"
     - "kanie-lab-agent/.mcp.json"
+    - "driving-license-bot/.mcp.json"
     # stock-analysis-agent: .mcp.json は data/workspace/ 配下で gitignore 済 (実行時生成)
     # lifeplanner-agent: MCP 未使用
     # hotcook-agent: MCP 未使用 (Phase 1)
@@ -29,6 +30,7 @@ targets:
     - "tech-news-agent/app/"
     - "analytics-platform/analytics_platform/"
     - "llm-client/llm_client/"
+    - "driving-license-bot/app/"      # Phase 1 で実装開始
 
 # CVSS thresholds
 cvss_thresholds:

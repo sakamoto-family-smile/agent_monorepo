@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Local data (analytics-platform conventions と整合)
+data/
+!data/.gitkeep
+
+# uv
+uv.lock.local
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
