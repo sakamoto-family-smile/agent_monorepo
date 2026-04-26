@@ -42,6 +42,19 @@ class HandlerDeps:
 
 
 async def handle_event(event: LineEvent, deps: HandlerDeps) -> None:
+    # bootstrap mode: 許可リスト未設定なら、開通用に **完全な userId** を WARN ログに出す。
+    # FAMILY_USER_IDS=Uxxx,Uyyy をデプロイ env に設定したら通常モードに戻る。
+    # (運用中に許可リストを空にすると意図せず userId が漏れるリスクはあるが、
+    #  許可リスト空状態はそもそも誰のメッセージにも応答しない open-webhook なので、
+    #  本番運用でこの状態になることは想定しない。初回セットアップでだけ通る経路。)
+    if not deps.family_user_ids:
+        logger.warning(
+            "[bootstrap] FAMILY_USER_IDS unset; received event from line_user_id=%s. "
+            "Add this id to FAMILY_USER_IDS and redeploy to enable normal handling.",
+            event.line_user_id,
+        )
+        return
+
     # access control
     if event.line_user_id not in deps.family_user_ids:
         logger.warning(

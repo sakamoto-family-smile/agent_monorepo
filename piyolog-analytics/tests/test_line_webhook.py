@@ -242,6 +242,51 @@ def test_rejects_non_family_user_silently(client, stub):
 
 
 # ---------------------------------------------------------------------------
+# B4 開通: bootstrap mode (FAMILY_USER_IDS 未設定 = 全員 silent + userId を WARN log)
+# ---------------------------------------------------------------------------
+
+
+def test_bootstrap_mode_logs_full_userid_when_family_user_ids_empty(
+    monkeypatch, tmp_path, caplog
+):
+    """`FAMILY_USER_IDS=""` で deploy したとき、メッセージ受信で full userId を WARN log。"""
+    monkeypatch.setenv("LINE_CHANNEL_SECRET", "testsecret")
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "testtoken")
+    monkeypatch.setenv("FAMILY_USER_IDS", "")  # ← 開通用に空に
+    monkeypatch.setenv("FAMILY_ID", "fam1")
+    monkeypatch.setenv("DEFAULT_CHILD_ID", "default")
+    monkeypatch.setenv("PIYOLOG_DB_PATH", str(tmp_path / "bootstrap.db"))
+    monkeypatch.setenv("ANALYTICS_ENABLED", "false")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    monkeypatch.setenv("ANALYTICS_DATA_DIR", str(tmp_path / "analytics"))
+    importlib.reload(__import__("config"))
+    importlib.reload(__import__("instrumentation.setup", fromlist=["x"]))
+    importlib.reload(__import__("routes.line", fromlist=["x"]))
+    main_mod = importlib.reload(__import__("main"))
+
+    stub_client = StubLineClient(secret="testsecret")
+    import services.line_client as lc
+
+    lc.set_line_bot_client(stub_client)
+
+    body = _text_event_body("Uffffffffffffffffffffffffffffffff", "hi")
+    sig = _sign(body, "testsecret")
+    with TestClient(main_mod.app) as client, caplog.at_level("WARNING"):
+        resp = client.post(
+            "/api/line/webhook", content=body, headers={"X-Line-Signature": sig}
+        )
+    lc.set_line_bot_client(None)
+
+    assert resp.status_code == 200
+    # bootstrap log に full userId が出ている (家族の userId 取得用)
+    bootstrap_logs = [r for r in caplog.records if "[bootstrap] FAMILY_USER_IDS unset" in r.message]
+    assert bootstrap_logs, "expected bootstrap log when FAMILY_USER_IDS is empty"
+    assert "Uffffffffffffffffffffffffffffffff" in bootstrap_logs[0].message
+    # bootstrap mode では reply しない
+    assert stub_client.reply_messages == []
+
+
+# ---------------------------------------------------------------------------
 # テキストコマンド
 # ---------------------------------------------------------------------------
 
