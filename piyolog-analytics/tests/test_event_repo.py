@@ -16,10 +16,14 @@ from repositories.event_repo import DuplicateImportError, EventRepo
 
 @pytest.fixture
 async def repo(tmp_path):
+    """各テスト用に独立した SQLite ファイル DB を立てる。"""
     db_path = str(tmp_path / "test.db")
-    r = EventRepo(db_path=db_path)
+    r = EventRepo(database_url=f"sqlite+aiosqlite:///{db_path}")
     await r.initialize()
-    return r
+    try:
+        yield r
+    finally:
+        await r.dispose()
 
 
 @pytest.mark.asyncio
