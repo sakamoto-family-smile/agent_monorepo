@@ -19,6 +19,7 @@ jobs:
       tech_news_agent:      ${{ steps.detect.outputs.tech_news_agent }}
       llm_client:           ${{ steps.detect.outputs.llm_client }}
       analytics_platform:   ${{ steps.detect.outputs.analytics_platform }}
+      driving_license_bot:  ${{ steps.detect.outputs.driving_license_bot }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,6 +84,12 @@ jobs:
             echo "analytics_platform=true" >> "$GITHUB_OUTPUT"
           else
             echo "analytics_platform=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -q '^driving-license-bot/'; then
+            echo "driving_license_bot=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "driving_license_bot=false" >> "$GITHUB_OUTPUT"
           fi
 
   # ── security-platform ──────────────────────────────────────────────────────
@@ -514,4 +521,51 @@ jobs:
           path: |
             analytics-platform/.pytest_cache/
             analytics-platform/dbt/target/
+          retention-days: 7
+
+  # ── driving-license-bot ───────────────────────────────────────────────────
+  test-driving-license-bot:
+    name: Test / driving-license-bot
+    needs: detect-changes
+    if: needs.detect-changes.outputs.driving_license_bot == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: driving-license-bot
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run ruff
+        run: uv run ruff check app tests
+
+      - name: Run tests
+        env:
+          ENV: "local"
+          # LINE / GCP とも外部呼出はテスト側でモック化されるため空でよい。
+          # Webhook テストは monkeypatch で LINE_CHANNEL_SECRET を上書きする。
+          LINE_CHANNEL_SECRET: ""
+          LINE_CHANNEL_ACCESS_TOKEN: ""
+          LINE_CHANNEL_ID: ""
+        run: |
+          uv run pytest tests/ \
+            --tb=short -v --no-header
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-driving-license-bot
+          path: driving-license-bot/.pytest_cache/
           retention-days: 7
