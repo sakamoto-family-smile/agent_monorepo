@@ -13,8 +13,11 @@ from fastapi.testclient import TestClient
 
 import app.config as config_module
 
-CHANNEL_SECRET = "dummy-secret-1234567890"
-CHANNEL_TOKEN = "dummy-access-token-abcdef"
+# テスト専用の placeholder 値。実シークレットではない。
+# `.gitleaks.toml` の allowlist regex (dummy[-_]?key / xxxx+) にマッチさせ、
+# generic-api-key 検出器の誤検知を回避する。
+CHANNEL_SECRET = "dummy-key-test-channel-secret-xxxx"
+CHANNEL_TOKEN = "dummy-key-test-channel-token-xxxx"
 
 
 def _sign(body: bytes) -> str:
