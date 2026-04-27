@@ -6,6 +6,7 @@ targets:
     - "agent-system-1/.mcp.json"
     - "agent-system-2/.mcp.json"
     - "kanie-lab-agent/.mcp.json"
+    - "driving-license-bot/.mcp.json"
     # stock-analysis-agent: .mcp.json は data/workspace/ 配下で gitignore 済 (実行時生成)
     # lifeplanner-agent: MCP 未使用
     # hotcook-agent: MCP 未使用 (Phase 1)
@@ -16,6 +17,8 @@ targets:
     - "agent-system-1/skills/"
     - "agent-system-2/skills/"
     - "kanie-lab-agent/.claude/skills/"
+    # driving-license-bot: skills は Phase 2（agent-service 実装時）で追加予定。
+    # 追加先: "driving-license-bot/skills/"
 
   source_directories:
     - "agent-system-1/src/"
@@ -29,6 +32,7 @@ targets:
     - "tech-news-agent/app/"
     - "analytics-platform/analytics_platform/"
     - "llm-client/llm_client/"
+    - "driving-license-bot/app/"      # Phase 1 で実装開始
 
 # CVSS thresholds
 cvss_thresholds:
@@ -134,6 +138,14 @@ gateway:
     - "aiplatform.googleapis.com"  # Vertex AI (Gemini grounding)
     # stock-analysis-agent MCP servers
     - "mcp-brave-search"       # docker-compose service name (Brave Search)
+    # driving-license-bot (Phase 2 で MCP / agent-service が実装されたら active 化)
+    - "firestore.googleapis.com"           # session / user state
+    - "bigquery.googleapis.com"            # event log analytics
+    - "storage.googleapis.com"             # signs SVG / kyousoku PDF
+    - "secretmanager.googleapis.com"       # LINE channel secrets
+    - "cloudtasks.googleapis.com"          # async job dispatch
+    - "elaws.e-gov.go.jp"                  # e-Gov 法令検索 API
+    - "www.npa.go.jp"                      # 警察庁「交通の方法に関する教則」
 
   # Additional injection patterns (merged with built-in defaults in injection.py).
   # Use this to add project-specific patterns without modifying source code.
