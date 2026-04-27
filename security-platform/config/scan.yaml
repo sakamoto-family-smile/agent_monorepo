@@ -114,6 +114,13 @@ gateway:
   # Operating mode:
   #   passive — log violations but do NOT block traffic (recommended for first 1-2 weeks)
   #   active  — block violations and alert immediately (switch after calibrating rules)
+  #
+  # Migration plan (driving-license-bot Phase 2-F → Phase 3+):
+  #   1. Phase 2-F: passive 固定。.mcp.json は宣言のみ、実 MCP サーバ未稼働。
+  #   2. Phase 4: law-mcp / signs-mcp 等の実 MCP を立てた後、passive で 1〜2 週運用
+  #              し、誤検知パターンを `dlp.patterns` / `injection_patterns` に
+  #              追記して校正する。
+  #   3. Phase 5: 校正完了後に active へ切替。違反時は block + alert。
   mode: passive
 
   rate_limiter:

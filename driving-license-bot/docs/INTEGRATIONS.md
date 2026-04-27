@@ -109,15 +109,37 @@ targets:
 ### MCP Proxy 経由化
 
 `.mcp.json`（[../.mcp.json](../.mcp.json)）はすべての MCP を `http://localhost:8080/<key>` に向けている。
+外部 HTTP egress（e-Gov / 警察庁）は `app.integrations.proxied_http_client` 経由で `SECURITY_HTTP_PROXY_URL` env が設定されていればそこを通す。
 
-- **Phase 1〜2 序盤**: `passive` mode で運用、違反パターンを観測
-- **Phase 2 後半**: `active` mode に昇格
-- `gateway.allowed_destinations`（security-platform 側）に追記する宛先:
-  - `firestore.googleapis.com`
-  - `bigquery.googleapis.com`
-  - `storage.googleapis.com`
-  - `elaws.e-gov.go.jp`（e-Gov 法令検索）
-  - `www.npa.go.jp`（教則 PDF）
+#### 段階的 active 化（Phase 2-F → Phase 5）
+
+| Phase | 状態 | アクション |
+|---|---|---|
+| 2-F（現状） | **passive 固定**。.mcp.json は宣言のみで実 MCP サーバ未稼働。`SECURITY_HTTP_PROXY_URL` も空 | `scripts/verify_mcp_proxy.sh` で proxy 到達性のみ確認 |
+| 4 | law-mcp / signs-mcp 等の実 MCP を起動 → passive で 1〜2 週間運用 | 違反パターンを `dlp.patterns` / `injection_patterns` に追記して校正 |
+| 5 | 校正完了後 → active 切替 | `security-platform/config/scan.yaml` の `gateway.mode: active` |
+
+#### `gateway.allowed_destinations`（security-platform 側）
+
+`security-platform/config/scan.yaml` に以下を **登録済み**（PR #53 + Phase 2-F でレビュー）:
+
+- `firestore.googleapis.com`
+- `bigquery.googleapis.com`
+- `storage.googleapis.com`
+- `secretmanager.googleapis.com`
+- `cloudtasks.googleapis.com`
+- `elaws.e-gov.go.jp`（e-Gov 法令検索）
+- `www.npa.go.jp`（警察庁「交通の方法に関する教則」）
+
+#### スモークテスト
+
+```bash
+# proxy 到達性 + .mcp.json declarations 表示
+./scripts/verify_mcp_proxy.sh
+
+# e-Gov API 到達性（passive 経由 / 直接接続のいずれでも動く）
+uv run python scripts/verify_egov_connectivity.py --law 335AC0000000105
+```
 
 ### DLP パターン追加
 

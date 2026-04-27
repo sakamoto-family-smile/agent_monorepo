@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     # --- security-platform / MCP Proxy ---
     security_mcp_proxy_url: str = "http://localhost:8080"
     security_mcp_proxy_mode: str = "passive"
+    # 外部 HTTP egress を proxy 経由に強制する場合の URL（例: "http://localhost:8080"）。
+    # 未設定なら直接外向き。Phase 2-F は declarative、Phase 4 で proxy 必須化検討。
+    security_http_proxy_url: str = ""
 
     # --- 問題プール / 生成設定 ---
     question_pool_min_size: int = 30
