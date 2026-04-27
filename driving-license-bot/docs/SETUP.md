@@ -97,6 +97,64 @@ LINE_CHANNEL_ACCESS_TOKEN=... uv run python scripts/provision_rich_menu.py \
 
 ## 6. GCP（本番）への切替
 
+### 6.A 問題生成バッチ（Phase 2-E 以降）
+
+Cloud Run Job + Cloud Workflows + Cloud Scheduler で問題プールを夜間補充する。
+
+#### 6.A.1 Service Account の前提
+
+事前に以下の SA を作成し、必要権限を付与しておく:
+
+| SA | 権限 |
+|---|---|
+| `sa-batch` | `roles/aiplatform.user`、Cloud SQL client、Secret Manager accessor |
+| `sa-workflow` | `roles/run.invoker`、Cloud Logging |
+| `sa-scheduler` | `roles/workflows.invoker` |
+
+#### 6.A.2 Image build & push
+
+\`\`\`bash
+gcloud builds submit \\
+  --config=driving-license-bot/cloudbuild.yaml \\
+  --substitutions=_LOCATION=asia-northeast1,_REPO=driving-license-bot \\
+  driving-license-bot/
+\`\`\`
+
+#### 6.A.3 デプロイ（Job + Workflow + Scheduler を一括）
+
+\`\`\`bash
+cd driving-license-bot
+GOOGLE_CLOUD_PROJECT=$PROJECT \\
+ANTHROPIC_VERTEX_PROJECT_ID=$PROJECT \\
+CLOUDSQL_INSTANCE_CONNECTION_NAME=$PROJECT:asia-northeast1:driving-license-bot-question-bank \\
+CLOUDSQL_DB=question_bank \\
+CLOUDSQL_USER=app \\
+CLOUDSQL_PASSWORD_SECRET=driving-license-bot-cloudsql-password \\
+LINE_CHANNEL_SECRET_NAME=driving-license-bot-line-channel-secret \\
+LINE_CHANNEL_ACCESS_TOKEN_NAME=driving-license-bot-line-channel-access-token \\
+GENERATION_BATCH_SIZE=20 \\
+BATCH_SCHEDULE_CRON="0 17 * * *" \\
+./scripts/deploy_batch.sh
+\`\`\`
+
+`BATCH_SCHEDULE_CRON` は UTC で指定（例: `0 17 * * *` = 毎日 02:00 JST）。
+`SCHEDULER_TIMEZONE` を `Asia/Tokyo` にすれば JST 直接指定も可。
+
+#### 6.A.4 手動トリガ
+
+\`\`\`bash
+gcloud workflows execute driving-license-bot-generation-pipeline \\
+  --project=$PROJECT --location=asia-northeast1 \\
+  --data='{"project":"'"$PROJECT"'","total":5,"difficulty":"standard"}'
+\`\`\`
+
+#### 6.A.5 監視
+
+- Cloud Logging で `resource.type=workflows.googleapis.com/Workflow` をフィルタ
+- analytics-platform の `mart_generation_health`（PR E 以降に追加）で
+  生成成功率・カテゴリ別品質・cross-check 不一致頻度を集計
+- `pool_low_alert` business_event が emit されたら運営者の LINE に通知（Phase 5）
+
 ### 6.0 Cloud SQL pgvector（重複検査用、Phase 2-D 以降）
 
 ```bash

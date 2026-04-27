@@ -1,0 +1,83 @@
+# Cloud Workflows: driving-license-bot question generation pipeline
+#
+# Cloud Scheduler から定期起動され、`driving-license-bot-batch` Cloud Run Job
+# を実行する。Job 内で GenerationPipeline が N 件回り、合格分が question_bank
+# に書き戻される。
+#
+# 失敗時:
+#   - Cloud Run Job 自体のリトライは job 側 (--max-retries) に任せる
+#   - Workflow レベルでは catch し、Cloud Monitoring が拾えるよう FAILED で終了
+#
+# 引数:
+#   project       GCP project id（必須、Scheduler から渡す）
+#   location      Cloud Run Job の region（default: asia-northeast1）
+#   job_name      Cloud Run Job 名（default: driving-license-bot-batch）
+#   total         1 回の生成数（default: 20）
+#   difficulty    basic / standard / advanced（default: standard）
+#
+# 戻り値:
+#   { status: "succeeded"|"failed", execution: <Cloud Run execution name>, error?: ... }
+
+main:
+  params: [args]
+  steps:
+    - init:
+        assign:
+          - project: '${default(map.get(args, "project"), sys.get_env("GOOGLE_CLOUD_PROJECT_ID"))}'
+          - location: '${default(map.get(args, "location"), "asia-northeast1")}'
+          - job_name: '${default(map.get(args, "job_name"), "driving-license-bot-batch")}'
+          - total: '${default(map.get(args, "total"), 20)}'
+          - difficulty: '${default(map.get(args, "difficulty"), "standard")}'
+
+    - log_start:
+        call: sys.log
+        args:
+          severity: INFO
+          text: '${"[workflow] starting batch project=" + project + " job=" + job_name + " total=" + string(total)}'
+
+    - run_batch:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: '${"projects/" + project + "/locations/" + location + "/jobs/" + job_name}'
+            body:
+              overrides:
+                containerOverrides:
+                  - args:
+                      - "--total"
+                      - '${string(total)}'
+                      - "--difficulty"
+                      - '${difficulty}'
+          result: batch_execution
+        retry:
+          # transient API error の軽量 retry。batch 自体の失敗は Cloud Run Job 側
+          # の --max-retries に委ねる。
+          predicate: '${http.default_retry_predicate_non_idempotent}'
+          max_retries: 3
+          backoff:
+            initial_delay: 2
+            max_delay: 30
+            multiplier: 2
+        except:
+          as: e
+          steps:
+            - log_failure:
+                call: sys.log
+                args:
+                  severity: ERROR
+                  text: '${"[workflow] batch failed: " + json.encode_to_string(e)}'
+            - return_failure:
+                return:
+                  status: "failed"
+                  error: '${e}'
+
+    - log_success:
+        call: sys.log
+        args:
+          severity: INFO
+          text: '${"[workflow] batch succeeded execution=" + map.get(batch_execution, "name")}'
+
+    - return_success:
+        return:
+          status: "succeeded"
+          execution: '${map.get(batch_execution, "name")}'
