@@ -15,6 +15,7 @@
 | ドキュメント | 内容 |
 |---|---|
 | [docs/DESIGN.md](docs/DESIGN.md) | 設計書（全体像・データフロー・スキーマ・フェーズ） |
+| [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | GCP インフラ構成と各コンポーネントの役割 |
 | [docs/POLICIES/TERMS_OF_SERVICE.md](docs/POLICIES/TERMS_OF_SERVICE.md) | 利用規約（初版） |
 | [docs/POLICIES/PRIVACY_POLICY.md](docs/POLICIES/PRIVACY_POLICY.md) | プライバシーポリシー（初版） |
 | [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) | 法令・教則・標識データの調達方針 |
