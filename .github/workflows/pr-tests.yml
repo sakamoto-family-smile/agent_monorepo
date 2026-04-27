@@ -569,3 +569,36 @@ jobs:
           name: test-results-driving-license-bot
           path: driving-license-bot/.pytest_cache/
           retention-days: 7
+
+  # ── driving-license-bot Terraform 検証 ────────────────────────────────────
+  # GCP 認証なしで安全にできる範囲のみ:
+  #   - terraform fmt -check -recursive    （フォーマット）
+  #   - terraform init -backend=false      （プロバイダ解決のみ、tfstate は触らない）
+  #   - terraform validate                 （構文・属性検証）
+  # `terraform plan` は Workload Identity Federation 設定が必要なため別 PR で対応。
+  terraform-driving-license-bot:
+    name: Terraform / driving-license-bot
+    needs: detect-changes
+    if: needs.detect-changes.outputs.driving_license_bot == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: driving-license-bot/terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Terraform fmt check
+        run: terraform fmt -check -recursive -diff
+
+      - name: Terraform init (no backend)
+        run: terraform init -backend=false -input=false
+
+      - name: Terraform validate
+        run: terraform validate -no-color

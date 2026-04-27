@@ -1,0 +1,29 @@
+# Copy to terraform.tfvars and fill in values.
+
+project_id = "sakamoto-family-agent"
+region     = "asia-northeast1"
+
+# 名前空間。bucket / SA / secret 名のプレフィックスになる
+name_prefix = "driving-license-bot"
+
+# Cloud Run line-bot
+line_bot_min_instances = 1
+line_bot_max_instances = 3
+line_bot_cpu           = "1"
+line_bot_memory        = "512Mi"
+
+# 初回 apply 時は image を空にして基盤だけ作る。
+# Cloud Build で push した後 ↓ を埋めて apply し直すと service が deploy される。
+# line_bot_image = "asia-northeast1-docker.pkg.dev/sakamoto-family-agent/driving-license-bot/line-bot:latest"
+line_bot_image = ""
+
+# LINE Webhook はパブリックなので allUsers 既定。
+line_bot_invoker_members = ["allUsers"]
+
+# Firestore. 一度作ると location は変更不可。
+firestore_location = "asia-northeast1"
+
+# 安全装置: dev/PoC では terraform destroy で完全削除できる設定にする。
+# 本番化する際は両方 false → true に変える。
+force_destroy       = true
+deletion_protection = false

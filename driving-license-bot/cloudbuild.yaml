@@ -1,0 +1,68 @@
+# Cloud Build: driving-license-bot line-bot image を build → push する。
+#
+# Build context は **リポジトリルート**（analytics-platform を path dep として
+# 含めるため）。
+#
+# 起動例（リポジトリルートから）:
+#   gcloud builds submit \
+#     --config=driving-license-bot/cloudbuild.yaml \
+#     --substitutions=_LOCATION=asia-northeast1,_REPO=driving-license-bot,_PROJECT=$GOOGLE_CLOUD_PROJECT \
+#     .
+#
+# substitutions:
+#   _LOCATION  Artifact Registry location  (default asia-northeast1)
+#   _REPO      Artifact Registry repo name (default driving-license-bot)
+#   _IMAGE     image name suffix           (default line-bot)
+#   SHORT_SHA  Cloud Build 自動。コミット先頭 7 文字。
+#
+# 出力:
+#   ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${SHORT_SHA}
+#   ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+
+substitutions:
+  _LOCATION: asia-northeast1
+  _REPO: driving-license-bot
+  _IMAGE: line-bot
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  # 1. ビルド
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file=driving-license-bot/Dockerfile
+      - --tag=${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${SHORT_SHA}
+      - --tag=${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+      - --build-arg=BUILDKIT_INLINE_CACHE=1
+      - .
+
+  # 2. smoke test: image が import できるかだけ確認
+  - id: smoke
+    name: ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${SHORT_SHA}
+    entrypoint: python
+    args:
+      - -c
+      - "import app.main; print('app imported OK')"
+
+  # 3. push (両タグ)
+  - id: push-sha
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${SHORT_SHA}
+
+  - id: push-latest
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+
+images:
+  - ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${SHORT_SHA}
+  - ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+
+timeout: 1200s
