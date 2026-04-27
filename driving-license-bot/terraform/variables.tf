@@ -82,3 +82,23 @@ variable "deletion_protection" {
   description = "Firestore database 等の deletion_protection。dev/PoC では false で teardown を容易に。"
   default     = false
 }
+
+# ---- Workload Identity Federation (CI 用) ----
+
+variable "enable_wif" {
+  type        = bool
+  description = "true で GitHub Actions 用 Workload Identity Federation を作成。Pool / Provider / SA / IAM binding。後段の `terraform plan` を CI 化するために使う。"
+  default     = false
+}
+
+variable "github_repo" {
+  type        = string
+  description = "WIF が信頼する GitHub リポジトリ (owner/repo 形式)。enable_wif=true の時のみ使われる。"
+  default     = "sakamoto-family-smile/agent_monorepo"
+}
+
+variable "tfstate_bucket" {
+  type        = string
+  description = "tfstate を保存している GCS バケット名 (scripts/bootstrap_gcp.sh で作成済)。WIF SA に objectViewer を付与するためだけに使う。"
+  default     = ""
+}

@@ -570,12 +570,7 @@ jobs:
           path: driving-license-bot/.pytest_cache/
           retention-days: 7
 
-  # ── driving-license-bot Terraform 検証 ────────────────────────────────────
-  # GCP 認証なしで安全にできる範囲のみ:
-  #   - terraform fmt -check -recursive    （フォーマット）
-  #   - terraform init -backend=false      （プロバイダ解決のみ、tfstate は触らない）
-  #   - terraform validate                 （構文・属性検証）
-  # `terraform plan` は Workload Identity Federation 設定が必要なため別 PR で対応。
+  # ── driving-license-bot Terraform validate / fmt（GCP 認証なし） ────────────
   terraform-driving-license-bot:
     name: Terraform / driving-license-bot
     needs: detect-changes
@@ -602,3 +597,114 @@ jobs:
 
       - name: Terraform validate
         run: terraform validate -no-color
+
+  # ── driving-license-bot Terraform plan（WIF 認証） ────────────────────────
+  # 必須 GitHub repo Variables（Settings > Secrets and variables > Actions > Variables）:
+  #   WIF_PROVIDER    Workload Identity Provider のフル resource name
+  #                   例: projects/123/locations/global/workloadIdentityPools/github-actions-pool/providers/github
+  #   TF_PLAN_SA      plan 用 SA email
+  #                   例: sa-terraform-plan@sakamoto-family-agent.iam.gserviceaccount.com
+  #   TFSTATE_BUCKET  tfstate を持つ GCS バケット名
+  #                   例: sakamoto-family-agent-driving-license-bot-tfstate
+  #   GCP_PROJECT_ID  対象 project id
+  #
+  # vars が未設定 / 空ならジョブごとスキップ（PR は通る）。
+  # WIF / SA は terraform/wif.tf を `enable_wif=true` で apply して作る。
+  # 値は `terraform output wif_setup_summary` で取得可能。
+  terraform-plan-driving-license-bot:
+    name: Terraform plan / driving-license-bot
+    needs: [detect-changes, terraform-driving-license-bot]
+    if: |
+      needs.detect-changes.outputs.driving_license_bot == 'true' &&
+      vars.WIF_PROVIDER != '' &&
+      vars.TF_PLAN_SA != '' &&
+      vars.TFSTATE_BUCKET != '' &&
+      vars.GCP_PROJECT_ID != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write       # WIF で OIDC token 発行
+      pull-requests: write  # plan 結果を PR コメント
+    defaults:
+      run:
+        working-directory: driving-license-bot/terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (WIF)
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.TF_PLAN_SA }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Generate backend.tf
+        run: |
+          cat > backend.tf <<EOF
+          terraform {
+            backend "gcs" {
+              bucket = "${{ vars.TFSTATE_BUCKET }}"
+              prefix = "terraform/state"
+            }
+          }
+          EOF
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Terraform plan
+        id: plan
+        continue-on-error: true
+        run: |
+          # tfvars は repo に commit していないので、project_id だけ -var で渡す。
+          # 他の値はデフォルトで動く（force_destroy=true 等）。
+          set +e
+          terraform plan \
+            -no-color -input=false \
+            -var "project_id=${{ vars.GCP_PROJECT_ID }}" \
+            -out=tfplan.out 2>&1 | tee plan.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Comment plan on PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let plan = '';
+            try { plan = fs.readFileSync('driving-license-bot/terraform/plan.txt', 'utf8'); } catch {}
+            const MAX = 60000;  // GitHub コメントの上限を考慮
+            if (plan.length > MAX) {
+              plan = plan.slice(0, MAX) + '\n\n... (truncated) ...';
+            }
+            const body = [
+              '### Terraform plan / driving-license-bot',
+              '',
+              '<details><summary>plan output</summary>',
+              '',
+              '```hcl',
+              plan,
+              '```',
+              '</details>'
+            ].join('\n');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body,
+            });
+
+      - name: Fail job if plan errored
+        if: steps.plan.outputs.exit_code != '0' && steps.plan.outputs.exit_code != '2'
+        run: |
+          echo "terraform plan exit code: ${{ steps.plan.outputs.exit_code }}"
+          # exit 0 = no changes / exit 2 = changes (with -detailed-exitcode); ここでは out=tfplan.out
+          # を渡しているので exit 0 が成功、その他は失敗扱い。
+          exit 1

@@ -147,3 +147,91 @@ GOOGLE_CLOUD_PROJECT=sakamoto-family-agent make teardown
 
 CI で `terraform plan -detailed-exitcode` を回せば手動変更を検知できます。
 piyolog-analytics の同パターン参照。
+
+---
+
+## CI で `terraform plan` を回す（Workload Identity Federation）
+
+GitHub Actions から GCP に **長期 SA キーを使わずに** 短期トークンで認証する
+構成を Terraform で管理しています。`enable_wif=true` で apply すれば、
+PR ごとに自動で plan が走ります。
+
+### 一回限りのセットアップ
+
+#### 1. 基盤 + WIF を一緒に apply
+
+`terraform.tfvars` を編集:
+
+```hcl
+enable_wif     = true
+github_repo    = "sakamoto-family-smile/agent_monorepo"
+tfstate_bucket = "sakamoto-family-agent-driving-license-bot-tfstate"
+```
+
+apply:
+
+```bash
+make tf-apply
+```
+
+これで以下が作られる:
+
+- WIF Pool: `github-actions-pool`
+- WIF Provider: `github`（GitHub OIDC、`assertion.repository == "<owner>/<repo>"` で repo フィルタ）
+- `sa-terraform-plan@<project>.iam.gserviceaccount.com`（read-only）
+- WIF binding: 上記 GitHub repo が SA を impersonate 可能
+
+#### 2. GitHub repo に Variables を登録
+
+`terraform output wif_setup_summary` で値が出ます:
+
+```bash
+cd terraform && terraform output -json wif_setup_summary
+```
+
+出力例:
+
+```json
+{
+  "WIF_PROVIDER":   "projects/123456789/locations/global/workloadIdentityPools/github-actions-pool/providers/github",
+  "TF_PLAN_SA":     "sa-terraform-plan@sakamoto-family-agent.iam.gserviceaccount.com",
+  "TFSTATE_BUCKET": "sakamoto-family-agent-driving-license-bot-tfstate",
+  "GCP_PROJECT_ID": "sakamoto-family-agent"
+}
+```
+
+GitHub の `Settings > Secrets and variables > Actions > Variables` で
+**4 つの Variables** として登録（Secrets ではなく Variables。値は機密ではない）:
+
+| Variable name | 値 |
+|---|---|
+| `WIF_PROVIDER` | `projects/.../providers/github` |
+| `TF_PLAN_SA` | `sa-terraform-plan@...` |
+| `TFSTATE_BUCKET` | tfstate バケット名 |
+| `GCP_PROJECT_ID` | `sakamoto-family-agent` |
+
+#### 3. 動作確認
+
+driving-license-bot/terraform/ 配下に何か変更を加えた PR を立てると、
+**`Terraform plan / driving-license-bot`** ジョブが起動して plan 結果が PR に
+コメントされます。
+
+vars が未設定 / 空ならジョブごとスキップ（PR は通る）。
+
+### セキュリティ上の注意
+
+- `attribute_condition` で **特定の repo のみ** が認証できるよう制限
+- fork からの PR は OIDC token の `assertion.repository` が一致しないため弾かれる
+- `sa-terraform-plan` は **read-only**（`roles/viewer` + `secretmanager.viewer` +
+  `iam.serviceAccountViewer` + tfstate bucket の `objectViewer`）
+- write 権限は持たないため、悪意ある PR でも resource 作成・削除は不可能
+- `terraform apply` は引き続き手元の `make tf-apply` でのみ実行する運用
+
+### 撤去
+
+```bash
+# tfvars を編集して enable_wif = false に
+make tf-apply
+```
+
+または完全に消したいなら `make teardown`。

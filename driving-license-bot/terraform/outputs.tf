@@ -37,3 +37,25 @@ output "line_bot_webhook_url" {
   description = "LINE Developers Console の Webhook URL に貼る完全 URL"
   value       = local.deploy_line_bot ? "${google_cloud_run_v2_service.line_bot[0].uri}/webhook" : null
 }
+
+# ---- Workload Identity Federation (enable_wif=true 時のみ値が入る) ----
+
+output "wif_provider" {
+  description = "GitHub Actions repo Variable WIF_PROVIDER に設定する値。"
+  value       = var.enable_wif ? google_iam_workload_identity_pool_provider.github[0].name : null
+}
+
+output "wif_service_account" {
+  description = "GitHub Actions repo Variable TF_PLAN_SA に設定する値。"
+  value       = var.enable_wif ? google_service_account.tf_plan[0].email : null
+}
+
+output "wif_setup_summary" {
+  description = "GitHub repo に登録する Variables（vars）の値。enable_wif=true 後に terraform output で確認。"
+  value = var.enable_wif ? {
+    WIF_PROVIDER   = google_iam_workload_identity_pool_provider.github[0].name
+    TF_PLAN_SA     = google_service_account.tf_plan[0].email
+    TFSTATE_BUCKET = var.tfstate_bucket
+    GCP_PROJECT_ID = var.project_id
+  } : null
+}

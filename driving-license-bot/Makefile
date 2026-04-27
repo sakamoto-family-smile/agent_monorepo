@@ -67,6 +67,11 @@ tf-apply:  ## terraform apply
 tf-destroy:  ## terraform destroy（確認あり）
 	cd $(TF_DIR) && terraform destroy
 
+tf-output-wif:  ## WIF setup 用に GitHub repo Variables にコピペする値を表示
+	@cd $(TF_DIR) && terraform output -json wif_setup_summary 2>/dev/null \
+		| jq -r 'to_entries[] | "\(.key)=\(.value)"' \
+		|| echo "wif outputs not available. enable_wif=true で apply してください。"
+
 image-build:  ## Cloud Build で image を build & push（リポジトリルートから実行する）
 	cd .. && gcloud builds submit \
 		--config=driving-license-bot/cloudbuild.yaml \
