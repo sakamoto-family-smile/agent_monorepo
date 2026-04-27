@@ -97,6 +97,59 @@ LINE_CHANNEL_ACCESS_TOKEN=... uv run python scripts/provision_rich_menu.py \
 
 ## 6. GCP（本番）への切替
 
+### 6.0 Cloud SQL pgvector（重複検査用、Phase 2-D 以降）
+
+```bash
+# インスタンス作成（db-f1-micro、最小構成）
+gcloud sql instances create driving-license-bot-question-bank \
+  --project=$GOOGLE_CLOUD_PROJECT \
+  --tier=db-f1-micro \
+  --database-version=POSTGRES_16 \
+  --region=asia-northeast1 \
+  --root-password="$(openssl rand -base64 24)"
+
+# データベース + ユーザー作成
+gcloud sql databases create question_bank \
+  --instance=driving-license-bot-question-bank
+gcloud sql users create app \
+  --instance=driving-license-bot-question-bank \
+  --password="$CLOUDSQL_PASSWORD"
+
+# pgvector 拡張 + スキーマ作成
+# Cloud SQL Auth Proxy をローカルで起動した上で:
+psql -h 127.0.0.1 -U app -d question_bank <<'EOF'
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE TABLE IF NOT EXISTS questions (
+    question_id      TEXT PRIMARY KEY,
+    version          INTEGER NOT NULL,
+    body_hash        TEXT NOT NULL,
+    embedding        vector(768) NOT NULL,
+    applicable_goals TEXT[] NOT NULL,
+    category         TEXT NOT NULL,
+    difficulty       TEXT NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'needs_review',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS questions_embedding_ivfflat
+    ON questions USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX IF NOT EXISTS questions_body_hash_idx ON questions (body_hash);
+CREATE INDEX IF NOT EXISTS questions_status_idx ON questions (status);
+EOF
+```
+
+`.env` に以下を追加:
+
+```bash
+QUESTION_BANK_BACKEND=pgvector
+CLOUDSQL_INSTANCE_CONNECTION_NAME=$GOOGLE_CLOUD_PROJECT:asia-northeast1:driving-license-bot-question-bank
+CLOUDSQL_DB=question_bank
+CLOUDSQL_USER=app
+CLOUDSQL_HOST=127.0.0.1   # Cloud SQL Auth Proxy 経由
+CLOUDSQL_PORT=5432
+```
+
+依存をインストール: `uv sync --extra pgvector`
+
 ### 6.1 Firestore
 
 ```bash

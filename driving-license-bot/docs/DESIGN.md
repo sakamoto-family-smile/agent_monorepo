@@ -205,6 +205,42 @@ app/agent/
 Phase 2-C の既定は `auto_approve_overall_score=None` で **常に人間レビュー必須**。
 Phase 3+ で運用結果を見ながらしきい値を導入する。
 
+### 3.1.3 Phase 2-D 実装：Question Bank + dedup
+
+`app/repositories/question_bank/` 配下に重複検査用のリポジトリ層を追加。
+pipeline に dedup ステップを差し込み、生成直後の埋め込み類似検索で
+**「過去問題と実質同じ」を弾く**。
+
+```
+app/repositories/question_bank/
+├── protocol.py          QuestionBankRepo Protocol + StoredQuestion / SimilarityHit
+├── in_memory.py         InMemoryQuestionBank（cosine 単純実装）
+└── pgvector_impl.py     PgvectorQuestionBank（asyncpg + pgvector、本番）
+
+app/agent/embedding.py   EmbeddingClient Protocol + VertexEmbeddingClient + MockEmbeddingClient
+```
+
+**dedup ロジック**:
+1. 生成された body を embedding（Vertex `text-embedding-004` / 768 次元）
+2. `question_bank.find_similar(embedding, category=...)` で類似度上位 N 件
+3. 最高類似度が `dedup_threshold`（既定 0.92）を超えたら **REJECTED (duplicate)**
+4. reviewer の LLM 呼び出しはスキップ → コスト節約
+
+**判定マトリクス更新**:
+
+| fact | dedup | reviewer.verdict | outcome |
+|---|---|---|---|
+| False | (skipped) | (skipped) | rejected |
+| True | duplicate | (skipped) | rejected (duplicate) |
+| True | clear | reject | rejected |
+| True | clear | approve（auto_approve_threshold 超） | approved |
+| True | clear | otherwise | needs_human_review |
+
+**Phase 2-D 既定**:
+- `auto_approve_overall_score=None`（人間レビュー必須）
+- `store_on_pass=False`（書き込みは PR E のバッチで一元管理）
+- 本番は `pgvector` バックエンド、CI/開発は `memory`
+
 ### 3.2 Fact Checker Agent の責務（明文化）
 
 1. **引用条文の実在検証**: `law-mcp` で law_id + 条 + 項 を引いて条文本文を取得し、ドラフトの quoted_text と完全一致 or 高類似度（>0.9）を確認
