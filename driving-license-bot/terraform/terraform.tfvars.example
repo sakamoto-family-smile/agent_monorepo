@@ -27,3 +27,11 @@ firestore_location = "asia-northeast1"
 # 本番化する際は両方 false → true に変える。
 force_destroy       = true
 deletion_protection = false
+
+# ---- Workload Identity Federation (CI で `terraform plan` を回す用) ----
+# 1. 初回 apply は false で OK（基盤のみ作る）。
+# 2. tfstate_bucket を bootstrap で作ったバケット名に書き、enable_wif=true で再 apply。
+# 3. `make tf-output-wif` で取れる値を GitHub repo の Variables に登録。
+enable_wif     = false
+github_repo    = "sakamoto-family-smile/agent_monorepo"
+tfstate_bucket = "sakamoto-family-agent-driving-license-bot-tfstate"
