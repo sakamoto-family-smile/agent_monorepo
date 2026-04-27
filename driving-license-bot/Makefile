@@ -5,11 +5,14 @@ SHELL := /bin/bash
 UV ?= uv
 IMAGE_NAME ?= driving-license-bot
 IMAGE_TAG ?= local
+TF_DIR ?= terraform
 
-.PHONY: help install lint format test check run docker-build docker-run
+.PHONY: help install lint format test check run docker-build docker-run \
+	tf-init tf-plan tf-apply tf-destroy tf-fmt tf-validate \
+	bootstrap teardown image-build
 
 help:  ## このヘルプを表示
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
 install:  ## 依存をインストール（uv sync）
 	$(UV) sync --extra gcs
@@ -40,3 +43,35 @@ docker-run:  ## Docker image をローカル起動
 		-e LINE_CHANNEL_SECRET="$$LINE_CHANNEL_SECRET" \
 		-e LINE_CHANNEL_ACCESS_TOKEN="$$LINE_CHANNEL_ACCESS_TOKEN" \
 		$(IMAGE_NAME):$(IMAGE_TAG)
+
+# ---- GCP デプロイ系（Terraform 主導） ----
+
+bootstrap:  ## GCP プロジェクト初回ブートストラップ（tfstate バケット + base API）
+	GOOGLE_CLOUD_PROJECT=$${GOOGLE_CLOUD_PROJECT:?required} ./scripts/bootstrap_gcp.sh
+
+tf-init:  ## terraform init
+	cd $(TF_DIR) && terraform init -upgrade
+
+tf-fmt:  ## terraform fmt
+	cd $(TF_DIR) && terraform fmt -recursive
+
+tf-validate:  ## terraform validate
+	cd $(TF_DIR) && terraform validate
+
+tf-plan:  ## terraform plan
+	cd $(TF_DIR) && terraform plan
+
+tf-apply:  ## terraform apply
+	cd $(TF_DIR) && terraform apply
+
+tf-destroy:  ## terraform destroy（確認あり）
+	cd $(TF_DIR) && terraform destroy
+
+image-build:  ## Cloud Build で image を build & push（リポジトリルートから実行する）
+	cd .. && gcloud builds submit \
+		--config=driving-license-bot/cloudbuild.yaml \
+		--substitutions=_LOCATION=$${REGION:-asia-northeast1},_REPO=$${ARTIFACT_REPO:-driving-license-bot} \
+		.
+
+teardown:  ## driving-license-bot のリソース一括削除（terraform destroy + image purge + secret 削除）
+	GOOGLE_CLOUD_PROJECT=$${GOOGLE_CLOUD_PROJECT:?required} ./scripts/teardown.sh
