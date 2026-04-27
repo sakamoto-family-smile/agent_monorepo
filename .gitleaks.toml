@@ -32,6 +32,10 @@ paths = [
     '''security-platform/tests/proxy/test_inbound\.py''',
     '''security-platform/tests/proxy/test_outbound\.py''',
 
+    # driving-license-bot Webhook test: HMAC 署名検証用の
+    # placeholder channel secret / token を保持。実シークレットではない。
+    '''driving-license-bot/tests/test_webhook\.py''',
+
     # Agent README files contain curl examples that look like auth headers.
     '''kanie-lab-agent/README\.md''',
 
