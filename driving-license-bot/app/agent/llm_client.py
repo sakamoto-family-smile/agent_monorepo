@@ -195,8 +195,85 @@ class VertexAnthropicClient:
         )
 
 
+class VertexGeminiClient:
+    """Gemini on Vertex AI の同期クライアント。Quality Reviewer の cross-check 用。
+
+    Question Generator が Claude である一方、Quality Reviewer は意図的に
+    別系列（Gemini）を使うことで、共通モード失敗を検出可能にする
+    （DESIGN.md §3.2 / §3.1.1）。
+    """
+
+    def __init__(
+        self,
+        *,
+        project_id: str,
+        region: str,
+        model: str,
+    ) -> None:
+        self._project_id = project_id
+        self._region = region
+        self._model = model
+        try:
+            import vertexai
+            from vertexai.generative_models import GenerativeModel
+        except ImportError as exc:  # pragma: no cover — google-cloud-aiplatform 未導入時
+            raise LLMClientError(
+                "google-cloud-aiplatform (vertexai) is required for VertexGeminiClient"
+            ) from exc
+        vertexai.init(project=project_id, location=region)
+        self._model_obj = GenerativeModel(model)
+        logger.info(
+            "VertexGeminiClient initialized project=%s region=%s model=%s",
+            project_id,
+            region,
+            model,
+        )
+
+    def generate(
+        self,
+        *,
+        system: str,
+        user: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.4,
+        cache_system: bool = True,  # noqa: ARG002 — Gemini は Anthropic と異なるキャッシュ方式
+    ) -> LLMResponse:
+        """Vertex AI 経由で Gemini を呼び出す。
+
+        Gemini にはシステムロールがないため、system + user を結合して 1 つの
+        ユーザープロンプトとして渡す。`cache_system` パラメータは Anthropic との
+        Protocol 統一のため受け取るが Gemini では無視される（context caching は
+        別 API のため Phase 5+ で導入検討）。
+        """
+        try:
+            from vertexai.generative_models import GenerationConfig
+        except ImportError as exc:  # pragma: no cover
+            raise LLMClientError("vertexai import failed") from exc
+
+        prompt = f"{system}\n\n---\n\n{user}"
+        config = GenerationConfig(
+            max_output_tokens=max_tokens,
+            temperature=temperature,
+        )
+        try:
+            resp = self._model_obj.generate_content(
+                prompt, generation_config=config
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise LLMClientError(f"Vertex Gemini call failed: {exc}") from exc
+
+        text = getattr(resp, "text", "") or ""
+        usage = getattr(resp, "usage_metadata", None)
+        return LLMResponse(
+            text=text,
+            model=self._model,
+            input_tokens=getattr(usage, "prompt_token_count", 0) if usage else 0,
+            output_tokens=getattr(usage, "candidates_token_count", 0) if usage else 0,
+        )
+
+
 def build_llm_client() -> LLMClient:
-    """env から実 LLM クライアントを構築する。
+    """env から実 Claude クライアントを構築する（Question Generator / Tutor 用）。
 
     `VERTEX_CLAUDE_MODEL` / `ANTHROPIC_VERTEX_PROJECT_ID` / `CLOUD_ML_REGION`
     を参照。`AGENT_LLM_MOCK=true` で MockLLMClient（固定空文字列）を返す。
@@ -221,10 +298,34 @@ def build_llm_client() -> LLMClient:
     )
 
 
+def build_reviewer_llm_client() -> LLMClient:
+    """env から Gemini クライアントを構築する（Quality Reviewer 用）。
+
+    別系列モデル（Claude vs Gemini）を意図的に分けて cross-check する設計。
+    `AGENT_LLM_MOCK=true` で Mock。
+    """
+    settings = app.config.settings
+    if settings.agent_llm_mock:
+        logger.warning(
+            "AGENT_LLM_MOCK=true: returning MockLLMClient for reviewer"
+        )
+        return MockLLMClient(text="", model="mock-gemini")
+    project = settings.google_cloud_project
+    if not project:
+        raise LLMClientError("GOOGLE_CLOUD_PROJECT is required for Gemini reviewer")
+    return VertexGeminiClient(
+        project_id=project,
+        region=settings.cloud_ml_region,
+        model=settings.vertex_gemini_model,
+    )
+
+
 __all__ = [
     "LLMClient",
     "LLMResponse",
     "MockLLMClient",
     "VertexAnthropicClient",
+    "VertexGeminiClient",
     "build_llm_client",
+    "build_reviewer_llm_client",
 ]
