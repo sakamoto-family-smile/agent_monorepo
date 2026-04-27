@@ -84,6 +84,29 @@ class Settings(BaseSettings):
     agent_temperature: float = 0.4
     agent_max_tokens: int = 4096
 
+    # --- embedding 制御 ---
+    # true で MockEmbeddingClient を返す。CI / 開発環境で誤って Vertex を叩かないため。
+    embedding_mock: bool = False
+    # Vertex AI text-embedding-004 のデフォルト次元
+    embedding_model: str = "text-embedding-004"
+    embedding_dim: int = 768
+
+    # --- Question Bank（重複検査）---
+    # `memory`: テスト・local 開発用。`pgvector`: 本番 Cloud SQL Postgres。
+    question_bank_backend: str = "memory"
+    # 類似度がこれを超えると「重複」と判断（cosine、0.0〜1.0）
+    question_bank_dedup_threshold: float = 0.92
+    # 類似度検索の上位件数
+    question_bank_top_k: int = 5
+
+    # --- Cloud SQL pgvector 接続 ---
+    cloudsql_instance_connection_name: str = ""
+    cloudsql_db: str = "question_bank"
+    cloudsql_user: str = "app"
+    cloudsql_password: str = ""
+    cloudsql_host: str = ""  # Cloud SQL Auth Proxy 経由なら "127.0.0.1" 等
+    cloudsql_port: int = 5432
+
     # --- レビュー Web UI ---
     review_admin_allowed_emails: str = ""
 

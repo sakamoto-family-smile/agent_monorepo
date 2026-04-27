@@ -109,13 +109,14 @@ def _request() -> GenerationRequest:
 
 # ---- 各シナリオ ----
 
-def test_happy_path_defaults_to_needs_human_review() -> None:
+@pytest.mark.asyncio
+async def test_happy_path_defaults_to_needs_human_review() -> None:
     """fact OK + reviewer approve でも、auto_threshold None なので人間レビュー必須。"""
     pipeline = _build_pipeline(
         gen_text=json.dumps(VALID_QUESTION_DICT, ensure_ascii=False),
         review_text=_approve_response(),
     )
-    result = pipeline.run(_request())
+    result = await pipeline.run(_request())
     assert result.outcome == PipelineOutcome.NEEDS_HUMAN_REVIEW
     assert result.passed_all
     assert result.fact_check is not None and result.fact_check.passed
@@ -124,17 +125,19 @@ def test_happy_path_defaults_to_needs_human_review() -> None:
     assert not result.rejection_reasons
 
 
-def test_auto_approve_when_threshold_met() -> None:
+@pytest.mark.asyncio
+async def test_auto_approve_when_threshold_met() -> None:
     pipeline = _build_pipeline(
         gen_text=json.dumps(VALID_QUESTION_DICT, ensure_ascii=False),
         review_text=_approve_response(),
         auto_threshold=0.85,
     )
-    result = pipeline.run(_request())
+    result = await pipeline.run(_request())
     assert result.outcome == PipelineOutcome.APPROVED
 
 
-def test_fact_check_fail_short_circuits_review() -> None:
+@pytest.mark.asyncio
+async def test_fact_check_fail_short_circuits_review() -> None:
     """corpus 外の URL → fact check fail → reviewer は呼ばれずに即 reject。"""
     review_llm = MockLLMClient(text=_approve_response(), model="mock-gemini")
     gen_llm = MockLLMClient(
@@ -146,7 +149,7 @@ def test_fact_check_fail_short_circuits_review() -> None:
         FactChecker(),
         QualityReviewer(review_llm),
     )
-    result = pipeline.run(_request())
+    result = await pipeline.run(_request())
     assert result.outcome == PipelineOutcome.REJECTED
     assert any("url_not_in_corpus" in r for r in result.rejection_reasons)
     # reviewer は呼ばれていない
@@ -154,12 +157,13 @@ def test_fact_check_fail_short_circuits_review() -> None:
     assert result.quality_review is None
 
 
-def test_quality_reviewer_reject_marks_rejected() -> None:
+@pytest.mark.asyncio
+async def test_quality_reviewer_reject_marks_rejected() -> None:
     pipeline = _build_pipeline(
         gen_text=json.dumps(VALID_QUESTION_DICT, ensure_ascii=False),
         review_text=_reject_response(),
     )
-    result = pipeline.run(_request())
+    result = await pipeline.run(_request())
     assert result.outcome == PipelineOutcome.REJECTED
     assert result.fact_check is not None and result.fact_check.passed
     assert result.quality_review is not None
@@ -167,7 +171,8 @@ def test_quality_reviewer_reject_marks_rejected() -> None:
     assert any("[review] reject" in r for r in result.rejection_reasons)
 
 
-def test_below_threshold_falls_to_human_review() -> None:
+@pytest.mark.asyncio
+async def test_below_threshold_falls_to_human_review() -> None:
     """approve verdict だが overall_score がしきい値未満 → 人間レビュー。"""
     weak = json.dumps(
         {
@@ -187,15 +192,16 @@ def test_below_threshold_falls_to_human_review() -> None:
         review_text=weak,
         auto_threshold=0.85,
     )
-    result = pipeline.run(_request())
+    result = await pipeline.run(_request())
     assert result.outcome == PipelineOutcome.NEEDS_HUMAN_REVIEW
 
 
-def test_generator_failure_propagates() -> None:
+@pytest.mark.asyncio
+async def test_generator_failure_propagates() -> None:
     """Generator が失敗（パース不能）したら例外がそのまま伝播する。"""
     pipeline = _build_pipeline(
         gen_text="not json at all",
         review_text=_approve_response(),
     )
     with pytest.raises(Exception):  # GenerationParseError
-        pipeline.run(_request())
+        await pipeline.run(_request())

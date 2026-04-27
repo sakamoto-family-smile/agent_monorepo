@@ -30,6 +30,13 @@ gcs = [
     "google-cloud-bigquery>=3.25.0",
 ]
 
+# 重複検査用 pgvector（Cloud SQL Postgres）。CI / 開発環境では未使用で OK。
+# In-memory 実装ではこの extra なしで動く。
+pgvector = [
+    "asyncpg>=0.30.0",
+    "pgvector>=0.3.0",
+]
+
 [tool.uv.sources]
 analytics-platform = { path = "../analytics-platform" }
 
