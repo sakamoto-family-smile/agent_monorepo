@@ -25,10 +25,16 @@ from linebot.v3.webhooks.models import Event
 from app.config import settings
 from app.handlers.command_router import CommandRouter, HandlerDeps
 from app.handlers.disclaimer import BLOCKED_DELETION_NOTE, FOLLOW_GREETING
+from app.instrumentation.events import (
+    EVENT_BLOCK_EVENT_RECEIVED,
+    EVENT_FOLLOW_EVENT_RECEIVED,
+    emit_business_event,
+)
 from app.models import UserStatus
 from app.repositories import (
-    InMemoryRepoBundle,
     QuestionPool,
+    RepoBundleImpl,
+    build_repo_bundle,
     load_question_pool,
 )
 from app.services.line_client import (
@@ -44,18 +50,19 @@ router = APIRouter(tags=["line"])
 
 # ---- DI シングルトン（テストで差し替え可） ----
 
-_repo_bundle: InMemoryRepoBundle | None = None
+_repo_bundle: RepoBundleImpl | None = None
 _question_pool: QuestionPool | None = None
 
 
-def get_repo_bundle() -> InMemoryRepoBundle:
+def get_repo_bundle() -> RepoBundleImpl:
+    """env (`REPOSITORY_BACKEND`) 駆動で in-memory / Firestore を選ぶ。"""
     global _repo_bundle
     if _repo_bundle is None:
-        _repo_bundle = InMemoryRepoBundle()
+        _repo_bundle = build_repo_bundle()
     return _repo_bundle
 
 
-def set_repo_bundle(bundle: InMemoryRepoBundle | None) -> None:
+def set_repo_bundle(bundle: RepoBundleImpl | None) -> None:
     global _repo_bundle
     _repo_bundle = bundle
 
@@ -152,8 +159,13 @@ async def _process_event(
     if isinstance(event, FollowEvent):
         line_user_id = _extract_user_id(event)
         if line_user_id:
-            await deps.identity.get_or_create(
+            user = await deps.identity.get_or_create(
                 line_user_id, bot_channel_id=bot_channel_id
+            )
+            emit_business_event(
+                event_name=EVENT_FOLLOW_EVENT_RECEIVED,
+                properties={"bot_channel_id": bot_channel_id},
+                user_id=user.internal_uid,
             )
         if event.reply_token:
             client.reply_text(event.reply_token, [FOLLOW_GREETING])
@@ -177,6 +189,11 @@ async def _process_event(
             }
         )
         await deps.users.upsert(blocked)
+        emit_business_event(
+            event_name=EVENT_BLOCK_EVENT_RECEIVED,
+            properties={"scheduled_deletion_at": scheduled_at.isoformat()},
+            user_id=internal_uid,
+        )
         logger.info(
             "user blocked: internal_uid=%s scheduled_deletion_at=%s. note=%s",
             internal_uid,

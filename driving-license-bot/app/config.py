@@ -39,7 +39,12 @@ class Settings(BaseSettings):
     vertex_claude_model: str = "claude-opus-4-7"
     vertex_gemini_model: str = "gemini-2.5-pro"
 
-    # --- Firestore (Phase 2+ で実利用、Phase 1 は in-memory) ---
+    # --- リポジトリバックエンド ---
+    # `memory`: テスト・local 開発用 in-memory。Cloud Run 再起動でデータ消失。
+    # `firestore`: 本番用、GOOGLE_CLOUD_PROJECT 必須。
+    repository_backend: str = "memory"
+
+    # --- Firestore ---
     firestore_database: str = "(default)"
 
     # --- Cloud Tasks (Phase 2+) ---
@@ -48,11 +53,14 @@ class Settings(BaseSettings):
     cloud_tasks_invoker_sa: str = ""
 
     # --- analytics-platform 連携 ---
+    analytics_enabled: bool = True
     analytics_data_dir: str = "./data"
     analytics_storage_backend: str = "local"
     analytics_gcs_bucket: str = ""
     analytics_gcs_raw_prefix: str = "uploaded/"
     analytics_gcs_payload_prefix: str = "payloads/"
+    analytics_compress: bool = False
+    analytics_content_inline_threshold_bytes: int = 8192
 
     # --- OTel / Langfuse ---
     otel_exporter_otlp_endpoint: str = ""

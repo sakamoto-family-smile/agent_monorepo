@@ -16,6 +16,13 @@ from app.handlers.disclaimer import (
     DISCLAIMER_FOOTER,
     HELP_TEXT,
 )
+from app.instrumentation.events import (
+    EVENT_MODE_SWITCHED,
+    EVENT_QUIZ_ANSWERED,
+    EVENT_QUIZ_STARTED,
+    EVENT_USER_DATA_DELETED,
+    emit_business_event,
+)
 from app.models import Goal, QuizMode, UserStatus
 from app.repositories.protocols import (
     AnswerHistoryRepo,
@@ -158,7 +165,20 @@ class CommandRouter:
         )
         if result is None:
             return ["現在出題できる問題がありません。しばらく経ってから再度お試しください。"]
-        question, _ = result
+        question, session = result
+        emit_business_event(
+            event_name=EVENT_QUIZ_STARTED,
+            properties={
+                "question_id": question.id,
+                "question_version": question.version,
+                "goal": goal.value,
+                "category": question.category,
+                "difficulty": question.difficulty,
+                "mode": session.mode.value,
+            },
+            user_id=internal_uid,
+            session_id=session.session_id,
+        )
         return [_format_question(question, goal)]
 
     async def _handle_answer(
@@ -167,7 +187,7 @@ class CommandRouter:
         consumed = await self._deps.quiz.consume_active_session(internal_uid)
         if consumed is None:
             return ["出題中の問題がありません。「クイズ」と送って次の問題を始めてください。"]
-        _, question = consumed
+        session, question = consumed
         if chosen_index >= len(question.choices):
             return [
                 f"選択肢の番号が範囲外です（1〜{len(question.choices)} の範囲で）。"
@@ -177,6 +197,19 @@ class CommandRouter:
             question=question,
             chosen_index=chosen_index,
         )
+        emit_business_event(
+            event_name=EVENT_QUIZ_ANSWERED,
+            properties={
+                "question_id": question.id,
+                "question_version": question.version,
+                "answer": chosen_index,
+                "correct": scoring.correct,
+                "category": question.category,
+                "difficulty": question.difficulty,
+            },
+            user_id=internal_uid,
+            session_id=session.session_id,
+        )
         return [_format_scoring(question, scoring)]
 
     async def _handle_mode_toggle(
@@ -184,6 +217,11 @@ class CommandRouter:
     ) -> list[str]:
         new_goal = Goal.FULL if current is Goal.PROVISIONAL else Goal.PROVISIONAL
         await self._deps.identity.switch_goal(internal_uid, new_goal)
+        emit_business_event(
+            event_name=EVENT_MODE_SWITCHED,
+            properties={"from_goal": current.value, "to_goal": new_goal.value},
+            user_id=internal_uid,
+        )
         return [
             f"モードを切替えました：{_goal_jp(current)} → {_goal_jp(new_goal)}\n"
             "「クイズ」と送ると新しいモードで出題されます。"
@@ -195,6 +233,11 @@ class CommandRouter:
         user = await self._deps.identity.switch_goal(internal_uid, goal)
         if user is None:
             return ["モード変更に失敗しました。再度お試しください。"]
+        emit_business_event(
+            event_name=EVENT_MODE_SWITCHED,
+            properties={"from_goal": None, "to_goal": goal.value},
+            user_id=internal_uid,
+        )
         return [
             f"モードを「{_goal_jp(goal)}」に設定しました。\n"
             "「クイズ」と送ると新しいモードで出題されます。"
@@ -217,6 +260,11 @@ class CommandRouter:
             }
         )
         await self._deps.users.upsert(scheduled)
+        emit_business_event(
+            event_name=EVENT_USER_DATA_DELETED,
+            properties={"trigger": "user_command"},
+            user_id=internal_uid,
+        )
         return [DELETE_CONFIRMATION]
 
 
