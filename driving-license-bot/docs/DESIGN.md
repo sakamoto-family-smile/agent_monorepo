@@ -221,14 +221,14 @@ Supervisor Agent
 ### 4.2 LLM ゲートウェイ：Vertex AI 経由 Claude
 
 - **採用理由**: GCP 内認証統一（Workload Identity）、Model Armor 統合、リージョン管理の一元化
-- **リージョン候補**:
-  - 第一候補: `asia-southeast1`（低レイテンシ）
-  - 代替: `us-east5`（最新モデル先行提供）
-  - **Phase 0 で `asia-northeast1` での Claude 提供状況を要確認**
+- **リージョン**: **`asia-northeast1`（Tokyo）に確定**（Phase 0 調査）
+  - Anthropic Claude on Vertex AI は Tokyo リージョンでフル対応（Opus 4.7 / Sonnet 4.6 / Haiku 4.5）
+  - グローバルエンドポイント（`location: global`）は障害時のフェイルオーバー予備として保持
+  - 詳細は [INFRA_DECISIONS.md §1](./INFRA_DECISIONS.md#1-vertex-ai-claude-のリージョン確定-asia-northeast1) 参照
 - **認証**: Cloud Run Service Account に `roles/aiplatform.user` を付与、API キー不要
 - **Model Armor**: Vertex AI Model Armor を Claude 呼び出し前段に配置（プロンプトインジェクション・PII 検知）
 - **Prompt Caching**: 法令本文・教則本文・スキル定義を `cache_control` で system prompt に固定
-- **SDK**: `claude-agent-sdk` を `ANTHROPIC_VERTEX_PROJECT_ID` / `CLOUD_ML_REGION` 環境変数で Vertex モードに切替
+- **SDK**: `claude-agent-sdk` を `ANTHROPIC_VERTEX_PROJECT_ID` / `CLOUD_ML_REGION=asia-northeast1` 環境変数で Vertex モードに切替
 
 ### 4.3 観測性 / セキュリティ
 
@@ -449,14 +449,29 @@ LINE User ID は Bot（Messaging API チャネル）ごとに異なる。複数 
 | 本免専用 | `[full]` | ❌ | ✅ |
 | 共通範囲 | `[provisional, full]` | ✅ | ✅ |
 
-### 9.3 模擬試験モード
+### 9.3 模擬試験モード（Phase 0 確定）
 
-| ゴール | 問題数 | 制限時間 | 合格基準（暫定） |
-|---|---|---|---|
-| 仮免 | 50 問 | 30 分 | 90%（45 問正解） |
-| 本免 | 95 問 | 50 分 | 90%（86 問正解） |
+実試験の公式構成は以下（[DATA_SOURCES.md §6](./DATA_SOURCES.md#6-学科試験の公式合格基準配点phase-0-確認済み) 参照）:
 
-> **注**: 本免の実試験は一般に「100 問満点中 90 点以上で合格」（文章問題 90 問 × 1 点 + イラスト問題 5 問 × 2 点）と運用されている。本サービスはイラスト問題（複合配点）を Phase 1〜5 では採用せず、文章問題ベースで合格率を 90% 相当に揃えている。配点を含む完全な再現は Phase 6 以降の検討事項とし、合格基準の根拠は [docs/DATA_SOURCES.md](./DATA_SOURCES.md) の各都道府県警察 / 警察庁公表資料への参照と整合させる（Phase 0 で要確認）。
+| ゴール | 問題数 | 配点 | 満点 | 制限時間 | 合格点 |
+|---|---|---|---|---|---|
+| 仮免 | 50 問 | 各 2 点 | 100 点 | 30 分 | 90 点 |
+| 本免 | 95 問（〇× 90 + イラスト 5） | 〇× 各 1 点 / イラスト各 2 点 | 100 点 | 50 分 | 90 点 |
+
+#### Phase 1〜5 の暫定実装
+
+イラスト問題（1 イラスト 3 連問・3 問全正解で 2 点）は Flex Message 設計が複雑なため、Phase 5 までは **〇× 問題のみで 100 点換算（90 点合格）に揃える**:
+
+| ゴール | 出題形式 | 問題数 | 配点 | 満点 | 制限時間 | 合格点 |
+|---|---|---|---|---|---|---|
+| 仮免 | 〇× | 50 問 | 各 2 点 | 100 点 | 30 分 | 90 点 |
+| 本免（暫定） | 〇× | 95 問 | 各約 1.05 点 | 100 点 | 50 分 | 90 点 |
+
+#### Phase 6 以降の本試験完全再現
+
+イラスト問題（3 連問形式）を別 format として追加し、本試験の配点を厳密に再現する。
+
+#### 共通
 
 - セッション `expires_at` で制限時間を管理
 - LINE では 1 問ずつ Quick Reply で進行
@@ -544,27 +559,33 @@ LINE User ID は Bot（Messaging API チャネル）ごとに異なる。複数 
 
 ---
 
-## 14. オープン課題（Phase 0 までに決定）
+## 14. オープン課題（Phase 0 → Phase 1 着手前のステータス）
 
 ### 14.1 法務・データソース系
 
-- [ ] e-Gov 法令検索 API v2 の利用規約・レート制限の確認
-- [ ] 警察庁「交通の方法に関する教則」の利用許諾範囲の確認
-- [ ] 標識画像の調達方針確定（自前 SVG / オープンデータ）
-- [ ] 利用規約・プライバシーポリシーの初版作成
+- [x] e-Gov 法令検索 API v2 の利用規約確認 — 政府標準利用規約 2.0（CC BY 互換、商用可、出典必須）
+- [x] 警察庁「交通の方法に関する教則」の利用条件確認 — PDL1.0（出典必須、商用可）
+- [x] 標識画像の調達方針確定 — Wikimedia Commons PD → 自作の順
+- [x] 学科試験の公式合格基準・配点確認 — 仮免/本免 各 100 点満点・90 点合格
+- [ ] 利用規約・プライバシーポリシーの公開前確定（運営者名・連絡先・適用日） — Phase 1 開発完了後
+- [ ] e-Gov API のレート制限・認証要件の最終確認（実装直前）
 
 ### 14.2 GCP / LLM 系
 
-- [ ] Vertex AI Claude のリージョン確定（asia-southeast1 / asia-northeast1 / us-east5）
-- [ ] 重複検査用ベクトル DB の選定（Vertex AI Vector Search / AlloyDB pgvector）
-- [ ] LINE Login プロバイダー作成（将来の複数 Bot 名寄せ準備）
+- [x] Vertex AI Claude のリージョン確定 — **`asia-northeast1`（Tokyo）**
+- [x] 重複検査用ベクトル DB の選定 — **Cloud SQL Postgres + pgvector（db-f1-micro）**
+- [x] エンベディングモデル選定 — Vertex AI `text-embedding-004`（768 次元）
+- [ ] Tokyo リージョンでの prompt caching / Model Armor の最終確認（実装直前）
+- [ ] LINE Login プロバイダー作成（将来の複数 Bot 名寄せ準備） — Phase 1 で実施
 
 ### 14.3 既存基盤連携系
 
-- [ ] `analytics-platform` の path dependency 追加と `[gcs]` extra 有効化
-- [ ] `analytics-platform` の Langfuse on GKE が未着手の場合、本プロジェクトでもローカル Phoenix で代替するか先行構築するか方針決定
-- [ ] `security-platform` の `inventory.yaml` と `scan.yaml` への登録
-- [ ] `security-platform` の MCP Proxy 経由化（passive mode で 1〜2 週間運用 → active）
+- [x] `analytics-platform` の path dependency 追加と `[gcs]` extra 有効化
+- [x] `security-platform` の `inventory.yaml` と `scan.yaml` への登録
+- [ ] `security-platform` の MCP Proxy 経由化（passive mode で 1〜2 週間運用 → active） — Phase 2 で MCP 実装後
+- [ ] `analytics-platform` の Langfuse on GKE 構築完了を待って OTel エンドポイントを切替 — Phase 3+
+
+詳細は [INFRA_DECISIONS.md](./INFRA_DECISIONS.md) / [DATA_SOURCES.md](./DATA_SOURCES.md) を参照。
 
 ---
 
