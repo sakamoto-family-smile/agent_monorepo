@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # --- LINE ---
     line_channel_secret: str = ""
     line_channel_access_token: str = ""
+    # Messaging API のチャネル ID（数値）。複数 Bot 名寄せの逆引きキーとして使う。
+    # `internal_uid` と紐付くため secret 値からの導出はせず明示設定する。
+    line_channel_id: str = ""
     operator_line_user_ids: str = ""
 
     # --- LINE Login (Phase 2+ で利用、Phase 1 では未使用) ---

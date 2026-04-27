@@ -1,6 +1,8 @@
 """LINE User ID と internal_uid のマッピング。
 
 DESIGN.md §8.1 / §8.2 に準拠。
+mutation は `model_copy(update=...)` で行い直接代入は避ける（pydantic v2 の
+validation を毎回通すため）。
 """
 
 from __future__ import annotations
@@ -32,15 +34,15 @@ class IdentityService:
         if internal_uid:
             existing = await self._users.get(internal_uid)
             if existing is not None:
-                # last_active_at の更新
-                existing.last_active_at = datetime.now(UTC)
+                updates: dict[str, object] = {"last_active_at": datetime.now(UTC)}
                 if display_name and not existing.display_name:
-                    existing.display_name = display_name
+                    updates["display_name"] = display_name
                 if picture_url and not existing.picture_url:
-                    existing.picture_url = picture_url
-                await self._users.upsert(existing)
-                return existing
-            # index は残っているが users が無い → 整合性回復
+                    updates["picture_url"] = picture_url
+                refreshed = existing.model_copy(update=updates)
+                await self._users.upsert(refreshed)
+                return refreshed
+            # index は残っているが users が無い → 整合性回復のため再発行
             internal_uid = None
 
         # 新規発行
@@ -63,7 +65,8 @@ class IdentityService:
         user = await self._users.get(internal_uid)
         if user is None:
             return None
-        user.active_goal = goal
-        user.last_active_at = datetime.now(UTC)
-        await self._users.upsert(user)
-        return user
+        updated = user.model_copy(
+            update={"active_goal": goal, "last_active_at": datetime.now(UTC)}
+        )
+        await self._users.upsert(updated)
+        return updated

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 from linebot.v3.webhooks import (
@@ -19,9 +20,10 @@ from linebot.v3.webhooks import (
     TextMessageContent,
     UnfollowEvent,
 )
+from linebot.v3.webhooks.models import Event
 
 from app.config import settings
-from app.handlers.command_router import HandlerDeps
+from app.handlers.command_router import CommandRouter, HandlerDeps
 from app.handlers.disclaimer import BLOCKED_DELETION_NOTE, FOLLOW_GREETING
 from app.models import UserStatus
 from app.repositories import (
@@ -107,13 +109,13 @@ async def webhook(
     body = await request.body()
     try:
         events = client.parse_events(body, x_line_signature)
-    except InvalidSignatureError:
+    except InvalidSignatureError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid signature"
-        )
+        ) from exc
 
     deps = _build_deps()
-    bot_channel_id = settings.line_channel_secret[:8] if settings.line_channel_secret else ""
+    bot_channel_id = settings.line_channel_id
 
     for event in events:
         background_tasks.add_task(
@@ -126,9 +128,15 @@ async def webhook(
 async def _process_event_safely(
     client: LineBotClient,
     deps: HandlerDeps,
-    event,  # noqa: ANN001 — LINE SDK のイベント Union
+    event: Event,
     bot_channel_id: str,
 ) -> None:
+    """個別イベント処理の例外を握り潰す（LINE の再送を抑止するため）。
+
+    LINE 公式仕様: Webhook が 5xx を返すと LINE は再送を試みるため、ハンドラ単位の
+    一時的失敗で再送ループに入らないよう、ここで例外を捕捉してログだけ残す。
+    署名検証はこの関数の手前 `webhook` で済んでいるため、安全側に倒している。
+    """
     try:
         await _process_event(client, deps, event, bot_channel_id)
     except Exception:  # noqa: BLE001
@@ -138,7 +146,7 @@ async def _process_event_safely(
 async def _process_event(
     client: LineBotClient,
     deps: HandlerDeps,
-    event,  # noqa: ANN001
+    event: Event,
     bot_channel_id: str,
 ) -> None:
     if isinstance(event, FollowEvent):
@@ -161,15 +169,18 @@ async def _process_event(
         user = await deps.users.get(internal_uid)
         if user is None:
             return
-        from datetime import UTC, datetime, timedelta
-
-        user.status = UserStatus.BLOCKED
-        user.scheduled_deletion_at = datetime.now(UTC) + timedelta(days=30)
-        await deps.users.upsert(user)
+        scheduled_at = datetime.now(UTC) + timedelta(days=30)
+        blocked = user.model_copy(
+            update={
+                "status": UserStatus.BLOCKED,
+                "scheduled_deletion_at": scheduled_at,
+            }
+        )
+        await deps.users.upsert(blocked)
         logger.info(
             "user blocked: internal_uid=%s scheduled_deletion_at=%s. note=%s",
             internal_uid,
-            user.scheduled_deletion_at.isoformat(),
+            scheduled_at.isoformat(),
             BLOCKED_DELETION_NOTE,
         )
         return
@@ -178,8 +189,6 @@ async def _process_event(
         line_user_id = _extract_user_id(event)
         if not line_user_id:
             return
-        from app.handlers.command_router import CommandRouter
-
         replies = await CommandRouter(deps).dispatch_text(
             line_user_id=line_user_id,
             text=event.message.text,
@@ -192,7 +201,7 @@ async def _process_event(
     logger.debug("unsupported event type: %s", type(event).__name__)
 
 
-def _extract_user_id(event) -> str | None:  # noqa: ANN001
+def _extract_user_id(event: Event) -> str | None:
     src = getattr(event, "source", None)
     if src is None:
         return None

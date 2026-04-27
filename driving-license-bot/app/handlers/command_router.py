@@ -45,6 +45,7 @@ _FALSE_KEYWORDS = {"誤り", "×", "false", "2"}
 
 
 def _normalize(text: str) -> str:
+    """テキストを strip + lower に正規化（コマンドキーワード照合の単一基準）。"""
     return text.strip().lower()
 
 
@@ -95,8 +96,9 @@ class CommandRouter:
         display_name: str | None = None,
     ) -> list[str]:
         """テキストメッセージを受けて、応答テキスト（最大 5 通）を返す。"""
-        normalized = text.strip()
-        lowered = _normalize(text)
+        # キーワードはすべて小文字で定義しているため、`_normalize` で
+        # 大文字小文字を吸収する単一基準にまとめる（日本語は影響を受けない）。
+        key = _normalize(text)
 
         user = await self._deps.identity.get_or_create(
             line_user_id,
@@ -110,35 +112,33 @@ class CommandRouter:
             ]
 
         # 1. データ削除（最優先：誤動作リスクを下げるため）
-        if normalized in _DELETE_KEYWORDS:
+        if key in _DELETE_KEYWORDS:
             return await self._handle_delete(user.internal_uid)
 
         # 2. ヘルプ
-        if normalized in _HELP_KEYWORDS or lowered in _HELP_KEYWORDS:
+        if key in _HELP_KEYWORDS:
             return [HELP_TEXT]
 
         # 3. モード関連
-        if normalized in _MODE_INFO_KEYWORDS:
+        if key in _MODE_INFO_KEYWORDS:
             return [_format_current_mode(user.active_goal)]
-        if normalized in _MODE_SWITCH_KEYWORDS:
+        if key in _MODE_SWITCH_KEYWORDS:
             return await self._handle_mode_toggle(user.internal_uid, user.active_goal)
-        if normalized in _PROVISIONAL_KEYWORDS:
+        if key in _PROVISIONAL_KEYWORDS:
             return await self._handle_mode_set(user.internal_uid, Goal.PROVISIONAL)
-        if normalized in _FULL_KEYWORDS:
+        if key in _FULL_KEYWORDS:
             return await self._handle_mode_set(user.internal_uid, Goal.FULL)
 
         # 4. クイズ開始
-        if normalized in _QUIZ_KEYWORDS:
+        if key in _QUIZ_KEYWORDS:
             return await self._handle_quiz_start(user.internal_uid, user.active_goal)
 
         # 5. 出題中の回答
         active = await self._deps.sessions.get_active(user.internal_uid)
         if active is not None:
-            chosen = _parse_answer(normalized)
+            chosen = _parse_answer(key)
             if chosen is not None:
-                return await self._handle_answer(
-                    user.internal_uid, chosen
-                )
+                return await self._handle_answer(user.internal_uid, chosen)
 
         # 6. 不明
         return [
@@ -204,13 +204,19 @@ class CommandRouter:
         user = await self._deps.users.get(internal_uid)
         if user is None:
             return [DELETE_CONFIRMATION]
-        # 即時論理削除 → 7 日後物理削除（Phase 1 では同期的に index/session/history を消す）
+        # 即時論理削除 → 7 日後物理削除（Phase 1 は in-memory のため同期 4 操作で完結）。
+        # TODO(Phase 2): Firestore 移行時は batch write / transaction で原子化し、
+        #                途中失敗時に index だけ残るケースを排除する。
         await self._deps.line_user_index.delete(user.line_user_id)
         await self._deps.sessions.delete_all(internal_uid)
         await self._deps.answer_histories.delete_all(internal_uid)
-        user.status = UserStatus.SCHEDULED_DELETION
-        user.scheduled_deletion_at = datetime.now(UTC) + timedelta(days=7)
-        await self._deps.users.upsert(user)
+        scheduled = user.model_copy(
+            update={
+                "status": UserStatus.SCHEDULED_DELETION,
+                "scheduled_deletion_at": datetime.now(UTC) + timedelta(days=7),
+            }
+        )
+        await self._deps.users.upsert(scheduled)
         return [DELETE_CONFIRMATION]
 
 
