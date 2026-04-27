@@ -126,6 +126,60 @@ Supervisor Agent
 └─ Analytics Agent           : 苦手分野分析・出題最適化
 ```
 
+### 3.1.1 Question Generator Agent（Phase 2-B 実装済み）
+
+`app/agent/` 配下に最初の sub-agent を実装。Phase 2-C 以降で Fact Checker /
+Quality Reviewer を追加し、Supervisor パターンに発展させる。
+
+```
+app/agent/
+├── llm_client.py            # LLMClient Protocol + VertexAnthropicClient + MockLLMClient
+├── corpus.py                # 法令/教則の grounding スニペット（Phase 4 で pgvector 化）
+├── prompts/
+│   └── question_generator.py  # SYSTEM_PROMPT + build_user_prompt
+├── question_generator.py    # JSON parse + Question schema 検証 + retry ロジック
+├── models.py                # GenerationRequest / GenerationResult
+└── errors.py                # GenerationParseError / GenerationValidationError
+```
+
+**生成フロー** (1 問あたり):
+
+```
+GenerationRequest (goal, category, difficulty, topic_hint)
+    │
+    ▼
+corpus.pick_snippets(category)  →  CorpusSnippet[]（grounding 候補）
+    │
+    ▼
+build_user_prompt(...)  +  SYSTEM_PROMPT
+    │
+    ▼
+LLMClient.generate(system=cached, user=...)   ← Vertex AI Claude (Tokyo)
+    │
+    ▼
+_extract_json_text(response.text)            ← Markdown フェンス対応
+    │
+    ▼
+json.loads + _ensure_unique_id  → dict
+    │
+    ▼
+Question.model_validate(dict)                ← sources 必須等を pydantic で強制
+    │
+    ▼
+GenerationResult (question + token usage)
+```
+
+**retry 戦略**:
+- JSON パース失敗 / Schema 違反は `max_retries`（既定 1 回）までリトライ
+- LLM 呼び出し自体のエラーはリトライせず、Vertex 側のリトライに委ねる
+- 全 retry 失敗時は `GenerationParseError` / `GenerationValidationError` を raise
+
+**テスト**:
+- `MockLLMClient(text=...)` で固定レスポンスを返し、パース・検証ロジックをユニット
+  テスト
+- 実 Vertex AI への接続テストは Phase 2-C 以降に統合テストとして追加
+- `AGENT_LLM_MOCK=true` env で誤って本番 LLM を叩かない安全弁
+
 ### 3.2 Fact Checker Agent の責務（明文化）
 
 1. **引用条文の実在検証**: `law-mcp` で law_id + 条 + 項 を引いて条文本文を取得し、ドラフトの quoted_text と完全一致 or 高類似度（>0.9）を確認

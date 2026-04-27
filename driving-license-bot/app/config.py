@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     generation_batch_size: int = 20
     seed_questions_path: str = "app/data/seed_questions.json"
 
+    # --- agent / LLM 制御 ---
+    # true で MockLLMClient を返す。CI / 開発環境で誤って Vertex を叩かないため。
+    agent_llm_mock: bool = False
+    # 生成時のサンプリング温度（低めで決定的に）
+    agent_temperature: float = 0.4
+    agent_max_tokens: int = 4096
+
     # --- レビュー Web UI ---
     review_admin_allowed_emails: str = ""
 
