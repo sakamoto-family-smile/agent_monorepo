@@ -180,6 +180,31 @@ GenerationResult (question + token usage)
 - 実 Vertex AI への接続テストは Phase 2-C 以降に統合テストとして追加
 - `AGENT_LLM_MOCK=true` env で誤って本番 LLM を叩かない安全弁
 
+### 3.1.2 Phase 2-C 実装：Fact Checker + Quality Reviewer + Pipeline
+
+```
+app/agent/
+├── fact_checker.py        # rule-based（LLM 不使用）
+├── quality_reviewer.py    # LLM-based（Gemini cross-check）
+├── pipeline.py            # 3 段オーケストレータ + 公開判定
+├── prompts/
+│   └── quality_reviewer.py
+└── llm_client.py          # VertexGeminiClient を追加
+```
+
+**判定マトリクス**:
+
+| fact_check.passed | reviewer.verdict | overall outcome |
+|---|---|---|
+| False | （任意） | rejected |
+| True | reject | rejected |
+| True | needs_human_review | needs_human_review |
+| True | approve | needs_human_review（Phase 1 既定） |
+| True | approve | approved（auto_approve_overall_score を渡し、しきい値超え時） |
+
+Phase 2-C の既定は `auto_approve_overall_score=None` で **常に人間レビュー必須**。
+Phase 3+ で運用結果を見ながらしきい値を導入する。
+
 ### 3.2 Fact Checker Agent の責務（明文化）
 
 1. **引用条文の実在検証**: `law-mcp` で law_id + 条 + 項 を引いて条文本文を取得し、ドラフトの quoted_text と完全一致 or 高類似度（>0.9）を確認
