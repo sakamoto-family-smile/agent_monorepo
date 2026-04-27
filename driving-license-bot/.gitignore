@@ -12,9 +12,10 @@ __pycache__/
 .env.local
 .env.*.local
 
-# Local data (analytics-platform conventions と整合)
-data/
-!data/.gitkeep
+# Local data — トップレベル `data/` のみ対象（実行時生成物）。
+# `app/data/` は seed JSON 等の commit 対象データを置くため除外しない。
+/data/
+!/data/.gitkeep
 
 # uv
 uv.lock.local

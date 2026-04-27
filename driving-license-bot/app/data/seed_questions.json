@@ -1,0 +1,663 @@
+[
+  {
+    "id": "q_seed_001",
+    "version": 1,
+    "body": "信号機の青色の灯火は、自動車が直進し、左折し、または右折することができることを示している。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法施行令 第 2 条に基づき、青色の灯火は車両が直進・左折・右折のいずれもできることを示す。ただし二段階右折を要する原動機付自転車は除く。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法施行令 第 2 条（信号の意味等）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335CO0000000270",
+        "quoted_text": "青色の灯火 - 自動車、原動機付自転車及びトロリーバスは、直進し、左折し、又は右折することができること。"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_002",
+    "version": 1,
+    "body": "信号が黄色の灯火に変わったときは、停止位置を超えて進行してはならないが、安全に停止できない場合はそのまま進行してよい。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "黄色の灯火は『停止位置を越えて進行してはならない』ことを示す。ただし、停止位置に近接していて安全に停止できない場合は進行してよい（道路交通法施行令第 2 条）。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法施行令 第 2 条（信号の意味等）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335CO0000000270"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_003",
+    "version": 1,
+    "body": "「一時停止」の標識のある場所では、停止線の直前で必ず一時停止し、安全を確認しなければならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 43 条により、一時停止の標識または標示のある交差点等では、停止線の直前で一時停止し交差道路の交通の安全を確認しなければならない。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "signs",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 43 条（指定場所における一時停止）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_004",
+    "version": 1,
+    "body": "横断歩道に歩行者が渡ろうとしているときは、その手前で一時停止して歩行者の通行を妨げないようにしなければならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 38 条により、横断歩道を通過する車両等は、横断しようとしている歩行者があるときは横断歩道の手前で一時停止し、かつその通行を妨げないようにしなければならない。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 38 条（横断歩道等における歩行者等の優先）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_005",
+    "version": 1,
+    "body": "酒を飲んでいたとしても、少量で運転に支障がないと自分が判断すれば運転してよい。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 1,
+    "explanation": "道路交通法第 65 条により、何人も酒気を帯びて車両等を運転してはならない。量の多少にかかわらず禁止される。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "manners",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 65 条（酒気帯び運転等の禁止）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_006",
+    "version": 1,
+    "body": "運転者は、シートベルトを着用しなければならず、また助手席や後部座席の同乗者にも着用させなければならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 71 条の 3 により、運転者は座席ベルトを装着し、助手席・後部座席の同乗者にも装着させなければならない。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 71 条の 3（普通自動車等の運転者の遵守事項）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_007",
+    "version": 1,
+    "body": "6 歳未満の幼児を自動車に乗せるときは、原則としてチャイルドシートを使用しなければならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 71 条の 3 第 3 項により、6 歳未満の幼児を乗車させて運転するときは幼児用補助装置（チャイルドシート）を使用しなければならない。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 71 条の 3 第 3 項",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_008",
+    "version": 1,
+    "body": "運転中に携帯電話を手に持って通話することは、停止しているときを除き禁止されている。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 71 条第 5 号の 5 により、自動車等を運転中に携帯電話用装置を通話のために手に持って使用することは禁止されている。停止しているときは除外される。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "manners",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 71 条第 5 号の 5（運転者の遵守事項）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_009",
+    "version": 1,
+    "body": "「車両進入禁止」の標識のある道路には、自動車・原動機付自転車・軽車両のいずれも進入してはならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "車両進入禁止の規制標識は、その道路への車両の進入を禁止する。一方通行の出口側に設置されることが多い。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "signs",
+    "sources": [
+      {
+        "type": "sign_order",
+        "title": "道路標識、区画線及び道路標示に関する命令 別表第二（規制標識）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335M50000003003"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_010",
+    "version": 1,
+    "body": "「最高速度」の標識がない一般道路では、普通自動車は時速 50 キロメートルを超えて走行してはならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 1,
+    "explanation": "道路交通法施行令第 11 条により、一般道路における自動車の法定最高速度は時速 60 キロメートル。標識がない場合はこの法定速度が適用される。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法施行令 第 11 条（最高速度）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335CO0000000270"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_011",
+    "version": 1,
+    "body": "高速自動車国道の本線車道における普通自動車の法定最高速度は、原則として時速 100 キロメートルである。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "高速自動車国道の本線車道における普通自動車の法定最高速度は時速 100 キロメートル（道路交通法施行令第 27 条）。標識による指定がある場合はそれに従う。",
+    "applicable_goals": ["full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法施行令 第 27 条（高速自動車国道での最高速度）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335CO0000000270"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_012",
+    "version": 1,
+    "body": "高速道路では、最低速度の標識による指定がない場合の法定最低速度は時速 50 キロメートルである。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "高速自動車国道の本線車道での法定最低速度は時速 50 キロメートル（道路交通法施行令第 27 条の 3）。標識で別途指定があれば従う。",
+    "applicable_goals": ["full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法施行令 第 27 条の 3（最低速度）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335CO0000000270"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_013",
+    "version": 1,
+    "body": "「駐車禁止」の標識がある場所であっても、5 分以内であれば荷物の積み下ろしのために停車してよい。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "駐車禁止場所であっても、人の乗降や 5 分を超えない貨物の積卸しのための停車は『駐車』に当たらないため可能。ただし駐停車禁止の場所では停車もできない。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 2 条第 1 項第 18 号（駐車の定義）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_014",
+    "version": 1,
+    "body": "横断歩道とその端から前後 5 メートル以内の場所では、駐車も停車もしてはならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 44 条により、横断歩道・自転車横断帯およびその端から前後 5 メートル以内の場所は駐停車禁止。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 44 条（停車及び駐車を禁止する場所）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_015",
+    "version": 1,
+    "body": "交差点の手前 30 メートル以内の場所では、原則として追い越しのため進路を変更してはならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 30 条により、交差点とその手前から 30 メートル以内の場所では追い越し（および追い越しのための進路変更）が禁止されている。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 30 条（追越しを禁止する場所）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_016",
+    "version": 1,
+    "body": "雨天時は晴れているときに比べて停止距離が長くなるため、通常時よりも車間距離を多めにとる必要がある。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "雨天時は路面が滑りやすくなり、ブレーキの効きが悪くなって制動距離が長くなる。教則でも車間距離を十分にとるよう指導されている。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "hazard",
+    "sources": [
+      {
+        "type": "kyousoku",
+        "title": "交通の方法に関する教則（警察庁）",
+        "url": "https://www.npa.go.jp/bureau/traffic/20241113kyousoku.pdf"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_017",
+    "version": 1,
+    "body": "夜間に対向車と行き違うときは、視界確保のため常にハイビーム（上向き）で走行しなければならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 1,
+    "explanation": "対向車と行き違うときや、前車に追従するときは、相手の運転者がまぶしくならないよう前照灯を下向き（ロービーム）に切り替える必要がある（道路交通法第 52 条第 2 項）。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "hazard",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 52 条第 2 項（車両等の灯火）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_018",
+    "version": 1,
+    "body": "踏切を通過するときは、踏切の手前で必ず一時停止し、自分の目と耳で安全を確認しなければならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 33 条により、車両等は踏切を通過しようとするときは踏切の直前で停止し安全を確認しなければならない。信号機の青色灯火に従う場合等の例外を除く。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 33 条（踏切の通過）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_019",
+    "version": 1,
+    "body": "前方の信号が黄色の点滅であるときは、徐行して交差点を通過することができる。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "黄色の灯火の点滅は『他の交通に注意して進行することができる』ことを示す（道路交通法施行令第 2 条）。徐行義務はないが、安全に注意して進行する必要がある。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法施行令 第 2 条（信号の意味等）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335CO0000000270"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_020",
+    "version": 1,
+    "body": "前方の信号が赤色の点滅であるときは、停止位置で一時停止し、安全を確認した後に進行することができる。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "赤色の灯火の点滅は『停止位置において一時停止しなければならない』ことを示す。一時停止後に安全を確認して進行する。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法施行令 第 2 条（信号の意味等）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335CO0000000270"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_021",
+    "version": 1,
+    "body": "右左折するときは、その行為をしようとする地点（交差点においてはその交差点の手前の側端）から 30 メートル手前で合図を出さなければならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法施行令第 21 条により、右折・左折・転回の合図は、その行為をする地点（交差点の場合はその手前の側端）から 30 メートル手前で出さなければならない。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法施行令 第 21 条（合図の時期及び方法）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335CO0000000270"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_022",
+    "version": 1,
+    "body": "進路変更するときは、その行為をしようとする 3 秒前に合図を出さなければならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法施行令第 21 条により、進路変更の合図は進路を変えようとするときの 3 秒前。右左折は 30 メートル手前との区別に注意。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法施行令 第 21 条（合図の時期及び方法）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335CO0000000270"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_023",
+    "version": 1,
+    "body": "横断歩道のない交差点付近で歩行者が横断しているときは、車はその歩行者の通行を妨げてはならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 38 条の 2 により、横断歩道のない交差点付近を歩行者が横断しているときも、その通行を妨げてはならない。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 38 条の 2（横断歩道のない交差点における歩行者の優先）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_024",
+    "version": 1,
+    "body": "高速道路では二輪車（大型・普通自動二輪車）は、運転者を除き同乗者を乗せて運転してはならない区間がある。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "高速自動車国道等では、20 歳未満の運転者や免許取得後 3 年未満の運転者は二人乗りが禁止される（道路交通法第 71 条の 4 等）。",
+    "applicable_goals": ["full"],
+    "difficulty": "advanced",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 71 条の 4（自動二輪車の運転者の遵守事項）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_025",
+    "version": 1,
+    "body": "交通事故を起こしたときは、直ちに車を止めて負傷者の救護と道路における危険防止の措置をとり、警察官に報告しなければならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 72 条により、交通事故があったときは運転者等は直ちに運転を停止し、負傷者の救護と危険防止の措置をとり、警察官に報告しなければならない。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "manners",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 72 条（交通事故の場合の措置）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_026",
+    "version": 1,
+    "body": "「徐行」とは、車がただちに停止することができるような速度で進行することをいう。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 2 条第 1 項第 20 号により、『徐行』とは車両等が直ちに停止することができるような速度で進行することをいう。一般的には時速 10 キロメートル以下が目安。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 2 条第 1 項第 20 号（徐行の定義）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_027",
+    "version": 1,
+    "body": "見通しのきかない交差点を通行するときは、原則として徐行しなければならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 42 条により、見通しのきかない交差点に入ろうとするときや道路の曲がり角付近、上り坂の頂上付近等では徐行しなければならない（信号機等で交通整理されている場合等を除く）。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "basic",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 42 条（徐行すべき場所）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_028",
+    "version": 1,
+    "body": "緊急自動車が接近してきたときは、交差点付近では交差点を避け、道路の左側に寄って進路を譲らなければならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 40 条により、緊急自動車が接近してきたとき、交差点またはその付近では交差点を避け道路の左側に寄って一時停止する。一方通行で左に寄ると緊急自動車の通行妨げとなる場合は右側に寄る。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 40 条（緊急自動車の優先）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_029",
+    "version": 1,
+    "body": "高速自動車国道では、一般道路と異なり前車との安全な車間距離を保つ必要はない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 1,
+    "explanation": "道路交通法第 26 条により、車両は前車が急に停止したときでも追突を避けることができる安全な車間距離を保たなければならない。高速道路では速度が速いため、より長い距離が必要となる。",
+    "applicable_goals": ["full"],
+    "difficulty": "standard",
+    "category": "rules",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 26 条（車間距離の保持）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  },
+  {
+    "id": "q_seed_030",
+    "version": 1,
+    "body": "「警笛鳴らせ」の標識がある場所では、必ず警音器を鳴らさなければならない。",
+    "format": "true_false",
+    "choices": [
+      {"index": 0, "text": "正しい"},
+      {"index": 1, "text": "誤り"}
+    ],
+    "correct": 0,
+    "explanation": "道路交通法第 54 条により、『警笛鳴らせ』の標識のある場所、見通しのきかない山道等の指定された場所では警音器を鳴らさなければならない。それ以外で危険防止のためやむを得ない場合を除き、警音器をみだりに鳴らしてはならない。",
+    "applicable_goals": ["provisional", "full"],
+    "difficulty": "standard",
+    "category": "signs",
+    "sources": [
+      {
+        "type": "law",
+        "title": "道路交通法 第 54 条（警音器の使用等）",
+        "url": "https://laws.e-gov.go.jp/document?lawid=335AC0000000105"
+      }
+    ]
+  }
+]
