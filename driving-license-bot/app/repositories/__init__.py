@@ -1,9 +1,10 @@
-"""リポジトリ層（Protocol + in-memory 実装）。
+"""リポジトリ層（Protocol + in-memory + Firestore 実装）。
 
-Phase 1 は in-memory 実装のみ。Phase 2 で Firestore 実装を別ファイル
-（`firestore_user_repo.py` 等）に追加して同一 Protocol を満たす。
+Phase 1.5 で Firestore 実装を追加。env `REPOSITORY_BACKEND` で切替（`memory` /
+`firestore`）。詳細は `app.repositories.bundle.build_repo_bundle` を参照。
 """
 
+from app.repositories.bundle import RepoBundleImpl, build_repo_bundle
 from app.repositories.in_memory import (
     InMemoryAnswerHistoryRepo,
     InMemoryLineUserIndexRepo,
@@ -30,7 +31,9 @@ __all__ = [
     "LineUserIndexRepo",
     "QuestionPool",
     "RepoBundle",
+    "RepoBundleImpl",
     "SessionRepo",
     "UserRepo",
+    "build_repo_bundle",
     "load_question_pool",
 ]

@@ -38,11 +38,13 @@ def deps(question_pool: QuestionPool, repo_bundle: InMemoryRepoBundle) -> Handle
 
 @pytest.fixture(autouse=True)
 def _reset_line_singletons() -> Iterator[None]:
-    """各テスト後に line_client / route のシングルトンをリセット。"""
+    """各テスト後に line_client / route / instrumentation のシングルトンをリセット。"""
     yield
+    from app.instrumentation import setup as instr_setup
     from app.routes import line as line_route
     from app.services import line_client as line_client_module
 
     line_client_module.reset_line_bot_client()
     line_route.set_repo_bundle(None)
     line_route.set_question_pool(None)
+    instr_setup.reset_for_tests()
