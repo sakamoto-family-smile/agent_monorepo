@@ -241,6 +241,39 @@ app/agent/embedding.py   EmbeddingClient Protocol + VertexEmbeddingClient + Mock
 - `store_on_pass=False`（書き込みは PR E のバッチで一元管理）
 - 本番は `pgvector` バックエンド、CI/開発は `memory`
 
+### 3.1.4 Phase 2-E 実装：問題生成バッチ + Workflow
+
+`app/batch/` に GenerationPipeline を N サイクル回すランナーを追加し、
+Cloud Run Job + Cloud Workflows + Cloud Scheduler で夜間定期実行する。
+
+```
+app/batch/
+├── plan.py                   round-robin 計画生成（goal × category）
+└── generation_runner.py      pipeline を回し、合格分を bank に書き戻し集計
+
+scripts/run_batch.py          Cloud Run Job entry。env で in-memory / pgvector 切替
+scripts/deploy_batch.sh       Job + Workflow + Scheduler を idempotent デプロイ
+workflows/generation_pipeline.yaml   Cloud Workflows 定義（retry + 失敗時通知）
+```
+
+**スケジューリング**:
+- 毎日 02:00 JST に Cloud Scheduler → Cloud Workflows → Cloud Run Job
+- Cloud Run Job 内で `GenerationRunner.run(plan)` が `GENERATION_BATCH_SIZE`
+  件（既定 20）の問題を生成
+- 生成された問題は dedup を通過したものだけ `question_bank` に
+  `status=needs_review` で書き込まれる（`store_on_pass=True`）
+
+**バッチが emit する business_event**（DESIGN.md §15.1.4 と整合）:
+- 全体: `batch_started` / `batch_completed` / `pool_low_alert`
+- 各問題: `question_drafted` / `fact_check_passed|rejected` /
+  `dedup_passed|rejected` / `quality_review_approved|rejected|needs_human` /
+  `question_published` / `question_queued_for_review`
+
+**プール枯渇アラート**:
+- バッチ完了時に `question_bank.count(status="needs_review|published")` を読み、
+  `QUESTION_POOL_MIN_SIZE`（既定 30）を下回れば `pool_low_alert` を emit
+- Phase 5 でこのイベントを受けて運営者に LINE Push する仕組みを実装
+
 ### 3.2 Fact Checker Agent の責務（明文化）
 
 1. **引用条文の実在検証**: `law-mcp` で law_id + 条 + 項 を引いて条文本文を取得し、ドラフトの quoted_text と完全一致 or 高類似度（>0.9）を確認
