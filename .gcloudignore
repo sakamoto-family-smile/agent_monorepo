@@ -1,0 +1,58 @@
+# Cloud Build にアップロードしないファイル / ディレクトリ。
+# build context はリポジトリルート（path dep の analytics-platform を含むため）。
+# driving-license-bot と analytics-platform 以外のディレクトリは基本的に不要。
+
+# VCS
+.git/
+.github/
+.gitignore
+.gitleaks.toml
+
+# Python ビルド成果物
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.venv/
+**/venv/
+**/*.egg-info/
+
+# Terraform
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/terraform.tfvars
+**/.env.secrets
+
+# OS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# データ・大規模 fixture（driving-license-bot/app/data だけは必要）
+**/data/raw/
+**/data/uploaded/
+**/data/payloads/
+**/data/dead_letter/
+**/data/analytics.duckdb*
+
+# 他エージェント（driving-license-bot のビルドには不要）
+agent-system-1/
+agent-system-2/
+hotcook-agent/
+kanie-lab-agent/
+lifeplanner-agent/
+llm-client/
+piyolog-analytics/
+security-platform/
+stock-analysis-agent/
+tech-news-agent/
+
+# README / docs（image には不要）
+LICENSE
+README.md
