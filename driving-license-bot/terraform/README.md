@@ -117,7 +117,35 @@ cd terraform && terraform output line_bot_webhook_url
 
 これを LINE Developers Console の Webhook URL に貼り付けて Verify。
 
-## Teardown（一発削除）
+## Teardown（2 モード）
+
+| モード | 残るもの | CI plan | 用途 |
+|---|---|---|---|
+| `make teardown-app` | WIF / tfstate / API 有効化 / sa-terraform-plan | ✅ 動作継続 | 課金停止したいが CI は維持 |
+| `make teardown` | （ほぼ）何も残らない | ❌ 再 bootstrap 必要 | 完全初期化 |
+
+### `make teardown-app`（推奨デフォルト）
+
+```bash
+GOOGLE_CLOUD_PROJECT=sakamoto-family-agent make teardown-app
+```
+
+削除されるもの:
+- Cloud Run service (`line-bot-service`)
+- Firestore database
+- Secret Manager 4 secrets
+- Artifact Registry repo + image
+- `sa-line-bot` SA + IAM 3 件
+
+残るもの（実質無料）:
+- WIF Pool / Provider / `sa-terraform-plan` SA + IAM
+- tfstate バケット（数 KB）
+- 有効化済み API（課金なし）
+
+→ `Terraform plan / driving-license-bot` ジョブは引き続き動作。
+→ 再展開する場合は tfvars に `line_bot_image` を埋めて `make tf-apply`。
+
+### `make teardown`（完全削除）
 
 ```bash
 GOOGLE_CLOUD_PROJECT=sakamoto-family-agent make teardown
@@ -126,12 +154,14 @@ GOOGLE_CLOUD_PROJECT=sakamoto-family-agent make teardown
 `scripts/teardown.sh` が以下を順に実行:
 
 1. Artifact Registry の image を全削除
-2. `terraform destroy`（SA / Firestore / Secret 枠 / Cloud Run / Artifact Registry repo）
-3. Secret Manager secret の即時削除（destroy のスケジュール削除を待たない）
+2. `terraform destroy`（**WIF 含む全リソース**）
+3. Secret Manager secret の即時削除
 
 オプション:
 - `PURGE_STATE=true` で tfstate バケットも削除（完全初期化）
 - `gcloud projects delete <PROJECT>` で project ごと削除（最も簡単）
+
+⚠️ teardown 後は `make bootstrap` から再実施し、GitHub Variables も再登録が必要。
 
 ## 安全装置
 
