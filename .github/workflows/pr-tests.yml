@@ -657,7 +657,9 @@ jobs:
           EOF
 
       - name: Terraform init
-        run: terraform init -input=false
+        # -lock=false で state lock を取らない (read-only SA で write 不要)。
+        # 並列 PR 実行時の plan 競合は許容（state は plan で書き換わらない）。
+        run: terraform init -input=false -lock=false
 
       - name: Terraform plan
         id: plan
@@ -665,11 +667,13 @@ jobs:
         run: |
           # tfvars は repo に commit していないので、project_id だけ -var で渡す。
           # 他の値はデフォルトで動く（force_destroy=true 等）。
+          # -lock=false: read-only SA のため state lock オブジェクト書き込み不可。
+          # -out なし: tfplan.out も書く必要なし（plan.txt のみで PR コメント）。
           set +e
           terraform plan \
-            -no-color -input=false \
+            -no-color -input=false -lock=false \
             -var "project_id=${{ vars.GCP_PROJECT_ID }}" \
-            -out=tfplan.out 2>&1 | tee plan.txt
+            2>&1 | tee plan.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Comment plan on PR
