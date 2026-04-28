@@ -657,19 +657,26 @@ jobs:
           EOF
 
       - name: Terraform init
-        run: terraform init -input=false
+        # -lock=false で state lock を取らない (read-only SA で write 不要)。
+        # 並列 PR 実行時の plan 競合は許容（state は plan で書き換わらない）。
+        run: terraform init -input=false -lock=false
 
       - name: Terraform plan
         id: plan
         continue-on-error: true
         run: |
-          # tfvars は repo に commit していないので、project_id だけ -var で渡す。
-          # 他の値はデフォルトで動く（force_destroy=true 等）。
+          # tfvars は repo に commit していない（個人値）ので、本番環境と整合する
+          # 値を CI 側で全部明示する。GitHub Variables に WIF_PROVIDER を登録できて
+          # いる時点で WIF は有効化されているので enable_wif=true を渡す。
+          # -lock=false: read-only SA で state lock オブジェクト書き込み不可。
           set +e
           terraform plan \
-            -no-color -input=false \
+            -no-color -input=false -lock=false \
             -var "project_id=${{ vars.GCP_PROJECT_ID }}" \
-            -out=tfplan.out 2>&1 | tee plan.txt
+            -var "enable_wif=true" \
+            -var "tfstate_bucket=${{ vars.TFSTATE_BUCKET }}" \
+            -var "github_repo=${{ github.repository }}" \
+            2>&1 | tee plan.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Comment plan on PR
