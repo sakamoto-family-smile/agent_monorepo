@@ -83,6 +83,41 @@ variable "deletion_protection" {
   default     = false
 }
 
+# ---- Cloud SQL Postgres + pgvector (Phase 2-A) ----
+
+variable "cloudsql_tier" {
+  type        = string
+  description = "Cloud SQL machine tier。PoC 既定の db-f1-micro は ~\\$10/月。本番は db-custom-1-3840 等に上げる。"
+  default     = "db-f1-micro"
+}
+
+variable "cloudsql_disk_size_gb" {
+  type        = number
+  description = "Cloud SQL ディスクサイズ (GB)。SSD 既定。disk_autoresize=false なので明示上限。"
+  default     = 10
+}
+
+variable "cloudsql_deletion_protection" {
+  type        = bool
+  description = "Cloud SQL instance の deletion_protection。dev/PoC では false で teardown を容易に。"
+  default     = false
+}
+
+variable "cloudsql_backup_enabled" {
+  type        = bool
+  description = "Cloud SQL automated backup を有効化。PoC でも有効推奨（コスト微増）。"
+  default     = true
+}
+
+variable "cloudsql_authorized_networks" {
+  type = list(object({
+    name  = string
+    value = string
+  }))
+  description = "Cloud SQL の authorized networks。基本的に空（Cloud SQL Auth Proxy 経由を想定）。一時的なローカル直接接続用に CIDR 追加可。"
+  default     = []
+}
+
 # ---- Workload Identity Federation (CI 用) ----
 
 variable "enable_wif" {

@@ -7,11 +7,19 @@ locals {
 
   sa_line_bot_email = google_service_account.line_bot.email
 
-  # Secret Manager の secret 名（値は手動投入）
+  # Secret Manager の secret 名（LINE 系は値を手動投入、cloudsql は random_password）
   secret_line_channel_secret       = "${var.name_prefix}-line-channel-secret"
   secret_line_channel_access_token = "${var.name_prefix}-line-channel-access-token"
   secret_line_login_channel_secret = "${var.name_prefix}-line-login-channel-secret"
   secret_operator_user_ids         = "${var.name_prefix}-operator-line-user-ids"
+  # Phase 2-A1: Cloud SQL `app` user password。Terraform が random_password で生成し
+  # Secret Manager に格納する。tfstate に値が残る点は PoC として容認（バケットは private）。
+  secret_cloudsql_password = "${var.name_prefix}-cloudsql-password"
+
+  # Phase 2-A1: Cloud SQL instance 名と DB / user 名
+  cloudsql_instance_name = "${var.name_prefix}-pg"
+  cloudsql_database_name = "question_bank"
+  cloudsql_user_name     = "app"
 
   # Common labels
   labels = {

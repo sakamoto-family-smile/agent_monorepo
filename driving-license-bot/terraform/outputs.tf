@@ -18,7 +18,30 @@ output "secret_names" {
     line_channel_access_token = google_secret_manager_secret.line_channel_access_token.secret_id
     line_login_channel_secret = google_secret_manager_secret.line_login_channel_secret.secret_id
     operator_user_ids         = google_secret_manager_secret.operator_user_ids.secret_id
+    cloudsql_password         = google_secret_manager_secret.cloudsql_password.secret_id
   }
+}
+
+# ---- Cloud SQL (Phase 2-A1) ----
+
+output "cloudsql_instance_name" {
+  description = "Cloud SQL instance 名（gcloud sql connect 等で使う）"
+  value       = google_sql_database_instance.main.name
+}
+
+output "cloudsql_instance_connection_name" {
+  description = "Cloud SQL Auth Proxy / Cloud Run の add-cloudsql-instances に渡す `<project>:<region>:<instance>` 形式"
+  value       = google_sql_database_instance.main.connection_name
+}
+
+output "cloudsql_database_name" {
+  description = "アプリが接続する Postgres database 名"
+  value       = google_sql_database.question_bank.name
+}
+
+output "cloudsql_user_name" {
+  description = "アプリが接続する Postgres user 名（パスワードは Secret Manager 参照）"
+  value       = google_sql_user.app.name
 }
 
 # Artifact Registry
