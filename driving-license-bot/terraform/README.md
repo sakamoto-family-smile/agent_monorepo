@@ -80,19 +80,17 @@ make tf-apply
 
 ### 4. Secret に値を投入
 
-LINE Developers Console から取得した値を投入:
-
 ```bash
-echo -n "<channel-secret>" | gcloud secrets versions add \
-    driving-license-bot-line-channel-secret --data-file=-
-
-echo -n "<access-token>" | gcloud secrets versions add \
-    driving-license-bot-line-channel-access-token --data-file=-
-
-# 運営者通知用の LINE User ID（カンマ区切り）。任意。
-echo -n "Uxxxx,Uyyyy" | gcloud secrets versions add \
-    driving-license-bot-operator-line-user-ids --data-file=-
+cp .env.secrets.example .env.secrets
+$EDITOR .env.secrets   # 値を埋める（gitignored）
+make secrets-push
 ```
+
+push スクリプトは末尾改行混入を防ぎ、bytes 表示で目視確認できます。
+
+> teardown-app では Secret 値は消えないので、一度投入すれば後の deploy cycle
+> で再投入不要。LINE 側で token rotation した時だけ `.env.secrets` 更新 +
+> 再 `make secrets-push`。
 
 ### 5. Image を build & push
 
@@ -141,17 +139,17 @@ make teardown-app
 削除されるもの:
 - Cloud Run service (`line-bot-service`)
 - Firestore database
-- Secret Manager 4 secrets
 - Artifact Registry repo + image
 - `sa-line-bot` SA + IAM 3 件
 
-残るもの（実質無料）:
-- WIF Pool / Provider / `sa-terraform-plan` SA + IAM
-- tfstate バケット（数 KB）
-- 有効化済み API（課金なし）
+残るもの:
+- WIF / `sa-terraform-plan` / tfstate バケット / 有効化済み API（実質無料）
+- **Secret Manager 4 secrets（値ごと）** ← 再 apply 後の再投入が不要
 
 → `Terraform plan / driving-license-bot` ジョブは引き続き動作。
 → 再展開する場合は tfvars に `line_bot_image` を埋めて `make tf-apply`。
+→ secret は前回値が再利用される。LINE 側で token rotation した時だけ
+  `.env.secrets` を更新して `make secrets-push`。
 
 ### `make teardown`（完全削除）
 

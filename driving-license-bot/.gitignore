@@ -11,6 +11,7 @@ __pycache__/
 .env
 .env.local
 .env.*.local
+.env.secrets
 
 # Local data — トップレベル `data/` のみ対象（実行時生成物）。
 # `app/data/` は seed JSON 等の commit 対象データを置くため除外しない。

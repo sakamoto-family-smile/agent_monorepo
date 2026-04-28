@@ -17,7 +17,8 @@ GOOGLE_CLOUD_PROJECT ?= $(shell gcloud config get-value project 2>/dev/null)
 
 .PHONY: help install lint format test check run docker-build docker-run \
 	tf-init tf-plan tf-apply tf-destroy tf-fmt tf-validate tf-output-wif \
-	bootstrap teardown teardown-app image-build _require_project show-project
+	bootstrap teardown teardown-app image-build secrets-push \
+	_require_project show-project
 
 help:  ## このヘルプを表示
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
@@ -91,6 +92,9 @@ tf-output-wif:  ## WIF setup 用に GitHub repo Variables にコピペする値�
 	@cd $(TF_DIR) && terraform output -json wif_setup_summary 2>/dev/null \
 		| jq -r 'to_entries[] | "\(.key)=\(.value)"' \
 		|| echo "wif outputs not available. enable_wif=true で apply してください。"
+
+secrets-push: _require_project  ## .env.secrets を読み Secret Manager に値投入（teardown-app では消えない）
+	GOOGLE_CLOUD_PROJECT=$(GOOGLE_CLOUD_PROJECT) ./scripts/push_line_secrets.sh
 
 image-build: _require_project  ## Cloud Build で image を build & push（リポジトリルートから実行）
 	cd .. && gcloud builds submit \
