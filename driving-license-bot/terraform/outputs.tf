@@ -11,6 +11,22 @@ output "sa_line_bot_email" {
   value = local.sa_line_bot_email
 }
 
+# Phase 2-A3: バッチ生成 pipeline 用 SA
+output "sa_batch_email" {
+  description = "Cloud Run Job が利用する SA（自動生成バッチ）"
+  value       = local.sa_batch_email
+}
+
+output "sa_workflow_email" {
+  description = "Workflows が Cloud Run Job を起動する SA"
+  value       = local.sa_workflow_email
+}
+
+output "sa_scheduler_email" {
+  description = "Scheduler が Workflow を nightly 起動する SA"
+  value       = local.sa_scheduler_email
+}
+
 # Secret Manager
 output "secret_names" {
   value = {

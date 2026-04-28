@@ -61,7 +61,23 @@ terraform destroy -auto-approve \
     -target=google_sql_database.question_bank \
     -target=google_sql_database_instance.main \
     -target=google_secret_manager_secret_version.cloudsql_password \
-    -target=random_password.cloudsql_app
+    -target=random_password.cloudsql_app \
+    -target=google_service_account.batch \
+    -target=google_project_iam_member.batch_aiplatform_user \
+    -target=google_project_iam_member.batch_cloudsql_client \
+    -target=google_project_iam_member.batch_datastore_user \
+    -target=google_project_iam_member.batch_log_writer \
+    -target=google_project_iam_member.batch_metric_writer \
+    -target=google_secret_manager_secret_iam_member.batch_cloudsql_password \
+    -target=google_secret_manager_secret_iam_member.batch_line_channel_access_token \
+    -target=google_secret_manager_secret_iam_member.batch_line_channel_secret \
+    -target=google_secret_manager_secret_iam_member.batch_operator_user_ids \
+    -target=google_service_account.workflow \
+    -target=google_project_iam_member.workflow_run_invoker \
+    -target=google_project_iam_member.workflow_log_writer \
+    -target=google_service_account_iam_member.workflow_act_as_batch \
+    -target=google_service_account.scheduler \
+    -target=google_project_iam_member.scheduler_workflows_invoker
 # NOTE: LINE 系の Secret (google_secret_manager_secret.line_*) と
 # google_secret_manager_secret.cloudsql_password の「枠」はあえて -target に含めない
 # → LINE token は次回 apply 後に再投入不要、cloudsql-password の枠も残るが値は次回
@@ -79,6 +95,7 @@ cat <<'DONE'
   - sa-line-bot SA + project-level IAM 3 件
   - Cloud SQL instance + question_bank database + app user
   - cloudsql-password secret value（枠は残る、次回 apply で random_password 再生成）
+  - sa-batch / sa-workflow / sa-scheduler SA + 各 IAM binding
 
 [teardown_app] 残っているもの:
 

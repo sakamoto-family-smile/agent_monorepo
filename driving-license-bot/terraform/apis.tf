@@ -64,3 +64,22 @@ resource "google_project_service" "sqladmin" {
   disable_on_destroy         = false
   disable_dependent_services = false
 }
+
+# Phase 2-A3: 自動生成バッチ + Vertex AI 利用に必要な API
+resource "google_project_service" "aiplatform" {
+  service                    = "aiplatform.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+}
+
+resource "google_project_service" "workflows" {
+  service                    = "workflows.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+}
+
+resource "google_project_service" "cloudscheduler" {
+  service                    = "cloudscheduler.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+}

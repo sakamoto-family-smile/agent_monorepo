@@ -7,6 +7,15 @@ locals {
 
   sa_line_bot_email = google_service_account.line_bot.email
 
+  # Phase 2-A3: バッチ生成 pipeline 用の SA（deploy_batch.sh と命名揃え）
+  sa_batch_id     = "sa-batch"
+  sa_workflow_id  = "sa-workflow"
+  sa_scheduler_id = "sa-scheduler"
+
+  sa_batch_email     = google_service_account.batch.email
+  sa_workflow_email  = google_service_account.workflow.email
+  sa_scheduler_email = google_service_account.scheduler.email
+
   # Secret Manager の secret 名（LINE 系は値を手動投入、cloudsql は random_password）
   secret_line_channel_secret       = "${var.name_prefix}-line-channel-secret"
   secret_line_channel_access_token = "${var.name_prefix}-line-channel-access-token"
