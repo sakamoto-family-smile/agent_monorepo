@@ -7,20 +7,19 @@ Phase 1 最小公開（30 問のシードプールで動く LINE Bot）+ Phase 2
 
 | カテゴリ | リソース |
 |---|---|
-| API | run / cloudbuild / artifactregistry / firestore / secretmanager / iam / iamcredentials / logging / monitoring / **sqladmin** |
-| IAM | `sa-line-bot` Service Account + project-level role bindings (datastore.user / logging.logWriter / monitoring.metricWriter) |
+| API | run / cloudbuild / artifactregistry / firestore / secretmanager / iam / iamcredentials / logging / monitoring / sqladmin / **aiplatform / workflows / cloudscheduler** |
+| IAM | `sa-line-bot` (datastore.user / logging.logWriter / monitoring.metricWriter) + **`sa-batch` (aiplatform.user / cloudsql.client / datastore.user / logging.logWriter / monitoring.metricWriter / 4 secret accessor) + `sa-workflow` (run.invoker / logging.logWriter / actAs sa-batch) + `sa-scheduler` (workflows.invoker)** |
 | Firestore | `(default)` database (asia-northeast1, native mode) |
-| Secret Manager | `driving-license-bot-line-channel-secret` / `-access-token` / `-line-login-channel-secret` / `-operator-line-user-ids` の 4 枠（値は手動投入）+ **`-cloudsql-password` の 1 枠（terraform が `random_password` で投入）** |
+| Secret Manager | `driving-license-bot-line-channel-secret` / `-access-token` / `-line-login-channel-secret` / `-operator-line-user-ids` の 4 枠（値は手動投入）+ `-cloudsql-password` の 1 枠（terraform が `random_password` で投入） |
 | Artifact Registry | `driving-license-bot` Docker repo |
 | Cloud Run | `driving-license-bot-line-bot` service（image を指定したときのみ deploy） |
-| **Cloud SQL** | **`driving-license-bot-pg` (Postgres 15, db-f1-micro, asia-northeast1) + `question_bank` database + `app` user** |
+| Cloud SQL | `driving-license-bot-pg` (Postgres 15, db-f1-micro, asia-northeast1) + `question_bank` database + `app` user |
 
 含まれないもの（Phase 2-B 以降）:
 
-- pgvector アクセス用 SA (`sa-batch` / `sa-agent`) と IAM binding（PR A3 で追加）
-- 重複検査スキーマ作成（PR A2 の `scripts/init_question_bank_schema.py`）
-- Vertex AI 利用承認（Marketplace 操作が必要）
-- Cloud Run Job / Workflows / Scheduler（batch 用）
+- 重複検査スキーマ作成（PR A2 の `scripts/init_question_bank_schema.py` で別途投入）
+- Vertex AI 利用承認（Marketplace 操作が必要、PR B1）
+- Cloud Run Job / Workflows / Scheduler（batch 用、PR B2 で TF 化予定。SA / API は本 PR で先行作成）
 - Langfuse on GKE
 - Cloud Monitoring alert policy（必要に応じて analytics-platform/terraform/monitoring.tf を参照）
 
