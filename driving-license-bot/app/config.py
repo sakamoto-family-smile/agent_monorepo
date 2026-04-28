@@ -36,7 +36,10 @@ class Settings(BaseSettings):
     google_cloud_project: str = ""
     anthropic_vertex_project_id: str = ""
     cloud_ml_region: str = "asia-northeast1"
-    vertex_claude_model: str = "claude-opus-4-7"
+    # Vertex AI 上の Anthropic モデル ID は `<base>@<YYYYMMDD>` 形式。
+    # Anthropic 直接 API のモデル名（claude-opus-4-7 等）とは異なるため要注意。
+    # 詳細: docs/VERTEX_ENABLEMENT.md §1.1
+    vertex_claude_model: str = "claude-sonnet-4-5@20250929"
     vertex_gemini_model: str = "gemini-2.5-pro"
 
     # --- リポジトリバックエンド ---

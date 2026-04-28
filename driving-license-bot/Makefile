@@ -22,6 +22,7 @@ CLOUDSQL_CONNECTION ?= $(GOOGLE_CLOUD_PROJECT):$(REGION):$(CLOUDSQL_INSTANCE)
 	tf-init tf-plan tf-apply tf-destroy tf-fmt tf-validate tf-output-wif \
 	bootstrap teardown teardown-app image-build secrets-push \
 	cloudsql-proxy cloudsql-init cloudsql-verify \
+	vertex-verify \
 	_require_project show-project
 
 help:  ## このヘルプを表示
@@ -131,6 +132,12 @@ cloudsql-init: _require_project  ## pgvector extension + questions テーブル 
 cloudsql-verify: _require_project  ## Cloud SQL pgvector の add/find_similar/count smoke（要 Auth Proxy 起動）
 	GOOGLE_CLOUD_PROJECT=$(GOOGLE_CLOUD_PROJECT) \
 		$(UV) run --extra pgvector python scripts/verify_question_bank.py
+
+# ---- Vertex AI 系（Phase 2-B1）----
+
+vertex-verify: _require_project  ## Vertex AI Claude / Gemini / Embedding の到達性 smoke（実コール、< $0.01）
+	GOOGLE_CLOUD_PROJECT=$(GOOGLE_CLOUD_PROJECT) \
+		$(UV) run python scripts/verify_vertex_models.py
 
 teardown: _require_project  ## driving-license-bot のリソース一括削除（WIF も含む完全削除）
 	GOOGLE_CLOUD_PROJECT=$(GOOGLE_CLOUD_PROJECT) ./scripts/teardown.sh
