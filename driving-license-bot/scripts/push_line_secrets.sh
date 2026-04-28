@@ -7,6 +7,8 @@
 # - シェル特殊文字を正しく escape
 # - secret 枠が無ければ枠だけ作って投入を促す
 #
+# bash 3.2 (macOS 既定) 互換のため連想配列を使わず並列配列で実装。
+#
 # 使い方:
 #   .env.secrets を埋めて
 #   make secrets-push
@@ -34,19 +36,19 @@ fi
 echo "[push_line_secrets] project=${PROJECT}"
 echo "[push_line_secrets] reading ${ENV_FILE}"
 
-# .env を sourcing（LINE token は base64 で shell 特殊文字を含まない）
-# set -a でこの関数内の declare を export 扱いにし、孫プロセスで使える状態にする
+# .env を sourcing
 set -a
 # shellcheck source=/dev/null
 source "${ENV_FILE}"
 set +a
 
-# secret name と env キーの対応
-declare -A SECRET_MAP=(
-    [driving-license-bot-line-channel-secret]="LINE_CHANNEL_SECRET"
-    [driving-license-bot-line-channel-access-token]="LINE_CHANNEL_ACCESS_TOKEN"
-    [driving-license-bot-operator-line-user-ids]="OPERATOR_LINE_USER_IDS"
-    [driving-license-bot-line-login-channel-secret]="LINE_LOGIN_CHANNEL_SECRET"
+# secret 名と env キーの対応（"<secret_name>:<env_key>" 形式）。
+# bash 3.2 互換のため連想配列ではなく並列配列で表現。
+SECRETS=(
+    "driving-license-bot-line-channel-secret:LINE_CHANNEL_SECRET"
+    "driving-license-bot-line-channel-access-token:LINE_CHANNEL_ACCESS_TOKEN"
+    "driving-license-bot-operator-line-user-ids:OPERATOR_LINE_USER_IDS"
+    "driving-license-bot-line-login-channel-secret:LINE_LOGIN_CHANNEL_SECRET"
 )
 
 # 必須キー
@@ -62,8 +64,9 @@ done
 
 # secret 枠が無いものを検出 → tf-apply 案内
 MISSING_SECRETS=()
-for secret in "${!SECRET_MAP[@]}"; do
-    env_key="${SECRET_MAP[$secret]}"
+for entry in "${SECRETS[@]}"; do
+    secret="${entry%%:*}"
+    env_key="${entry##*:}"
     val="${!env_key:-}"
     [[ -z "${val}" ]] && continue   # 任意キーで値が空なら skip
     if ! gcloud secrets describe "${secret}" --project="${PROJECT}" >/dev/null 2>&1; then
@@ -92,8 +95,9 @@ push_one() {
 }
 
 echo "[push_line_secrets] pushing values ..."
-for secret in "${!SECRET_MAP[@]}"; do
-    env_key="${SECRET_MAP[$secret]}"
+for entry in "${SECRETS[@]}"; do
+    secret="${entry%%:*}"
+    env_key="${entry##*:}"
     val="${!env_key:-}"
     if [[ -z "${val}" ]]; then
         echo "  - ${secret}  (skipped: ${env_key} is empty)"

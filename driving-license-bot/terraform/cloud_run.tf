@@ -59,6 +59,12 @@ resource "google_cloud_run_v2_service" "line_bot" {
         name  = "FIRESTORE_DATABASE"
         value = "(default)"
       }
+      # Cloud Run は `/tmp` 以外 read-only。analytics-platform の
+      # JsonlSink 出力先を `/tmp/data` に逃がす（再起動で消えるが Phase 1 では許容）。
+      env {
+        name  = "ANALYTICS_DATA_DIR"
+        value = "/tmp/data"
+      }
 
       # LINE secrets は Secret Manager → env に注入
       env {
