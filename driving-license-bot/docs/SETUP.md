@@ -155,54 +155,74 @@ gcloud workflows execute driving-license-bot-generation-pipeline \\
   生成成功率・カテゴリ別品質・cross-check 不一致頻度を集計
 - `pool_low_alert` business_event が emit されたら運営者の LINE に通知（Phase 5）
 
-### 6.0 Cloud SQL pgvector（重複検査用、Phase 2-D 以降）
+### 6.0 Cloud SQL pgvector（重複検査用、Phase 2-A）
+
+#### 6.0.1 インスタンス作成
+
+Phase 2-A1 で **Terraform 化済**。`make tf-apply` で以下が自動作成される:
+
+- Cloud SQL Postgres 15 instance: `driving-license-bot-pg` (db-f1-micro, asia-northeast1)
+- Database: `question_bank`
+- User: `app` (password は `random_password` で生成され `driving-license-bot-cloudsql-password`
+  Secret Manager に格納)
+
+詳細は [terraform/README.md](../terraform/README.md) と [terraform/cloudsql.tf](../terraform/cloudsql.tf)。
+
+#### 6.0.2 Cloud SQL Auth Proxy のインストール
+
+Cloud Run / ローカル両方から Cloud SQL に接続するため Auth Proxy を使う（VPC Connector
+は Phase 3+ 先送り）。
 
 ```bash
-# インスタンス作成（db-f1-micro、最小構成）
-gcloud sql instances create driving-license-bot-question-bank \
-  --project=$GOOGLE_CLOUD_PROJECT \
-  --tier=db-f1-micro \
-  --database-version=POSTGRES_16 \
-  --region=asia-northeast1 \
-  --root-password="$(openssl rand -base64 24)"
-
-# データベース + ユーザー作成
-gcloud sql databases create question_bank \
-  --instance=driving-license-bot-question-bank
-gcloud sql users create app \
-  --instance=driving-license-bot-question-bank \
-  --password="$CLOUDSQL_PASSWORD"
-
-# pgvector 拡張 + スキーマ作成
-# Cloud SQL Auth Proxy をローカルで起動した上で:
-psql -h 127.0.0.1 -U app -d question_bank <<'EOF'
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE TABLE IF NOT EXISTS questions (
-    question_id      TEXT PRIMARY KEY,
-    version          INTEGER NOT NULL,
-    body_hash        TEXT NOT NULL,
-    embedding        vector(768) NOT NULL,
-    applicable_goals TEXT[] NOT NULL,
-    category         TEXT NOT NULL,
-    difficulty       TEXT NOT NULL,
-    status           TEXT NOT NULL DEFAULT 'needs_review',
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS questions_embedding_ivfflat
-    ON questions USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX IF NOT EXISTS questions_body_hash_idx ON questions (body_hash);
-CREATE INDEX IF NOT EXISTS questions_status_idx ON questions (status);
-EOF
+gcloud components install cloud-sql-proxy
+# または: https://cloud.google.com/sql/docs/postgres/sql-proxy#install
 ```
 
-`.env` に以下を追加:
+#### 6.0.3 スキーマ投入（PR A2 で追加）
+
+```bash
+# ターミナル A: Auth Proxy を起動（127.0.0.1:5432 で listen）
+cd driving-license-bot
+make cloudsql-proxy
+
+# ターミナル B: スキーマ投入 + 動作確認
+make cloudsql-init       # CREATE EXTENSION vector + questions + index
+make cloudsql-verify     # add → find_similar → count → cleanup の smoke
+```
+
+`make cloudsql-init` の出力例:
+
+```
+[init_schema] connecting host=127.0.0.1 port=5432 db=question_bank user=app
+[init_schema] applying DDL ...
+[init_schema] verifying ...
+[init_schema] vector extension: v0.7.0
+[init_schema] questions columns (9): question_id, version, body_hash, embedding, ...
+[init_schema] indexes (4): questions_body_hash_idx, questions_embedding_ivfflat, ...
+[init_schema] questions row count: 0
+[init_schema] OK.
+```
+
+`make cloudsql-verify` の出力例:
+
+```
+[verify_qb] ✓ add (12.3 ms)
+[verify_qb] ✓ find_similar top score=1.000000 (1 hits, 8.9 ms)
+[verify_qb] ✓ find_by_body_hash
+[verify_qb] ✓ count = 1
+[verify_qb] ALL OK.
+```
+
+> teardown-app 後の再投入も同コマンドで可能（DDL は `IF NOT EXISTS`）。
+
+#### 6.0.4 アプリ側 `.env` 設定
 
 ```bash
 QUESTION_BANK_BACKEND=pgvector
-CLOUDSQL_INSTANCE_CONNECTION_NAME=$GOOGLE_CLOUD_PROJECT:asia-northeast1:driving-license-bot-question-bank
+CLOUDSQL_INSTANCE_CONNECTION_NAME=$GOOGLE_CLOUD_PROJECT:asia-northeast1:driving-license-bot-pg
 CLOUDSQL_DB=question_bank
 CLOUDSQL_USER=app
-CLOUDSQL_HOST=127.0.0.1   # Cloud SQL Auth Proxy 経由
+CLOUDSQL_HOST=127.0.0.1   # Cloud SQL Auth Proxy 経由（Cloud Run では unix socket 使用）
 CLOUDSQL_PORT=5432
 ```
 

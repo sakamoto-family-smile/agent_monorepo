@@ -107,6 +107,19 @@ resource "google_project_iam_member" "tf_plan_security_reviewer" {
   member  = "serviceAccount:${google_service_account.tf_plan[0].email}"
 }
 
+# `google_secret_manager_secret_version.cloudsql_password` の refresh で
+# `secretmanager.versions.access` が必要だが `roles/secretmanager.viewer` には含まれない。
+# 個別 secret に限定して accessor を付与（LINE token 等の他 secret は引き続き保護）。
+# 値が tfstate 経由で漏れる懸念は既に objectViewer で同等の状態（PoC 容認）。
+resource "google_secret_manager_secret_iam_member" "tf_plan_cloudsql_password_accessor" {
+  count = var.enable_wif ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.cloudsql_password.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.tf_plan[0].email}"
+}
+
 # WIF binding: GitHub repo が SA を impersonate できる
 resource "google_service_account_iam_member" "tf_plan_wif" {
   count = var.enable_wif ? 1 : 0
