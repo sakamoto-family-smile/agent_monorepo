@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 5.40"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 
   # State は GCS で管理する（terraform destroy 時に履歴を残すため）。

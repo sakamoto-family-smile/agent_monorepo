@@ -56,6 +56,21 @@ resource "google_secret_manager_secret" "operator_user_ids" {
   depends_on = [google_project_service.secretmanager]
 }
 
+# Phase 2-A1: Cloud SQL `app` user password。値は terraform が random_password で生成し
+# `google_secret_manager_secret_version.cloudsql_password` で投入（cloudsql.tf 参照）。
+resource "google_secret_manager_secret" "cloudsql_password" {
+  project   = var.project_id
+  secret_id = local.secret_cloudsql_password
+
+  replication {
+    auto {}
+  }
+
+  labels = local.labels
+
+  depends_on = [google_project_service.secretmanager]
+}
+
 # ---- IAM: sa-line-bot に accessor 権限 ----
 
 resource "google_secret_manager_secret_iam_member" "line_bot_channel_secret" {

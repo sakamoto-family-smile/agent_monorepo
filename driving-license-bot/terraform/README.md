@@ -1,22 +1,24 @@
 # driving-license-bot Terraform
 
-Phase 1 最小公開（30 問のシードプールで動く LINE Bot）に必要な GCP リソースを
-Terraform で管理する。`terraform destroy` で一発削除できる構成。
+Phase 1 最小公開（30 問のシードプールで動く LINE Bot）+ Phase 2-A の Cloud SQL pgvector
+基盤までを Terraform で管理する。`terraform destroy` で一発削除できる構成。
 
 ## 含まれるリソース
 
 | カテゴリ | リソース |
 |---|---|
-| API | run / cloudbuild / artifactregistry / firestore / secretmanager / iam / iamcredentials / logging / monitoring |
+| API | run / cloudbuild / artifactregistry / firestore / secretmanager / iam / iamcredentials / logging / monitoring / **sqladmin** |
 | IAM | `sa-line-bot` Service Account + project-level role bindings (datastore.user / logging.logWriter / monitoring.metricWriter) |
 | Firestore | `(default)` database (asia-northeast1, native mode) |
-| Secret Manager | `driving-license-bot-line-channel-secret` / `-access-token` / `-line-login-channel-secret` / `-operator-line-user-ids` の 4 枠（値は手動投入）|
+| Secret Manager | `driving-license-bot-line-channel-secret` / `-access-token` / `-line-login-channel-secret` / `-operator-line-user-ids` の 4 枠（値は手動投入）+ **`-cloudsql-password` の 1 枠（terraform が `random_password` で投入）** |
 | Artifact Registry | `driving-license-bot` Docker repo |
 | Cloud Run | `driving-license-bot-line-bot` service（image を指定したときのみ deploy） |
+| **Cloud SQL** | **`driving-license-bot-pg` (Postgres 15, db-f1-micro, asia-northeast1) + `question_bank` database + `app` user** |
 
-含まれないもの（Phase 2 以降）:
+含まれないもの（Phase 2-B 以降）:
 
-- Cloud SQL pgvector
+- pgvector アクセス用 SA (`sa-batch` / `sa-agent`) と IAM binding（PR A3 で追加）
+- 重複検査スキーマ作成（PR A2 の `scripts/init_question_bank_schema.py`）
 - Vertex AI 利用承認（Marketplace 操作が必要）
 - Cloud Run Job / Workflows / Scheduler（batch 用）
 - Langfuse on GKE
@@ -141,15 +143,20 @@ make teardown-app
 - Firestore database
 - Artifact Registry repo + image
 - `sa-line-bot` SA + IAM 3 件
+- **Cloud SQL instance (`driving-license-bot-pg`)** ← 月 ~$10 を停止するため
 
 残るもの:
 - WIF / `sa-terraform-plan` / tfstate バケット / 有効化済み API（実質無料）
-- **Secret Manager 4 secrets（値ごと）** ← 再 apply 後の再投入が不要
+- **Secret Manager 5 secrets（値ごと）** ← LINE 4 + cloudsql-password
+  - cloudsql-password 自体は次回 apply 時に random_password で再生成され Secret Manager にも上書き
+  - したがって teardown-app → apply 後に Cloud SQL 内のデータは失われる（重複検査用 DB のため再生成可）
 
 → `Terraform plan / driving-license-bot` ジョブは引き続き動作。
 → 再展開する場合は tfvars に `line_bot_image` を埋めて `make tf-apply`。
-→ secret は前回値が再利用される。LINE 側で token rotation した時だけ
+→ LINE secret は前回値が再利用される。LINE 側で token rotation した時だけ
   `.env.secrets` を更新して `make secrets-push`。
+→ Cloud SQL は再生成されるため `make cloudsql-init`（PR A2 で追加予定）でスキーマを
+  再投入し、必要なら Question Bank への問題再 import も実施する。
 
 ### `make teardown`（完全削除）
 

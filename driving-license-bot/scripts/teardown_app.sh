@@ -24,7 +24,8 @@ TF_DIR="$(dirname "$0")/../terraform"
 echo "[teardown_app] project=${PROJECT} region=${REGION}"
 echo "[teardown_app] このスクリプトは app リソースのみ削除します。"
 echo "[teardown_app]   - Cloud Run / Firestore / Artifact Registry / sa-line-bot は削除"
-echo "[teardown_app]   - WIF / tfstate / API / Secret 枠と値 は残す（再投入不要）"
+echo "[teardown_app]   - Cloud SQL instance (\$10/月) も削除（重複検査 DB は再生成可能）"
+echo "[teardown_app]   - WIF / tfstate / API / Secret 枠 は残す（cloudsql-password は次回 apply で再生成）"
 read -r -p "[teardown_app] よろしいですか？ (yes/no): " CONFIRM
 if [[ "${CONFIRM}" != "yes" ]]; then
     echo "[teardown_app] aborted"
@@ -55,9 +56,16 @@ terraform destroy -auto-approve \
     -target=google_service_account.line_bot \
     -target=google_project_iam_member.line_bot_datastore_user \
     -target=google_project_iam_member.line_bot_log_writer \
-    -target=google_project_iam_member.line_bot_metric_writer
-# NOTE: Secret 関連 (google_secret_manager_secret.* と _iam_member.line_bot_*)
-# はあえて -target に含めない → 値が消えないので make tf-apply 後に再投入不要。
+    -target=google_project_iam_member.line_bot_metric_writer \
+    -target=google_sql_user.app \
+    -target=google_sql_database.question_bank \
+    -target=google_sql_database_instance.main \
+    -target=google_secret_manager_secret_version.cloudsql_password \
+    -target=random_password.cloudsql_app
+# NOTE: LINE 系の Secret (google_secret_manager_secret.line_*) と
+# google_secret_manager_secret.cloudsql_password の「枠」はあえて -target に含めない
+# → LINE token は次回 apply 後に再投入不要、cloudsql-password の枠も残るが値は次回
+#   apply で random_password が再生成されて上書きされる（DB 自体が新規生成のため整合）。
 # Secret に紐づく sa-line-bot accessor binding も残るが、SA 不在中は orphan として
 # 安全（次の tf-apply で SA 復活時に同じ email で binding が有効化される）。
 
@@ -69,6 +77,8 @@ cat <<'DONE'
   - Firestore database
   - Artifact Registry repo + image
   - sa-line-bot SA + project-level IAM 3 件
+  - Cloud SQL instance + question_bank database + app user
+  - cloudsql-password secret value（枠は残る、次回 apply で random_password 再生成）
 
 [teardown_app] 残っているもの:
 
@@ -84,7 +94,11 @@ cat <<'DONE'
   - driving-license-bot-line-login-channel-secret
   - driving-license-bot-operator-line-user-ids
 
+  Secret 枠のみ（値は次回 apply で再生成）:
+  - driving-license-bot-cloudsql-password
+
 → `Terraform plan / driving-license-bot` ジョブは引き続き動作します。
-→ 再展開: `make tf-apply`（secret は既存値が再利用される）
+→ 再展開: `make tf-apply`（LINE secret は既存値が再利用される）
+→ Cloud SQL の重複検査スキーマは `make cloudsql-init`（PR A2 で追加予定）で再投入
 → Secret も消したい完全削除: `make teardown`
 DONE

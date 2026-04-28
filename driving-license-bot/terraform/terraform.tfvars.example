@@ -28,6 +28,17 @@ firestore_location = "asia-northeast1"
 force_destroy       = true
 deletion_protection = false
 
+# ---- Cloud SQL (Phase 2-A) ----
+# db-f1-micro: shared CPU, 0.6GB RAM, 月 ~$10
+cloudsql_tier                = "db-f1-micro"
+cloudsql_disk_size_gb        = 10
+cloudsql_deletion_protection = false
+cloudsql_backup_enabled      = true
+# Cloud SQL Auth Proxy 経由で接続する想定なので authorized_networks は空。
+# 一時的に直接接続したい場合のみ追加（IPv4 CIDR）:
+# cloudsql_authorized_networks = [{ name = "office", value = "203.0.113.0/24" }]
+cloudsql_authorized_networks = []
+
 # ---- Workload Identity Federation (CI で `terraform plan` を回す用) ----
 # 1. 初回 apply は false で OK（基盤のみ作る）。
 # 2. tfstate_bucket を bootstrap で作ったバケット名に書き、enable_wif=true で再 apply。
