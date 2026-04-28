@@ -665,14 +665,17 @@ jobs:
         id: plan
         continue-on-error: true
         run: |
-          # tfvars は repo に commit していないので、project_id だけ -var で渡す。
-          # 他の値はデフォルトで動く（force_destroy=true 等）。
-          # -lock=false: read-only SA のため state lock オブジェクト書き込み不可。
-          # -out なし: tfplan.out も書く必要なし（plan.txt のみで PR コメント）。
+          # tfvars は repo に commit していない（個人値）ので、本番環境と整合する
+          # 値を CI 側で全部明示する。GitHub Variables に WIF_PROVIDER を登録できて
+          # いる時点で WIF は有効化されているので enable_wif=true を渡す。
+          # -lock=false: read-only SA で state lock オブジェクト書き込み不可。
           set +e
           terraform plan \
             -no-color -input=false -lock=false \
             -var "project_id=${{ vars.GCP_PROJECT_ID }}" \
+            -var "enable_wif=true" \
+            -var "tfstate_bucket=${{ vars.TFSTATE_BUCKET }}" \
+            -var "github_repo=${{ github.repository }}" \
             2>&1 | tee plan.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
