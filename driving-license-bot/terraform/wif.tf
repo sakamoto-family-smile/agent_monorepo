@@ -96,6 +96,17 @@ resource "google_storage_bucket_iam_member" "tf_plan_state_viewer" {
   member = "serviceAccount:${google_service_account.tf_plan[0].email}"
 }
 
+# `terraform plan` は管理リソース (google_*_iam_member 等) の現状取得のため
+# `*.getIamPolicy` permissions が必要。`roles/iam.securityReviewer` は
+# IAM policy の **read のみ** なので read-only 制約は守られる。
+resource "google_project_iam_member" "tf_plan_security_reviewer" {
+  count = var.enable_wif ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/iam.securityReviewer"
+  member  = "serviceAccount:${google_service_account.tf_plan[0].email}"
+}
+
 # WIF binding: GitHub repo が SA を impersonate できる
 resource "google_service_account_iam_member" "tf_plan_wif" {
   count = var.enable_wif ? 1 : 0
