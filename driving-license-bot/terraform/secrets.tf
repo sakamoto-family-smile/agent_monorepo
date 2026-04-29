@@ -127,3 +127,13 @@ resource "google_secret_manager_secret_iam_member" "batch_operator_user_ids" {
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${local.sa_batch_email}"
 }
+
+# ---- Phase 2-C3: sa-admin-ui 用 secret accessor ----
+
+# Cloud SQL password: pgvector へ接続するため
+resource "google_secret_manager_secret_iam_member" "admin_ui_cloudsql_password" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.cloudsql_password.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.admin_ui.email}"
+}

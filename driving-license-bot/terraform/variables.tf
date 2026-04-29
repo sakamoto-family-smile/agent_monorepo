@@ -173,6 +173,44 @@ variable "agent_llm_provider" {
   }
 }
 
+# ---- review-admin-ui (Phase 2-C3) ----
+
+variable "review_admin_image" {
+  type        = string
+  description = "review-admin-ui の Cloud Run image URI。line-bot と同 image を共有 (CMD で uvicorn review_admin_ui.main:app に切替)。空なら admin-ui を deploy しない。"
+  default     = ""
+}
+
+variable "review_admin_min_instances" {
+  type        = number
+  description = "review-admin-ui の min instances。運営者 1 人なら 0 で十分（cold start ~3s）。"
+  default     = 0
+}
+
+variable "review_admin_max_instances" {
+  type        = number
+  description = "review-admin-ui の max instances。"
+  default     = 2
+}
+
+variable "review_admin_cpu" {
+  type        = string
+  description = "review-admin-ui の CPU 割当。"
+  default     = "1"
+}
+
+variable "review_admin_memory" {
+  type        = string
+  description = "review-admin-ui の memory 割当。"
+  default     = "512Mi"
+}
+
+variable "review_admin_allowed_emails" {
+  type        = list(string)
+  description = "review-admin-ui への IAP アクセスを許可する Google アカウント email のリスト。空なら誰もアクセスできない（fail-closed）。"
+  default     = []
+}
+
 # ---- Workload Identity Federation (CI 用) ----
 
 variable "enable_wif" {

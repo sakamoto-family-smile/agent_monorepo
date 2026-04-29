@@ -275,6 +275,63 @@ gcloud run deploy line-bot-service \
 デプロイ完了後の URL を `https://<cloud-run-url>/webhook` として LINE Developers
 Console の Webhook URL に設定。
 
+### 6.5 review-admin-ui (IAP, Phase 2-C3)
+
+運営者向けレビュー Web UI を IAP で公開する。
+
+#### 6.5.1 OAuth consent screen を configure（1 度だけ）
+
+IAP は OAuth consent screen が必要。GCP Console で:
+
+1. **APIs & Services > OAuth consent screen** を開く
+2. **External**（個人 Google アカウント）を選択して "Create"
+3. App name: `driving-license-bot-admin`、User support email を入力
+4. **Test users** に運営者の Google アカウント email を追加（External + unverified の場合は test user 設定が必要）
+5. **Save and continue**（Scopes は default で OK）
+
+> "Internal" は Google Workspace でのみ。個人 GCP project では External を選ぶ。
+
+#### 6.5.2 tfvars に値を設定
+
+```hcl
+# image は line-bot と共有（CMD で uvicorn review_admin_ui.main:app に切替）
+review_admin_image = "asia-northeast1-docker.pkg.dev/<PROJECT>/driving-license-bot/line-bot:latest"
+
+# IAP 経由でアクセス許可するアカウント
+review_admin_allowed_emails = ["operator@example.com"]
+```
+
+#### 6.5.3 Apply + URL 確認
+
+```bash
+make tf-apply
+cd terraform && terraform output review_admin_url
+# 例: https://driving-license-bot-admin-ui-XXXX.a.run.app
+```
+
+ブラウザで上記 URL を開くと:
+- 未ログインなら Google 認証画面（IAP）
+- allowlist 外の email なら 403
+- 許可された email なら `Review queue` 画面
+
+#### 6.5.4 IAP audience の確認 / 調整
+
+`ADMIN_IAP_AUDIENCE` env はアプリ側の JWT 検証で使われる。Cloud Run direct IAP の audience は GCP の実装で決まるため、deploy 後 1 度ブラウザの DevTools で:
+
+```
+Network → / リクエスト → Request Headers → x-goog-iap-jwt-assertion
+```
+
+の payload を [jwt.io](https://jwt.io) で decode し、`aud` claim を控えて、必要なら:
+
+```bash
+gcloud run services update driving-license-bot-admin-ui \
+  --project=$GOOGLE_CLOUD_PROJECT --region=asia-northeast1 \
+  --update-env-vars="ADMIN_IAP_AUDIENCE=<実際の aud>"
+```
+
+で env を上書きする（terraform 側のデフォルトは典型値）。
+
 ---
 
 ## 7. オープン項目（運用開始前）

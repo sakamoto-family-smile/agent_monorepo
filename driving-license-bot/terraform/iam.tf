@@ -130,3 +130,42 @@ resource "google_project_iam_member" "scheduler_workflows_invoker" {
   role    = "roles/workflows.invoker"
   member  = "serviceAccount:${local.sa_scheduler_email}"
 }
+
+# ---- Phase 2-C3: sa-admin-ui (review-admin-ui Cloud Run 用) ----
+
+resource "google_service_account" "admin_ui" {
+  project      = var.project_id
+  account_id   = local.sa_admin_ui_id
+  display_name = "driving-license-bot review admin UI"
+  description  = "Cloud Run review-admin-ui が利用する SA。pgvector / Firestore RW + secret accessor。"
+
+  depends_on = [google_project_service.iam]
+}
+
+# Cloud SQL: pgvector に list_by_status / update_status を発行
+resource "google_project_iam_member" "admin_ui_cloudsql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.admin_ui.email}"
+}
+
+# Firestore: 問題本文 (Question) を読む
+resource "google_project_iam_member" "admin_ui_datastore_user" {
+  project = var.project_id
+  role    = "roles/datastore.user"
+  member  = "serviceAccount:${google_service_account.admin_ui.email}"
+}
+
+# Cloud Logging
+resource "google_project_iam_member" "admin_ui_log_writer" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.admin_ui.email}"
+}
+
+# Cloud Monitoring (uptime ping や custom metric)
+resource "google_project_iam_member" "admin_ui_metric_writer" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.admin_ui.email}"
+}

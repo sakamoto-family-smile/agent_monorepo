@@ -2,11 +2,13 @@
 
 C1: スケルトン (/healthz, / の認可)
 C2: ReviewService と接続、queue / detail / approve / reject API
+C3: 本番 wiring (pgvector + Firestore) + lifespan で接続プール管理
 """
 
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -35,45 +37,92 @@ templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
 # ReviewService は app.state にぶら下げて DI する（テストで差し替え可能）
 _REVIEW_SERVICE_KEY = "review_service"
+_PGVECTOR_POOL_KEY = "_pgvector_pool"
 
 
-def _build_default_review_service() -> ReviewService:
-    """env から実 service を構築（本番: pgvector + Firestore）。
+async def _build_default_review_service(app: FastAPI) -> ReviewService:
+    """env から実 service を構築。
 
-    テストや dev では create_app() 呼び出し前に app.state に直接セットすれば
+    QUESTION_BANK_BACKEND=pgvector + REPOSITORY_BACKEND=firestore を本番想定。
+    pool は lifespan で close 出来るよう app.state に保持。
+
+    テストや dev では create_app(review_service=...) で先に注入されるので
     本関数は呼ばれない。
     """
     from app.config import settings as app_settings
-    from app.repositories.question_bank import InMemoryQuestionBank
-    from app.repositories.question_repo import InMemoryQuestionRepo
 
     backend = app_settings.question_bank_backend.lower()
-    if backend != "pgvector":
-        logger.info("review-admin-ui: using InMemory bank/repo (dev/test)")
-        return ReviewService(
-            bank=InMemoryQuestionBank(), repo=InMemoryQuestionRepo()
+
+    # ---- bank ----
+    if backend == "pgvector":
+        from app.repositories.question_bank.pgvector_impl import (
+            PgvectorQuestionBank,
+            build_pgvector_pool,
         )
 
-    # 本番: pgvector + Firestore
-    raise RuntimeError(
-        "review-admin-ui: production wiring (pgvector + Firestore) not implemented "
-        "yet — set ReviewService manually via app.state.review_service or use "
-        "QUESTION_BANK_BACKEND=memory for now"
-    )
+        pool = await build_pgvector_pool(
+            host=app_settings.cloudsql_host,
+            port=app_settings.cloudsql_port,
+            user=app_settings.cloudsql_user,
+            password=app_settings.cloudsql_password,
+            database=app_settings.cloudsql_db,
+            min_size=1,
+            max_size=3,
+        )
+        setattr(app.state, _PGVECTOR_POOL_KEY, pool)
+        bank = PgvectorQuestionBank(pool)
+        logger.info("review-admin-ui: PgvectorQuestionBank wired")
+    else:
+        from app.repositories.question_bank import InMemoryQuestionBank
+
+        bank = InMemoryQuestionBank()
+        logger.info("review-admin-ui: InMemoryQuestionBank (dev/test)")
+
+    # ---- repo (本文) ----
+    repo_backend = app_settings.repository_backend.lower()
+    if repo_backend == "firestore":
+        from google.cloud.firestore_v1 import AsyncClient
+
+        from app.repositories.firestore_repos import FirestoreQuestionRepo
+
+        client = AsyncClient(project=app_settings.google_cloud_project)
+        repo = FirestoreQuestionRepo(client)
+        logger.info("review-admin-ui: FirestoreQuestionRepo wired")
+    else:
+        from app.repositories.question_repo import InMemoryQuestionRepo
+
+        repo = InMemoryQuestionRepo()
+        logger.info("review-admin-ui: InMemoryQuestionRepo (dev/test)")
+
+    return ReviewService(bank=bank, repo=repo)
 
 
-def get_review_service(request: Request) -> ReviewService:
+async def get_review_service(request: Request) -> ReviewService:
     svc = getattr(request.app.state, _REVIEW_SERVICE_KEY, None)
     if svc is None:
-        svc = _build_default_review_service()
+        svc = await _build_default_review_service(request.app)
         setattr(request.app.state, _REVIEW_SERVICE_KEY, svc)
     return svc
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    yield
+    # cleanup pgvector pool（生存していれば）
+    pool = getattr(app.state, _PGVECTOR_POOL_KEY, None)
+    if pool is not None:
+        try:
+            await pool.close()
+            logger.info("review-admin-ui: pgvector pool closed")
+        except Exception:  # noqa: BLE001
+            logger.exception("review-admin-ui: pool close failed")
 
 
 def create_app(review_service: ReviewService | None = None) -> FastAPI:
     app = FastAPI(
         title="driving-license-bot review admin UI",
         version=settings.service_version,
+        lifespan=_lifespan,
     )
     if review_service is not None:
         setattr(app.state, _REVIEW_SERVICE_KEY, review_service)
