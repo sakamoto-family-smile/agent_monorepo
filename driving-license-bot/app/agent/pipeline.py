@@ -89,6 +89,7 @@ class GenerationPipeline:
         *,
         embedding_client: EmbeddingClient | None = None,
         question_bank: QuestionBankRepo | None = None,
+        question_repo: object | None = None,  # Phase 2-C2: QuestionRepo Protocol
         dedup_threshold: float = 0.92,
         dedup_top_k: int = 5,
         auto_approve_overall_score: float | None = None,
@@ -113,6 +114,8 @@ class GenerationPipeline:
         self._reviewer = quality_reviewer
         self._embedding = embedding_client
         self._question_bank = question_bank
+        # Phase 2-C2: 本文保存先（Firestore など）。None なら本文未保存（後方互換）
+        self._question_repo = question_repo
         self._dedup_threshold = dedup_threshold
         self._dedup_top_k = dedup_top_k
         self._auto_approve_threshold = auto_approve_overall_score
@@ -250,6 +253,15 @@ class GenerationPipeline:
             created_at=datetime.now(UTC),
         )
         await self._question_bank.add(stored)
+        # Phase 2-C2: 本文も保存（レビュー UI から読む）。失敗してもパイプライン
+        # 全体は止めない（バンクには入っているので最低限の dedup は機能する）。
+        if self._question_repo is not None:
+            try:
+                await self._question_repo.upsert(question)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "question_repo.upsert failed id=%s (continuing)", question.id
+                )
 
 
 __all__ = [

@@ -1,31 +1,44 @@
 {% extends "base.html" %}
-{% block title %}Review queue · {{ service_name }}{% endblock %}
+{% block title %}{{ status }} · {{ service_name }}{% endblock %}
 {% block content %}
-  <h2 style="margin-top: 0;">Review queue</h2>
-  {% if questions %}
+  <h2 style="margin-top: 0;">Queue: <code>{{ status }}</code></h2>
+  <p style="font-size: 12px; opacity: 0.7;">
+    <a href="/">needs_review</a> ｜ <a href="/published">published</a>
+  </p>
+  {% if items %}
     <table>
       <thead>
         <tr>
           <th>ID</th>
+          <th>Body (excerpt)</th>
           <th>Category</th>
           <th>Difficulty</th>
-          <th>Status</th>
           <th>Created</th>
         </tr>
       </thead>
       <tbody>
-        {% for q in questions %}
+        {% for item in items %}
           <tr>
-            <td><code>{{ q.question_id }}</code></td>
-            <td>{{ q.category }}</td>
-            <td>{{ q.difficulty }}</td>
-            <td><span class="badge">{{ q.status }}</span></td>
-            <td>{{ q.created_at }}</td>
+            <td>
+              <a href="/questions/{{ item.question_id }}">
+                <code>{{ item.question_id }}</code>
+              </a>
+            </td>
+            <td style="max-width: 380px;">
+              {% if item.question %}
+                {{ item.question.body[:80] }}{% if item.question.body|length > 80 %}…{% endif %}
+              {% else %}
+                <span style="opacity: 0.5;">(本文未保存)</span>
+              {% endif %}
+            </td>
+            <td>{{ item.stored.category }}</td>
+            <td>{{ item.stored.difficulty }}</td>
+            <td style="font-size: 11px; opacity: 0.7;">{{ item.stored.created_at.strftime('%m-%d %H:%M') }}</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
   {% else %}
-    <p class="empty">レビュー待ちの問題はありません（C2 で実データに繋ぎ込み予定）。</p>
+    <p class="empty">該当する問題はありません。</p>
   {% endif %}
 {% endblock %}

@@ -142,6 +142,43 @@ class PgvectorQuestionBank:
             )
         return _row_to_stored(row) if row else None
 
+    async def list_by_status(
+        self,
+        status: str,
+        *,
+        limit: int = 50,
+    ) -> list[StoredQuestion]:
+        async with self._pool.acquire() as conn:
+            await self._register_vector(conn)
+            rows = await conn.fetch(
+                """
+                SELECT
+                    question_id, version, body_hash, embedding,
+                    applicable_goals, category, difficulty, status, created_at
+                FROM questions
+                WHERE status = $1
+                ORDER BY created_at DESC
+                LIMIT $2
+                """,
+                status,
+                limit,
+            )
+        return [_row_to_stored(r) for r in rows]
+
+    async def update_status(self, question_id: str, status: str) -> bool:
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE questions SET status = $1 WHERE question_id = $2",
+                status,
+                question_id,
+            )
+        # asyncpg の execute は "UPDATE N" を返す。N=0 なら未更新。
+        try:
+            n = int(result.split()[-1])
+        except (ValueError, IndexError):
+            return False
+        return n > 0
+
     async def _register_vector(self, conn: asyncpg.Connection) -> None:
         """pgvector の型コーデックをコネクションに登録する。"""
         try:

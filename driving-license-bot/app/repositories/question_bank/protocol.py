@@ -45,7 +45,8 @@ class SimilarityHit:
 class QuestionBankRepo(Protocol):
     """Question Bank のリポジトリ Protocol。
 
-    Phase 2-D で必要な最小操作のみ。Phase 5 で出題プールとしての検索
+    Phase 2-D で必要な最小操作のみ。Phase 2-C2 でレビュー UI 用に
+    list_by_status / update_status を追加。Phase 5 で出題プールとしての検索
     （`pick`）も同じ Protocol に追加する想定。
     """
 
@@ -69,3 +70,17 @@ class QuestionBankRepo(Protocol):
     ) -> int: ...
 
     async def get(self, question_id: str) -> StoredQuestion | None: ...
+
+    # Phase 2-C2: レビュー UI 用
+    async def list_by_status(
+        self,
+        status: str,
+        *,
+        limit: int = 50,
+    ) -> list[StoredQuestion]:
+        """status (needs_review / published / archived) 別の問題一覧を created_at 降順で返す。"""
+        ...
+
+    async def update_status(self, question_id: str, status: str) -> bool:
+        """status を更新。存在すれば True、存在しなければ False。"""
+        ...

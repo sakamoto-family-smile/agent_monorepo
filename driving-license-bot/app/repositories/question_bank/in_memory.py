@@ -73,3 +73,23 @@ class InMemoryQuestionBank:
 
     async def get(self, question_id: str) -> StoredQuestion | None:
         return self._store.get(question_id)
+
+    async def list_by_status(
+        self,
+        status: str,
+        *,
+        limit: int = 50,
+    ) -> list[StoredQuestion]:
+        items = [q for q in self._store.values() if q.status == status]
+        items.sort(key=lambda q: q.created_at, reverse=True)
+        return items[:limit]
+
+    async def update_status(self, question_id: str, status: str) -> bool:
+        existing = self._store.get(question_id)
+        if existing is None:
+            return False
+        # StoredQuestion は dataclass(eq) なので新オブジェクト作成
+        from dataclasses import replace
+
+        self._store[question_id] = replace(existing, status=status)
+        return True
