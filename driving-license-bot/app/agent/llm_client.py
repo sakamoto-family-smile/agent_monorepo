@@ -273,28 +273,48 @@ class VertexGeminiClient:
 
 
 def build_llm_client() -> LLMClient:
-    """env から実 Claude クライアントを構築する（Question Generator / Tutor 用）。
+    """env から Question Generator 用 LLM クライアントを構築する。
 
-    `VERTEX_CLAUDE_MODEL` / `ANTHROPIC_VERTEX_PROJECT_ID` / `CLOUD_ML_REGION`
-    を参照。`AGENT_LLM_MOCK=true` で MockLLMClient（固定空文字列）を返す。
-    実運用では呼び出し側が設定しないため、本番経路で誤って Mock が選ばれる
-    心配はない（`build_llm_client` を呼ぶのは batch / CLI のみ）。
+    `AGENT_LLM_PROVIDER` で claude / gemini を切替（既定: gemini）。Claude は
+    Vertex AI Marketplace 承認が必要なため、承認前は gemini にしておく。
+    `AGENT_LLM_MOCK=true` で MockLLMClient を返す（CI / 開発の安全弁）。
+
+    切替例:
+      AGENT_LLM_PROVIDER=claude make vertex-verify   # 承認後の本番化
+      AGENT_LLM_PROVIDER=gemini make vertex-verify   # 既定 (Marketplace 不要)
     """
     settings = app.config.settings
     if settings.agent_llm_mock:
-        logger.warning("AGENT_LLM_MOCK=true: returning MockLLMClient (returns empty text)")
-        return MockLLMClient(text="", model="mock-claude")
-    project = (
-        settings.anthropic_vertex_project_id or settings.google_cloud_project
-    )
+        logger.warning(
+            "AGENT_LLM_MOCK=true: returning MockLLMClient (returns empty text)"
+        )
+        return MockLLMClient(text="", model="mock")
+
+    project = settings.anthropic_vertex_project_id or settings.google_cloud_project
     if not project:
         raise LLMClientError(
             "ANTHROPIC_VERTEX_PROJECT_ID or GOOGLE_CLOUD_PROJECT is required"
         )
-    return VertexAnthropicClient(
-        project_id=project,
-        region=settings.cloud_ml_region,
-        model=settings.vertex_claude_model,
+
+    provider = settings.agent_llm_provider.strip().lower()
+    if provider == "gemini":
+        logger.info(
+            "AGENT_LLM_PROVIDER=gemini: question generator uses Vertex Gemini "
+            "(cross-check value reduced; rely on human review)"
+        )
+        return VertexGeminiClient(
+            project_id=project,
+            region=settings.cloud_ml_region,
+            model=settings.vertex_gemini_model,
+        )
+    if provider == "claude":
+        return VertexAnthropicClient(
+            project_id=project,
+            region=settings.cloud_ml_region,
+            model=settings.vertex_claude_model,
+        )
+    raise LLMClientError(
+        f"unsupported agent_llm_provider: {provider!r} (expected 'claude' or 'gemini')"
     )
 
 

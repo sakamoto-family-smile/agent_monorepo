@@ -40,8 +40,8 @@ CLOUD_ML_REGION=asia-northeast1
 
 ### 残 TODO
 
-- [ ] Tokyo リージョンでの prompt caching 対応の最終確認（実装直前）
-- [ ] Model Armor の Tokyo リージョン対応確認
+- [ ] Tokyo リージョンでの prompt caching 対応の最終確認（[VERTEX_ENABLEMENT.md §1.3](./VERTEX_ENABLEMENT.md#13-prompt-caching-の確認) で `make vertex-verify` を 2 回実行 → `cache_read_input_tokens > 0` を確認）
+- [ ] Model Armor の Tokyo リージョン対応確認（Phase 5+ 本番化検討時、当面 Anthropic builtin で代替）
 
 ---
 
