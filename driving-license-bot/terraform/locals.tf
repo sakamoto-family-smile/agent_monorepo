@@ -40,6 +40,13 @@ locals {
   # (chicken-and-egg: image を build してから埋める)
   deploy_batch = length(trimspace(var.batch_image)) > 0
 
+  # Phase 2-C3: review-admin-ui (Cloud Run + IAP)
+  sa_admin_ui_id        = "sa-admin-ui"
+  admin_ui_service_name = "${var.name_prefix}-admin-ui"
+  sa_admin_ui_email     = google_service_account.admin_ui.email
+  # review_admin_image が空なら admin-ui を deploy しない（同様の chicken-and-egg）
+  deploy_admin_ui = length(trimspace(var.review_admin_image)) > 0
+
   # Common labels
   labels = {
     project     = var.name_prefix

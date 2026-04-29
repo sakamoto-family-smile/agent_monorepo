@@ -80,7 +80,15 @@ terraform destroy -auto-approve \
     -target=google_project_iam_member.scheduler_workflows_invoker \
     -target=google_cloud_scheduler_job.batch_nightly \
     -target=google_workflows_workflow.generation_pipeline \
-    -target=google_cloud_run_v2_job.batch
+    -target=google_cloud_run_v2_job.batch \
+    -target=google_cloud_run_v2_service_iam_member.admin_ui_iap_accessor \
+    -target=google_cloud_run_v2_service.admin_ui \
+    -target=google_service_account.admin_ui \
+    -target=google_project_iam_member.admin_ui_cloudsql_client \
+    -target=google_project_iam_member.admin_ui_datastore_user \
+    -target=google_project_iam_member.admin_ui_log_writer \
+    -target=google_project_iam_member.admin_ui_metric_writer \
+    -target=google_secret_manager_secret_iam_member.admin_ui_cloudsql_password
 # NOTE: LINE 系の Secret (google_secret_manager_secret.line_*) と
 # google_secret_manager_secret.cloudsql_password の「枠」はあえて -target に含めない
 # → LINE token は次回 apply 後に再投入不要、cloudsql-password の枠も残るが値は次回
@@ -102,6 +110,9 @@ cat <<'DONE'
   - Cloud Run Job (driving-license-bot-batch)
   - Cloud Workflow (generation-pipeline)
   - Cloud Scheduler (batch-nightly)
+  - Cloud Run service (driving-license-bot-admin-ui)
+  - sa-admin-ui SA + IAM 5 件
+  - IAP IAM bindings (allowed_emails)
 
 [teardown_app] 残っているもの:
 

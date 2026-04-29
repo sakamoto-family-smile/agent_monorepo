@@ -83,3 +83,10 @@ resource "google_project_service" "cloudscheduler" {
   disable_on_destroy         = false
   disable_dependent_services = false
 }
+
+# Phase 2-C3: review-admin-ui の IAP 直接適用
+resource "google_project_service" "iap" {
+  service                    = "iap.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+}

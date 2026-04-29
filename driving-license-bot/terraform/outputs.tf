@@ -77,6 +77,18 @@ output "scheduler_job_name" {
   value       = local.deploy_batch ? google_cloud_scheduler_job.batch_nightly[0].name : null
 }
 
+# ---- review-admin-ui (Phase 2-C3) ----
+
+output "review_admin_url" {
+  description = "review-admin-ui の URL。allowlist 内の email でアクセスすると IAP の Google ログインを経由して画面が出る。"
+  value       = local.deploy_admin_ui ? google_cloud_run_v2_service.admin_ui[0].uri : null
+}
+
+output "sa_admin_ui_email" {
+  description = "review-admin-ui Cloud Run が利用する SA。"
+  value       = local.deploy_admin_ui ? google_service_account.admin_ui.email : null
+}
+
 # Artifact Registry
 output "ar_image_uri_base" {
   description = "Cloud Build / push 時に使う image base. tag を付けて push する: <base>:<sha>"

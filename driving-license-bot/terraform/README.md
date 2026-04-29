@@ -12,16 +12,17 @@ Phase 1 最小公開（30 問のシードプールで動く LINE Bot）+ Phase 2
 | Firestore | `(default)` database (asia-northeast1, native mode) |
 | Secret Manager | `driving-license-bot-line-channel-secret` / `-access-token` / `-line-login-channel-secret` / `-operator-line-user-ids` の 4 枠（値は手動投入）+ `-cloudsql-password` の 1 枠（terraform が `random_password` で投入） |
 | Artifact Registry | `driving-license-bot` Docker repo |
-| Cloud Run | `driving-license-bot-line-bot` service（image を指定したときのみ deploy） + **`driving-license-bot-batch` Cloud Run Job** (batch_image を指定したときのみ) |
+| Cloud Run | `driving-license-bot-line-bot` service / **`driving-license-bot-admin-ui` service (IAP 直接適用)** / `driving-license-bot-batch` Cloud Run Job (image を指定したときのみ deploy) |
 | Cloud SQL | `driving-license-bot-pg` (Postgres 15, db-f1-micro, asia-northeast1) + `question_bank` database + `app` user |
-| **Workflows** | **`driving-license-bot-generation-pipeline` (workflows/generation_pipeline.yaml を埋め込み)** |
-| **Scheduler** | **`driving-license-bot-batch-nightly` (cron 02:00 JST)** |
+| Workflows | `driving-license-bot-generation-pipeline` (workflows/generation_pipeline.yaml を埋め込み) |
+| Scheduler | `driving-license-bot-batch-nightly` (cron 02:00 JST) |
+| **IAP** | **`google_iap_web_cloud_run_service_iam_member` で `review_admin_allowed_emails` に `roles/iap.httpsResourceAccessor` 付与** |
 
-含まれないもの（Phase 2-C 以降）:
+含まれないもの（次フェーズ以降）:
 
 - 重複検査スキーマ作成（PR A2 の `scripts/init_question_bank_schema.py` で別途投入）
 - Vertex AI Claude Marketplace 承認（手動。承認前は `agent_llm_provider=gemini` で動作）
-- Review Admin UI (Phase 2-C)
+- **OAuth consent screen の configure**（Console で 1 度だけ手動、IAP 利用時必須）
 - Langfuse on GKE
 - Cloud Monitoring alert policy / 運営者通知 (Phase 2-B3)
 
