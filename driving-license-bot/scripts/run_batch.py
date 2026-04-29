@@ -66,6 +66,28 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+async def _build_question_repo():
+    """env から question_repo backend を選ぶ（C2 で導入）。
+
+    REPOSITORY_BACKEND=firestore なら FirestoreQuestionRepo、それ以外は in-memory。
+    """
+    backend = settings.repository_backend.lower()
+    if backend == "firestore":
+        try:
+            from google.cloud.firestore_v1 import AsyncClient
+
+            from app.repositories.firestore_repos import FirestoreQuestionRepo
+        except ImportError:
+            from app.repositories.question_repo import InMemoryQuestionRepo
+
+            return InMemoryQuestionRepo()
+        client = AsyncClient(project=settings.google_cloud_project)
+        return FirestoreQuestionRepo(client)
+    from app.repositories.question_repo import InMemoryQuestionRepo
+
+    return InMemoryQuestionRepo()
+
+
 async def _build_question_bank() -> QuestionBankRepo:
     """env から question_bank backend を選ぶ。"""
     backend = settings.question_bank_backend.lower()
@@ -109,12 +131,16 @@ async def _run(args: argparse.Namespace) -> int:
         await shutdown_observability()
         return 1
 
+    # Phase 2-C2: 本文 (Question) も保存して review-admin-ui から読めるようにする
+    question_repo = await _build_question_repo()
+
     pipeline = GenerationPipeline(
         QuestionGenerator(gen_llm),
         FactChecker(),
         QualityReviewer(review_llm),
         embedding_client=embedding_client,
         question_bank=question_bank,
+        question_repo=question_repo,
         dedup_threshold=settings.question_bank_dedup_threshold,
         dedup_top_k=settings.question_bank_top_k,
         auto_approve_overall_score=args.auto_approve,

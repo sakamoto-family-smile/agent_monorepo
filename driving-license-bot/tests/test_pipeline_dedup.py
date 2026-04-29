@@ -234,6 +234,35 @@ async def test_store_on_pass_writes_to_bank() -> None:
 
 
 @pytest.mark.asyncio
+async def test_store_on_pass_writes_question_repo_when_provided() -> None:
+    """C2: question_repo が指定されていれば本文も保存される。"""
+    from app.repositories.question_repo import InMemoryQuestionRepo
+
+    bank = InMemoryQuestionBank()
+    repo = InMemoryQuestionRepo()
+    gen_llm = MockLLMClient(
+        text=json.dumps(VALID_QUESTION_DICT, ensure_ascii=False),
+        model="mock-claude",
+    )
+    review_llm = MockLLMClient(text=_approve_response(), model="mock-gemini")
+    pipeline = GenerationPipeline(
+        QuestionGenerator(gen_llm),
+        FactChecker(),
+        QualityReviewer(review_llm),
+        embedding_client=MockEmbeddingClient(dimension=768),
+        question_bank=bank,
+        question_repo=repo,
+        store_on_pass=True,
+    )
+    result = await pipeline.run(_request())
+    assert result.question is not None
+    assert await bank.count() == 1
+    full = await repo.get(result.question.id)
+    assert full is not None
+    assert full.body == VALID_QUESTION_DICT["body"]
+
+
+@pytest.mark.asyncio
 async def test_store_on_pass_skipped_for_rejected() -> None:
     """duplicate で rejected なら bank に書かれない。"""
     bank = InMemoryQuestionBank()

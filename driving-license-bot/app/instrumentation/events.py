@@ -28,6 +28,9 @@ EVENT_MOCK_COMPLETED = "mock_completed"
 EVENT_USER_DATA_DELETED = "user_data_deleted"
 EVENT_BLOCK_EVENT_RECEIVED = "block_event_received"
 EVENT_FOLLOW_EVENT_RECEIVED = "follow_event_received"
+# Phase 2-C2: 人間レビュー
+EVENT_QUESTION_PUBLISHED = "question_published"
+EVENT_HUMAN_REVIEW_DECIDED = "human_review_decided"
 
 
 def emit_business_event(
@@ -95,9 +98,11 @@ def emit_error_event(
 __all__ = [
     "EVENT_BLOCK_EVENT_RECEIVED",
     "EVENT_FOLLOW_EVENT_RECEIVED",
+    "EVENT_HUMAN_REVIEW_DECIDED",
     "EVENT_MOCK_COMPLETED",
     "EVENT_MOCK_STARTED",
     "EVENT_MODE_SWITCHED",
+    "EVENT_QUESTION_PUBLISHED",
     "EVENT_QUIZ_ANSWERED",
     "EVENT_QUIZ_COMPLETED",
     "EVENT_QUIZ_STARTED",

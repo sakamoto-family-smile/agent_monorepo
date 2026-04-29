@@ -21,6 +21,8 @@ dependencies = [
     "google-auth>=2.30.0",
     # Phase 2-C: HTML rendering for review-admin-ui
     "jinja2>=3.1.0",
+    # Phase 2-C: form parsing (review_admin_ui の reject reason_tag 等)
+    "python-multipart>=0.0.9",
     # Analytics platform (path dep) for OTel + AnalyticsLogger
     "analytics-platform",
 ]

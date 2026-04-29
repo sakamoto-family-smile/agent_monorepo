@@ -19,13 +19,14 @@ from google.cloud.firestore_v1 import AsyncClient
 from google.cloud.firestore_v1.async_query import AsyncQuery
 from google.cloud.firestore_v1.base_query import FieldFilter
 
-from app.models import AnswerHistory, Session, SessionState, User
+from app.models import AnswerHistory, Question, Session, SessionState, User
 
 # 親 collection 名はここで一元管理（DESIGN.md §8.2）。
 USERS_COLLECTION = "users"
 LINE_USER_INDEX_COLLECTION = "line_user_index"
 SESSIONS_SUBCOLLECTION = "sessions"
 ANSWER_HISTORY_SUBCOLLECTION = "answer_history"
+QUESTIONS_COLLECTION = "questions"  # Phase 2-C2: 問題本文 (Question pydantic)
 
 
 def _serialize(model: Any) -> dict[str, Any]:
@@ -174,9 +175,33 @@ class FirestoreAnswerHistoryRepo:
             await doc.reference.delete()
 
 
+class FirestoreQuestionRepo:
+    """Phase 2-C2: 問題本文 (Question pydantic) を Firestore に保存。
+
+    pgvector の StoredQuestion (dedup メタ + embedding) と分離する設計。
+    レビュー UI が `/questions/{id}` で本文を取得する。
+    """
+
+    def __init__(self, client: AsyncClient) -> None:
+        self._coll = client.collection(QUESTIONS_COLLECTION)
+
+    async def upsert(self, question: Question) -> None:
+        await self._coll.document(question.id).set(_serialize(question))
+
+    async def get(self, question_id: str) -> Question | None:
+        snap = await self._coll.document(question_id).get()
+        if not snap.exists:
+            return None
+        return Question.model_validate(snap.to_dict() or {})
+
+    async def delete(self, question_id: str) -> None:
+        await self._coll.document(question_id).delete()
+
+
 __all__ = [
     "FirestoreAnswerHistoryRepo",
     "FirestoreLineUserIndexRepo",
+    "FirestoreQuestionRepo",
     "FirestoreSessionRepo",
     "FirestoreUserRepo",
 ]
