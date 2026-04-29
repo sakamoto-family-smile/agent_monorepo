@@ -32,7 +32,8 @@ from app.instrumentation.events import (
 )
 from app.models import UserStatus
 from app.repositories import (
-    QuestionPool,
+    BankBackedQuestionPool,
+    QuestionPoolLike,
     RepoBundleImpl,
     build_repo_bundle,
     load_question_pool,
@@ -51,7 +52,7 @@ router = APIRouter(tags=["line"])
 # ---- DI シングルトン（テストで差し替え可） ----
 
 _repo_bundle: RepoBundleImpl | None = None
-_question_pool: QuestionPool | None = None
+_question_pool: QuestionPoolLike | None = None
 
 
 def get_repo_bundle() -> RepoBundleImpl:
@@ -67,16 +68,81 @@ def set_repo_bundle(bundle: RepoBundleImpl | None) -> None:
     _repo_bundle = bundle
 
 
-def get_question_pool() -> QuestionPool:
+def get_question_pool() -> QuestionPoolLike:
+    """env (`QUESTION_POOL_SOURCE`) 駆動で seed / bank を選ぶ。
+
+    既定 'seed' は Phase 1 と同等の挙動 (シード JSON)。'bank' は
+    BankBackedQuestionPool を返す。bank の cache 初期化は app.main lifespan で
+    `await pool.refresh()` する想定。本関数自体は sync で構築までしか行わない。
+    """
     global _question_pool
     if _question_pool is None:
-        _question_pool = load_question_pool(settings.seed_questions_path)
+        source = settings.question_pool_source.lower()
+        if source == "bank":
+            _question_pool = _build_bank_backed_pool()
+            logger.info(
+                "question pool: bank-backed (initial cache empty until refresh)"
+            )
+        else:
+            _question_pool = load_question_pool(settings.seed_questions_path)
+            logger.info(
+                "question pool: seed (path=%s, count=%d)",
+                settings.seed_questions_path,
+                len(_question_pool),
+            )
     return _question_pool
 
 
-def set_question_pool(pool: QuestionPool | None) -> None:
+def set_question_pool(pool: QuestionPoolLike | None) -> None:
     global _question_pool
     _question_pool = pool
+
+
+def _build_bank_backed_pool() -> BankBackedQuestionPool:
+    """env から QuestionBank + QuestionRepo を組み立てて bank-backed プールを返す。
+
+    本関数は同期で構築までしか行わない。pool.refresh() は lifespan 経由で呼ぶ。
+    """
+    # bank
+    if settings.question_bank_backend.lower() == "pgvector":
+        # 注意: pgvector pool は lifespan で 1 度だけ作って渡したい。
+        # ここでは循環依存を避けるため module-level の lazy build に任せる。
+        from app.repositories.question_bank.pgvector_impl import (
+            PgvectorQuestionBank,
+        )
+
+        # Pool は lifespan 経由でセットされる（_pgvector_pool 経由）
+        if _pgvector_pool is None:
+            raise RuntimeError(
+                "pgvector pool not initialized (lifespan で先に build_pgvector_pool を呼ぶ)"
+            )
+        bank = PgvectorQuestionBank(_pgvector_pool)
+    else:
+        from app.repositories.question_bank import InMemoryQuestionBank
+
+        bank = InMemoryQuestionBank()
+
+    # repo (本文)
+    if settings.repository_backend.lower() == "firestore":
+        from google.cloud.firestore_v1 import AsyncClient
+
+        from app.repositories.firestore_repos import FirestoreQuestionRepo
+
+        repo = FirestoreQuestionRepo(AsyncClient(project=settings.google_cloud_project))
+    else:
+        from app.repositories.question_repo import InMemoryQuestionRepo
+
+        repo = InMemoryQuestionRepo()
+    return BankBackedQuestionPool(bank, repo)
+
+
+# pgvector の pool は lifespan で 1 度だけ build / close する。
+_pgvector_pool: object | None = None
+
+
+def set_pgvector_pool(pool: object | None) -> None:
+    global _pgvector_pool
+    _pgvector_pool = pool
 
 
 def _build_deps() -> HandlerDeps:

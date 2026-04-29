@@ -19,10 +19,16 @@ from app.repositories.protocols import (
     SessionRepo,
     UserRepo,
 )
-from app.repositories.question_pool import QuestionPool, load_question_pool
+from app.repositories.question_pool import (
+    BankBackedQuestionPool,
+    QuestionPool,
+    QuestionPoolLike,
+    load_question_pool,
+)
 
 __all__ = [
     "AnswerHistoryRepo",
+    "BankBackedQuestionPool",
     "InMemoryAnswerHistoryRepo",
     "InMemoryLineUserIndexRepo",
     "InMemoryRepoBundle",
@@ -30,6 +36,7 @@ __all__ = [
     "InMemoryUserRepo",
     "LineUserIndexRepo",
     "QuestionPool",
+    "QuestionPoolLike",
     "RepoBundle",
     "RepoBundleImpl",
     "SessionRepo",

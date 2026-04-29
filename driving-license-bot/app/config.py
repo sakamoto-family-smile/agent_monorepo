@@ -82,6 +82,14 @@ class Settings(BaseSettings):
     question_pool_target_size: int = 30
     generation_batch_size: int = 20
     seed_questions_path: str = "app/data/seed_questions.json"
+    # Phase 2-X1: 出題プールのソース。"seed" でシード JSON、"bank" で
+    # pgvector + Firestore の published 問題から動的構築。
+    # 既定 "seed" は Phase 1 と同等動作 (後方互換)。bank プール ≥ 30 件が安定運用の目安。
+    question_pool_source: str = "seed"
+    # Phase 2-X1: bank プールの cache 自動更新間隔 (秒)。0 で無効。
+    # FastAPI lifespan で N 秒ごとに refresh する。Cloud Run 単一インスタンスで
+    # 1〜5 分程度が現実的。
+    question_pool_refresh_interval_seconds: int = 180
 
     # --- agent / LLM 制御 ---
     # Question Generator が使う LLM プロバイダ。"claude" | "gemini"。

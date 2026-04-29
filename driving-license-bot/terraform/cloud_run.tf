@@ -66,6 +66,60 @@ resource "google_cloud_run_v2_service" "line_bot" {
         value = "/tmp/data"
       }
 
+      # Phase 2-X1: 出題プールのソース。"seed" (Phase 1 既定) or "bank"。
+      env {
+        name  = "QUESTION_POOL_SOURCE"
+        value = var.line_bot_pool_source
+      }
+      # bank プール時は pgvector (Cloud SQL) と Firestore に接続が必要
+      dynamic "env" {
+        for_each = var.line_bot_pool_source == "bank" ? [1] : []
+        content {
+          name  = "QUESTION_BANK_BACKEND"
+          value = "pgvector"
+        }
+      }
+      dynamic "env" {
+        for_each = var.line_bot_pool_source == "bank" ? [1] : []
+        content {
+          name  = "CLOUDSQL_HOST"
+          value = "/cloudsql/${google_sql_database_instance.main.connection_name}"
+        }
+      }
+      dynamic "env" {
+        for_each = var.line_bot_pool_source == "bank" ? [1] : []
+        content {
+          name  = "CLOUDSQL_PORT"
+          value = "5432"
+        }
+      }
+      dynamic "env" {
+        for_each = var.line_bot_pool_source == "bank" ? [1] : []
+        content {
+          name  = "CLOUDSQL_DB"
+          value = local.cloudsql_database_name
+        }
+      }
+      dynamic "env" {
+        for_each = var.line_bot_pool_source == "bank" ? [1] : []
+        content {
+          name  = "CLOUDSQL_USER"
+          value = local.cloudsql_user_name
+        }
+      }
+      dynamic "env" {
+        for_each = var.line_bot_pool_source == "bank" ? [1] : []
+        content {
+          name = "CLOUDSQL_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.cloudsql_password.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
       # LINE secrets は Secret Manager → env に注入
       env {
         name = "LINE_CHANNEL_SECRET"
@@ -103,6 +157,26 @@ resource "google_cloud_run_v2_service" "line_bot" {
         }
         period_seconds  = 30
         timeout_seconds = 5
+      }
+
+      # bank プール時のみ Cloud SQL Unix socket をマウント
+      dynamic "volume_mounts" {
+        for_each = var.line_bot_pool_source == "bank" ? [1] : []
+        content {
+          name       = "cloudsql"
+          mount_path = "/cloudsql"
+        }
+      }
+    }
+
+    # bank プール時のみ cloud_sql_instance volume を定義
+    dynamic "volumes" {
+      for_each = var.line_bot_pool_source == "bank" ? [1] : []
+      content {
+        name = "cloudsql"
+        cloud_sql_instance {
+          instances = [google_sql_database_instance.main.connection_name]
+        }
       }
     }
 
