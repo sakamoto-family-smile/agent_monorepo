@@ -188,3 +188,75 @@ def test_build_llm_client_requires_project(monkeypatch: pytest.MonkeyPatch) -> N
 
     with pytest.raises(LLMClientError, match="VERTEX_PROJECT_ID"):
         build_llm_client()
+
+
+def test_build_llm_client_provider_dispatch_gemini(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AGENT_LLM_PROVIDER=gemini で VertexGeminiClient が返ること。"""
+    from importlib import reload
+
+    import app.agent.llm_client as llm_module
+    import app.config as config_module
+
+    monkeypatch.setenv("AGENT_LLM_MOCK", "false")
+    monkeypatch.setenv("AGENT_LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    reload(config_module)
+    reload(llm_module)
+
+    # 実 SDK init を避けるため VertexGeminiClient を差し替え
+    captured: dict[str, object] = {}
+
+    class _Stub:
+        def __init__(self, *, project_id: str, region: str, model: str) -> None:
+            captured["init"] = {"project_id": project_id, "region": region, "model": model}
+
+    monkeypatch.setattr(llm_module, "VertexGeminiClient", _Stub)
+    client = llm_module.build_llm_client()
+    assert isinstance(client, _Stub)
+    assert captured["init"]["project_id"] == "test-project"
+
+
+def test_build_llm_client_provider_dispatch_claude(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AGENT_LLM_PROVIDER=claude で VertexAnthropicClient が返ること。"""
+    from importlib import reload
+
+    import app.agent.llm_client as llm_module
+    import app.config as config_module
+
+    monkeypatch.setenv("AGENT_LLM_MOCK", "false")
+    monkeypatch.setenv("AGENT_LLM_PROVIDER", "claude")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    reload(config_module)
+    reload(llm_module)
+
+    captured: dict[str, object] = {}
+
+    class _Stub:
+        def __init__(self, *, project_id: str, region: str, model: str) -> None:
+            captured["init"] = {"project_id": project_id, "region": region, "model": model}
+
+    monkeypatch.setattr(llm_module, "VertexAnthropicClient", _Stub)
+    client = llm_module.build_llm_client()
+    assert isinstance(client, _Stub)
+
+
+def test_build_llm_client_provider_unsupported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """未知の provider は LLMClientError。"""
+    from importlib import reload
+
+    import app.config as config_module
+
+    monkeypatch.setenv("AGENT_LLM_MOCK", "false")
+    monkeypatch.setenv("AGENT_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    reload(config_module)
+    from app.agent.llm_client import LLMClientError, build_llm_client
+
+    with pytest.raises(LLMClientError, match="unsupported"):
+        build_llm_client()

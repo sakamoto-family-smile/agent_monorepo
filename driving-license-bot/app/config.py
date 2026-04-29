@@ -84,6 +84,11 @@ class Settings(BaseSettings):
     seed_questions_path: str = "app/data/seed_questions.json"
 
     # --- agent / LLM 制御 ---
+    # Question Generator が使う LLM プロバイダ。"claude" | "gemini"。
+    # Claude は Vertex AI Marketplace 承認が必要。承認前 / 個人利用で承認しない場合は
+    # "gemini" にして Gemini 単独で運用する（cross-check の多様性は減るが Phase 2 では
+    # 全件人間レビュー必須なので品質担保は可能）。Quality Reviewer は常に Gemini。
+    agent_llm_provider: str = "gemini"
     # true で MockLLMClient を返す。CI / 開発環境で誤って Vertex を叩かないため。
     agent_llm_mock: bool = False
     # 生成時のサンプリング温度（低めで決定的に）

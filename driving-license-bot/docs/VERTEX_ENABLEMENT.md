@@ -6,6 +6,26 @@ Claude / Gemini / text-embedding-004 を呼び出せるようにするための 
 
 実行後は `scripts/verify_vertex_models.py` で 1 回実コールして到達性を確認する。
 
+## 0.1 LLM プロバイダの切替（重要）
+
+`app/config.py` の `agent_llm_provider` で Question Generator が使う LLM を切替:
+
+| 設定 | Generator | Reviewer | Marketplace 承認 |
+|---|---|---|---|
+| `gemini` (**既定**) | Gemini 2.5 Pro | Gemini 2.5 Pro | 不要 |
+| `claude` | Claude (Vertex) | Gemini 2.5 Pro | 必要 |
+
+既定 `gemini` の理由: 個人利用で Anthropic Marketplace 承認が降りない / 待てない場合の
+フォールバック。Gemini 単独だと cross-vendor 多様性は減るが、Phase 2 は **全件人間レビュー必須**
+（[DESIGN.md §10.3](./DESIGN.md)）なので品質は人間レビューで担保する。
+
+切替:
+
+```bash
+make vertex-verify                          # 既定 gemini で動作確認
+AGENT_LLM_PROVIDER=claude make vertex-verify # 承認後の本番切替
+```
+
 ## 0. 前提
 
 - gcloud CLI 認証済（Project Owner / Editor 相当）

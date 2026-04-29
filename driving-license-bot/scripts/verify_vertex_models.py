@@ -77,11 +77,22 @@ def select_models(arg: str) -> list[str]:
 
 
 def verify_claude() -> VerifyResult:
-    from app.agent.llm_client import build_llm_client
+    """Vertex Anthropic Claude を直接テスト（AGENT_LLM_PROVIDER に関係なく）。
 
+    Marketplace 承認状況を確認するためのもの。承認されていなければ 404 になる。
+    """
+    import app.config
+    from app.agent.llm_client import VertexAnthropicClient
+
+    settings = app.config.settings
+    project = settings.anthropic_vertex_project_id or settings.google_cloud_project
     print("[verify_vertex] claude: building client ...")
     try:
-        client = build_llm_client()
+        client = VertexAnthropicClient(
+            project_id=project,
+            region=settings.cloud_ml_region,
+            model=settings.vertex_claude_model,
+        )
     except Exception as exc:  # noqa: BLE001
         return VerifyResult(name="claude", ok=False, error=f"build failed: {exc}")
     print(f"[verify_vertex] claude: model={getattr(client, '_model', '?')}")
@@ -115,11 +126,19 @@ def verify_claude() -> VerifyResult:
 
 
 def verify_gemini() -> VerifyResult:
-    from app.agent.llm_client import build_reviewer_llm_client
+    """Vertex Gemini を直接テスト（Marketplace 承認不要、API enable のみ）。"""
+    import app.config
+    from app.agent.llm_client import VertexGeminiClient
 
+    settings = app.config.settings
+    project = settings.google_cloud_project or settings.anthropic_vertex_project_id
     print("[verify_vertex] gemini: building client ...")
     try:
-        client = build_reviewer_llm_client()
+        client = VertexGeminiClient(
+            project_id=project,
+            region=settings.cloud_ml_region,
+            model=settings.vertex_gemini_model,
+        )
     except Exception as exc:  # noqa: BLE001
         return VerifyResult(name="gemini", ok=False, error=f"build failed: {exc}")
     print(f"[verify_vertex] gemini: model={getattr(client, '_model', '?')}")
