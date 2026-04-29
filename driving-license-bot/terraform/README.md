@@ -12,16 +12,18 @@ Phase 1 最小公開（30 問のシードプールで動く LINE Bot）+ Phase 2
 | Firestore | `(default)` database (asia-northeast1, native mode) |
 | Secret Manager | `driving-license-bot-line-channel-secret` / `-access-token` / `-line-login-channel-secret` / `-operator-line-user-ids` の 4 枠（値は手動投入）+ `-cloudsql-password` の 1 枠（terraform が `random_password` で投入） |
 | Artifact Registry | `driving-license-bot` Docker repo |
-| Cloud Run | `driving-license-bot-line-bot` service（image を指定したときのみ deploy） |
+| Cloud Run | `driving-license-bot-line-bot` service（image を指定したときのみ deploy） + **`driving-license-bot-batch` Cloud Run Job** (batch_image を指定したときのみ) |
 | Cloud SQL | `driving-license-bot-pg` (Postgres 15, db-f1-micro, asia-northeast1) + `question_bank` database + `app` user |
+| **Workflows** | **`driving-license-bot-generation-pipeline` (workflows/generation_pipeline.yaml を埋め込み)** |
+| **Scheduler** | **`driving-license-bot-batch-nightly` (cron 02:00 JST)** |
 
-含まれないもの（Phase 2-B 以降）:
+含まれないもの（Phase 2-C 以降）:
 
 - 重複検査スキーマ作成（PR A2 の `scripts/init_question_bank_schema.py` で別途投入）
-- Vertex AI 利用承認（Marketplace 操作が必要、PR B1）
-- Cloud Run Job / Workflows / Scheduler（batch 用、PR B2 で TF 化予定。SA / API は本 PR で先行作成）
+- Vertex AI Claude Marketplace 承認（手動。承認前は `agent_llm_provider=gemini` で動作）
+- Review Admin UI (Phase 2-C)
 - Langfuse on GKE
-- Cloud Monitoring alert policy（必要に応じて analytics-platform/terraform/monitoring.tf を参照）
+- Cloud Monitoring alert policy / 運営者通知 (Phase 2-B3)
 
 ## 前提
 

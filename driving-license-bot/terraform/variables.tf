@@ -118,6 +118,61 @@ variable "cloudsql_authorized_networks" {
   default     = []
 }
 
+# ---- Cloud Run Job (Phase 2-B 自動生成バッチ) ----
+
+variable "batch_image" {
+  type        = string
+  description = "Cloud Run Job (driving-license-bot-batch) で使う image URI。空文字列なら Job / Workflow / Scheduler を deploy しない (chicken-and-egg 回避)。line-bot と同 image を使う想定。"
+  default     = ""
+}
+
+variable "batch_cpu" {
+  type        = string
+  description = "Cloud Run Job CPU 割当。"
+  default     = "1"
+}
+
+variable "batch_memory" {
+  type        = string
+  description = "Cloud Run Job memory 割当。embedding 計算等で 1Gi が無難。"
+  default     = "1Gi"
+}
+
+variable "batch_task_timeout_seconds" {
+  type        = number
+  description = "Cloud Run Job 1 タスクの最大実行時間 (秒)。30 分既定。"
+  default     = 1800
+}
+
+variable "batch_max_retries" {
+  type        = number
+  description = "Cloud Run Job 失敗時の自動 retry 回数。"
+  default     = 2
+}
+
+variable "generation_batch_size" {
+  type        = number
+  description = "1 バッチで生成する問題数。Cloud Run Job の --total に渡る。"
+  default     = 20
+}
+
+variable "batch_schedule_cron" {
+  type        = string
+  description = "Cloud Scheduler の cron 式 (Asia/Tokyo)。既定: 02:00 JST 毎日。"
+  default     = "0 2 * * *"
+}
+
+variable "agent_llm_provider" {
+  type        = string
+  description = "Question Generator が使う LLM プロバイダ。'gemini' (既定、Marketplace 不要) または 'claude' (Vertex AI Marketplace 承認後)。"
+  default     = "gemini"
+
+  validation {
+    condition     = contains(["gemini", "claude"], var.agent_llm_provider)
+    error_message = "agent_llm_provider must be 'gemini' or 'claude'."
+  }
+}
+
 # ---- Workload Identity Federation (CI 用) ----
 
 variable "enable_wif" {

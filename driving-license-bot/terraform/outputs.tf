@@ -60,6 +60,23 @@ output "cloudsql_user_name" {
   value       = google_sql_user.app.name
 }
 
+# ---- Cloud Run Job + Workflow + Scheduler (Phase 2-B2) ----
+
+output "batch_job_name" {
+  description = "Cloud Run Job (生成バッチ) の名前。batch_image を空にした初回 apply では null。"
+  value       = local.deploy_batch ? google_cloud_run_v2_job.batch[0].name : null
+}
+
+output "workflow_name" {
+  description = "Cloud Workflow の名前。手動起動: gcloud workflows execute <name> --location=<region>"
+  value       = local.deploy_batch ? google_workflows_workflow.generation_pipeline[0].name : null
+}
+
+output "scheduler_job_name" {
+  description = "Cloud Scheduler の名前。手動 fire: gcloud scheduler jobs run <name> --location=<region>"
+  value       = local.deploy_batch ? google_cloud_scheduler_job.batch_nightly[0].name : null
+}
+
 # Artifact Registry
 output "ar_image_uri_base" {
   description = "Cloud Build / push 時に使う image base. tag を付けて push する: <base>:<sha>"
