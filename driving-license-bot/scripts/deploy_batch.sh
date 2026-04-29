@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# DEPRECATED (Phase 2-B2 で Terraform 化済): このスクリプトは今後削除予定。
+#   旧: ./scripts/deploy_batch.sh
+#   新: tfvars に batch_image を埋めて make tf-apply
+#       (terraform/{batch,workflows,scheduler}.tf 参照)
+# 残す理由: 緊急時にすぐ Job だけ差し替えたい場合の参考用。
+#
 # Cloud Run Job + Cloud Workflows + Cloud Scheduler を idempotent にデプロイする。
 #
 # 必要な env:

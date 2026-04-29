@@ -36,14 +36,16 @@ COPY driving-license-bot/uv.lock* /app/
 WORKDIR /app
 
 # 依存解決のみ（本体は後段でコピー）
+# pgvector extra も含める: 同一 image を line-bot service / batch Job 両方で使うため。
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-install-project --no-dev --no-editable
+    uv sync --no-install-project --no-dev --no-editable --extra pgvector
 
-# アプリ本体
+# アプリ本体 + バッチスクリプト（Cloud Run Job が `python -m scripts.run_batch` 起動）
 COPY driving-license-bot/app /app/app
+COPY driving-license-bot/scripts /app/scripts
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --no-editable
+    uv sync --no-dev --no-editable --extra pgvector
 
 # ---------------------------------------------------------------------------
 # Stage 2: runtime
@@ -65,6 +67,7 @@ RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin runner
 
 COPY --from=builder --chown=runner:runner /app/.venv /app/.venv
 COPY --from=builder --chown=runner:runner /app/app /app/app
+COPY --from=builder --chown=runner:runner /app/scripts /app/scripts
 
 USER runner
 

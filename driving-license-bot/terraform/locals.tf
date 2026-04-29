@@ -30,6 +30,16 @@ locals {
   cloudsql_database_name = "question_bank"
   cloudsql_user_name     = "app"
 
+  # Phase 2-B2: Cloud Run Job / Workflow / Scheduler 名
+  batch_job_name      = "${var.name_prefix}-batch"
+  workflow_name       = "${var.name_prefix}-generation-pipeline"
+  scheduler_job_name  = "${var.name_prefix}-batch-nightly"
+  scheduler_time_zone = "Asia/Tokyo"
+
+  # batch_image が空なら Cloud Run Job / Workflow / Scheduler を deploy しない
+  # (chicken-and-egg: image を build してから埋める)
+  deploy_batch = length(trimspace(var.batch_image)) > 0
+
   # Common labels
   labels = {
     project     = var.name_prefix

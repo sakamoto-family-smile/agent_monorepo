@@ -47,12 +47,15 @@ steps:
       - .
 
   # 2. smoke test: image が import できるかだけ確認
+  #    line-bot (app.main) と batch (scripts.run_batch) 両方の import パスを確認
+  #    Cloud Build は cwd=/workspace で起動するため sys.path に /app を明示追加。
+  #    (Cloud Run Job 起動時は WORKDIR=/app + `python -m` で問題なし)
   - id: smoke
     name: ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_SHA}
     entrypoint: python
     args:
       - -c
-      - "import app.main; print('app imported OK')"
+      - "import sys; sys.path.insert(0, '/app'); import app.main; import scripts.run_batch; print('app + batch imported OK')"
 
   # 3. push (両タグ)
   - id: push-sha

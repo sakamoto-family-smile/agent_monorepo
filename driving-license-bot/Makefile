@@ -22,7 +22,7 @@ CLOUDSQL_CONNECTION ?= $(GOOGLE_CLOUD_PROJECT):$(REGION):$(CLOUDSQL_INSTANCE)
 	tf-init tf-plan tf-apply tf-destroy tf-fmt tf-validate tf-output-wif \
 	bootstrap teardown teardown-app image-build secrets-push \
 	cloudsql-proxy cloudsql-init cloudsql-verify \
-	vertex-verify \
+	vertex-verify batch-trigger workflow-trigger \
 	_require_project show-project
 
 help:  ## このヘルプを表示
@@ -138,6 +138,20 @@ cloudsql-verify: _require_project  ## Cloud SQL pgvector の add/find_similar/co
 vertex-verify: _require_project  ## Vertex AI Claude / Gemini / Embedding の到達性 smoke（実コール、< $0.01）
 	GOOGLE_CLOUD_PROJECT=$(GOOGLE_CLOUD_PROJECT) \
 		$(UV) run python scripts/verify_vertex_models.py
+
+# ---- 自動生成バッチ trigger（Phase 2-B2）----
+
+batch-trigger: _require_project  ## Cloud Run Job (driving-license-bot-batch) を即時 1 回実行（テスト用）
+	gcloud run jobs execute driving-license-bot-batch \
+		--project=$(GOOGLE_CLOUD_PROJECT) \
+		--region=$(REGION) \
+		--wait
+
+workflow-trigger: _require_project  ## Workflow を手動起動（Scheduler 経由ではなく即時）
+	gcloud workflows execute driving-license-bot-generation-pipeline \
+		--project=$(GOOGLE_CLOUD_PROJECT) \
+		--location=$(REGION) \
+		--data='{"project":"$(GOOGLE_CLOUD_PROJECT)","location":"$(REGION)"}'
 
 teardown: _require_project  ## driving-license-bot のリソース一括削除（WIF も含む完全削除）
 	GOOGLE_CLOUD_PROJECT=$(GOOGLE_CLOUD_PROJECT) ./scripts/teardown.sh

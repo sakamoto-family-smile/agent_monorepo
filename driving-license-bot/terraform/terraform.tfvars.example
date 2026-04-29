@@ -28,6 +28,18 @@ firestore_location = "asia-northeast1"
 force_destroy       = true
 deletion_protection = false
 
+# ---- Cloud Run Job 自動生成バッチ (Phase 2-B2) ----
+# batch_image を空にすると Cloud Run Job / Workflow / Scheduler は deploy されない。
+# image build 後に line_bot_image と同じ値を設定すれば deploy される（同一 image を共有）。
+batch_image                = ""
+batch_cpu                  = "1"
+batch_memory               = "1Gi"
+batch_task_timeout_seconds = 1800
+batch_max_retries          = 2
+generation_batch_size      = 20
+batch_schedule_cron        = "0 2 * * *"  # 毎日 02:00 JST
+agent_llm_provider         = "gemini"     # 'gemini' (既定、Marketplace 不要) or 'claude'
+
 # ---- Cloud SQL (Phase 2-A) ----
 # db-f1-micro: shared CPU, 0.6GB RAM, 月 ~$10
 cloudsql_tier                = "db-f1-micro"
