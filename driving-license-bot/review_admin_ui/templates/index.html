@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Review queue · {{ service_name }}{% endblock %}
+{% block content %}
+  <h2 style="margin-top: 0;">Review queue</h2>
+  {% if questions %}
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Category</th>
+          <th>Difficulty</th>
+          <th>Status</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for q in questions %}
+          <tr>
+            <td><code>{{ q.question_id }}</code></td>
+            <td>{{ q.category }}</td>
+            <td>{{ q.difficulty }}</td>
+            <td><span class="badge">{{ q.status }}</span></td>
+            <td>{{ q.created_at }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">レビュー待ちの問題はありません（C2 で実データに繋ぎ込み予定）。</p>
+  {% endif %}
+{% endblock %}

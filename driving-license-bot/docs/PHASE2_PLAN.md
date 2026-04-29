@@ -140,6 +140,35 @@
   - `app/services/quiz_service.py` 自体は変更なし（プール差し替えで対応）
 - **完了判定**: LINE で実際に bank 由来の問題（id prefix で識別可能）が出る
 
+### Sub 追加: Y1 GCS バックアップ / リストア（teardown-app との両立）
+
+- **目的**: `make teardown-app` 時に Firestore（ユーザー / 回答履歴 / セッション）と
+  Cloud SQL pgvector（生成済み問題）を **自動で GCS にバックアップ**、再 apply 時に
+  **自動でリストア** することで「課金停止 ↔ 再開」サイクルを非破壊化する
+- **背景**: 現状の teardown-app では Firestore / Cloud SQL のデータが消失。
+  Phase 2-A1 README で「重複検査用 DB のため再生成可」と記したが、Phase 2-B 以降で
+  生成済み問題が蓄積される + Phase 1 から既にユーザー回答履歴が蓄積されている。
+  個人運用でも消失コストが大きくなったため自動バックアップを追加する
+- **deliverable**:
+  - `terraform/backup_bucket.tf`: 専用 GCS bucket
+    `${PROJECT}-driving-license-bot-backups`（versioning 有効、lifecycle 30 日 retention）
+  - `scripts/backup_data.sh`:
+    - Firestore: `gcloud firestore export gs://...backups/firestore/$(date)`
+    - Cloud SQL: `gcloud sql export sql ... gs://...backups/cloudsql/$(date)/dump.sql`
+  - `scripts/restore_data.sh`:
+    - 最新 backup を検索 → Firestore import / Cloud SQL import
+    - **存在しなければ skip**（初回 apply 時の冪等性）
+  - `scripts/teardown_app.sh` を修正: terraform destroy 前に backup_data.sh を実行
+  - `Makefile`: `tf-apply` 後に restore のヒント表示、`make backup` / `make restore` 単独実行可
+  - `terraform/iam.tf`: sa-batch / sa-line-bot に bucket 書き込み権限
+  - 復旧手順は `docs/BACKUP_RESTORE.md` に整理
+- **テスト**:
+  - 1 件 add → backup → teardown-app → tf-apply → restore → 1 件 read で同じ data 取得
+  - backup 不在時の restore が exit 0 で skip
+- **完了判定**: teardown-app 後の再 apply で **回答履歴と問題プールが完全に復元** される
+- **着手タイミング**: C 系列マージ後、X1 と同等優先度。**既存ユーザーの履歴を消したくない**
+  ので teardown-app の本格運用開始前に必須化する候補
+
 ## 3. インフラ追加分の Terraform リソース概要
 
 | カテゴリ | リソース | PR |
