@@ -80,8 +80,13 @@ output "scheduler_job_name" {
 # ---- review-admin-ui (Phase 2-C3) ----
 
 output "review_admin_url" {
-  description = "review-admin-ui の URL。allowlist 内の email でアクセスすると IAP の Google ログインを経由して画面が出る。"
+  description = "review-admin-ui の URL。/login で Google OAuth → allowlist 内の email でログインできる。"
   value       = local.deploy_admin_ui ? google_cloud_run_v2_service.admin_ui[0].uri : null
+}
+
+output "review_admin_oauth_redirect_url" {
+  description = "OAuth client の Authorized redirect URIs に登録する値 (Console で手動設定)。"
+  value       = local.deploy_admin_ui ? "${google_cloud_run_v2_service.admin_ui[0].uri}/auth/callback" : null
 }
 
 output "sa_admin_ui_email" {

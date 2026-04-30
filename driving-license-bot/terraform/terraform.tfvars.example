@@ -48,7 +48,9 @@ review_admin_min_instances = 0
 review_admin_max_instances = 2
 review_admin_cpu           = "1"
 review_admin_memory        = "512Mi"
-# IAP 経由でアクセスを許可する Google アカウント email のリスト (空なら全員拒否)
+# App-level OAuth でログイン許可する Google アカウント email のリスト (空なら全員拒否)
+# OAuth client ID / Client Secret / session secret は手動で Secret Manager に投入。
+# 詳細: docs/SETUP.md §6.5
 review_admin_allowed_emails = []
 # 例:
 # review_admin_allowed_emails = ["operator@example.com"]

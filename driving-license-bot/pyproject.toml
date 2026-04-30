@@ -17,8 +17,11 @@ dependencies = [
     "google-cloud-firestore>=2.16.0",
     "google-cloud-tasks>=2.16.0",
     "google-cloud-secret-manager>=2.20.0",
-    # Phase 2-C: review-admin-ui の IAP JWT 検証用
+    # Phase 2-C: review-admin-ui の Google OAuth ID token 検証用
     "google-auth>=2.30.0",
+    # Phase 2-C: review-admin-ui の Google OAuth flow + signed session cookie
+    "authlib>=1.3.0",
+    "itsdangerous>=2.2.0",
     # Phase 2-C: HTML rendering for review-admin-ui
     "jinja2>=3.1.0",
     # Phase 2-C: form parsing (review_admin_ui の reject reason_tag 等)

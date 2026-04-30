@@ -133,9 +133,7 @@ async def test_approve_transitions_to_published(client: TestClient) -> None:
     bank = client.app.state.test_bank
     await bank.add(_make_stored("q3"))
 
-    resp = client.post(
-        "/questions/q3/approve", follow_redirects=False
-    )
+    resp = client.post("/questions/q3/approve", follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == "/"
 
