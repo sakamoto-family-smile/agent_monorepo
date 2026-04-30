@@ -84,6 +84,11 @@ resource "google_sql_database" "question_bank" {
   project  = var.project_id
   name     = local.cloudsql_database_name
   instance = google_sql_database_instance.main.name
+
+  # ABANDON: terraform から database delete API を呼ばない。instance destroy で
+  # 巻き取らせる。app user が所有する 200+ オブジェクトとの依存で delete が
+  # こけるのを回避するため。state からは消えるので次回 apply で再作成される。
+  deletion_policy = "ABANDON"
 }
 
 resource "google_sql_user" "app" {
@@ -91,6 +96,10 @@ resource "google_sql_user" "app" {
   name     = local.cloudsql_user_name
   instance = google_sql_database_instance.main.name
   password = random_password.cloudsql_app.result
+
+  # ABANDON: 同上。user が所有するオブジェクトとの依存で delete がこけるため
+  # delete API を呼ばず instance destroy で巻き取らせる。
+  deletion_policy = "ABANDON"
 }
 
 # Secret Manager に投入。accessor 権限の付与は Phase 2-A3 (sa-batch / sa-agent 作成時) で行う。
