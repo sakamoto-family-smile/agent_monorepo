@@ -43,11 +43,12 @@ echo "[restore_data] latest backup = ${TIMESTAMP}"
 
 # ---- 1. Firestore import ----
 FS_PATH="${BUCKET}/firestore/${TIMESTAMP}"
-# Firestore export は metadata file が `<TS>.overall_export_metadata` の形で出る
-FS_META=$(gcloud storage ls "${FS_PATH}" 2>/dev/null | grep '\.overall_export_metadata$' || true)
-if [[ -n "${FS_META}" ]]; then
-    echo "[restore_data] firestore ← ${FS_META}"
-    if ! gcloud firestore import "${FS_META}" --project="${PROJECT}" 2>&1 | tail -5; then
+# `gcloud firestore import` は export 時の prefix path (= ${FS_PATH}) を受け取る
+# 仕様。metadata file 自体ではなくディレクトリ。中で `<TS>.overall_export_metadata`
+# を自動的に探す。metadata file 存在で「prefix が valid」を判定。
+if gcloud storage ls "${FS_PATH}" 2>/dev/null | grep -q '\.overall_export_metadata$'; then
+    echo "[restore_data] firestore ← ${FS_PATH}"
+    if ! gcloud firestore import "${FS_PATH}" --project="${PROJECT}" 2>&1 | tail -5; then
         echo "[restore_data] WARN: Firestore import 失敗。続行。" >&2
     fi
 else
