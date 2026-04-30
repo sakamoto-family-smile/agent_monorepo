@@ -94,7 +94,7 @@ terraform destroy -auto-approve \
     -target=google_cloud_scheduler_job.batch_nightly \
     -target=google_workflows_workflow.generation_pipeline \
     -target=google_cloud_run_v2_job.batch \
-    -target=google_cloud_run_v2_service_iam_member.admin_ui_iap_accessor \
+    -target=google_iap_web_cloud_run_service_iam_member.admin_ui_iap_accessor \
     -target=google_cloud_run_v2_service.admin_ui \
     -target=google_service_account.admin_ui \
     -target=google_project_iam_member.admin_ui_cloudsql_client \
