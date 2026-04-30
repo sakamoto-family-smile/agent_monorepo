@@ -64,6 +64,12 @@ cloudsql_backup_enabled      = true
 # cloudsql_authorized_networks = [{ name = "office", value = "203.0.113.0/24" }]
 cloudsql_authorized_networks = []
 
+# ---- Backup bucket (Phase 2-Y1) ----
+# teardown-app 時に Firestore + Cloud SQL を GCS にバックアップ → 再 apply 後に
+# make restore で復元することで、課金停止サイクルでデータが消えない。
+backup_retention_days       = 90
+backup_bucket_force_destroy = false  # 完全削除時に bucket も消したい場合は true
+
 # ---- Workload Identity Federation (CI で `terraform plan` を回す用) ----
 # 1. 初回 apply は false で OK（基盤のみ作る）。
 # 2. tfstate_bucket を bootstrap で作ったバケット名に書き、enable_wif=true で再 apply。

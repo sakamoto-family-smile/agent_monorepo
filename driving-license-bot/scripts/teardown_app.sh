@@ -23,13 +23,26 @@ TF_DIR="$(dirname "$0")/../terraform"
 
 echo "[teardown_app] project=${PROJECT} region=${REGION}"
 echo "[teardown_app] このスクリプトは app リソースのみ削除します。"
+echo "[teardown_app]   - destroy 前に Firestore + Cloud SQL を GCS にバックアップ"
 echo "[teardown_app]   - Cloud Run / Firestore / Artifact Registry / sa-line-bot は削除"
-echo "[teardown_app]   - Cloud SQL instance (\$10/月) も削除（重複検査 DB は再生成可能）"
-echo "[teardown_app]   - WIF / tfstate / API / Secret 枠 は残す（cloudsql-password は次回 apply で再生成）"
+echo "[teardown_app]   - Cloud SQL instance (\$10/月) も削除（再 apply 後 make restore で復元）"
+echo "[teardown_app]   - WIF / tfstate / API / Secret 枠 / backup bucket は残す"
 read -r -p "[teardown_app] よろしいですか？ (yes/no): " CONFIRM
 if [[ "${CONFIRM}" != "yes" ]]; then
     echo "[teardown_app] aborted"
     exit 1
+fi
+
+# 0. destroy 前に Firestore + Cloud SQL を GCS にバックアップ (Phase 2-Y1)
+#    backup 失敗時はユーザーに確認 (継続するかは判断)
+echo "[teardown_app] running backup_data.sh ..."
+if ! "$(dirname "$0")/backup_data.sh"; then
+    echo "[teardown_app] WARN: backup 失敗。データ消失のリスクあり。" >&2
+    read -r -p "[teardown_app] それでも続行しますか？ (yes/no): " CONFIRM2
+    if [[ "${CONFIRM2}" != "yes" ]]; then
+        echo "[teardown_app] aborted"
+        exit 1
+    fi
 fi
 
 # 1. Artifact Registry の image を全削除
@@ -133,6 +146,7 @@ cat <<'DONE'
 
 → `Terraform plan / driving-license-bot` ジョブは引き続き動作します。
 → 再展開: `make tf-apply`（LINE secret は既存値が再利用される）
-→ Cloud SQL の重複検査スキーマは `make cloudsql-init`（PR A2 で追加予定）で再投入
+→ Cloud SQL のデータ復元: `make restore`（destroy 前のバックアップから自動復元）
+→ Cloud SQL のスキーマだけ作り直す場合: `make cloudsql-init`
 → Secret も消したい完全削除: `make teardown`
 DONE

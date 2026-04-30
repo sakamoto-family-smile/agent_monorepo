@@ -17,6 +17,7 @@ Phase 1 最小公開（30 問のシードプールで動く LINE Bot）+ Phase 2
 | Workflows | `driving-license-bot-generation-pipeline` (workflows/generation_pipeline.yaml を埋め込み) |
 | Scheduler | `driving-license-bot-batch-nightly` (cron 02:00 JST) |
 | **IAP** | **`google_iap_web_cloud_run_service_iam_member` で `review_admin_allowed_emails` に `roles/iap.httpsResourceAccessor` 付与** |
+| **Backup bucket** | **`<PROJECT>-driving-license-bot-backups` (versioning ON, lifecycle 90 日)** + Firestore service agent / Cloud SQL SA への objectAdmin 付与 |
 
 含まれないもの（次フェーズ以降）:
 
