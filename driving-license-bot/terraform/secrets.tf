@@ -128,6 +128,14 @@ resource "google_secret_manager_secret_iam_member" "batch_operator_user_ids" {
   member    = "serviceAccount:${local.sa_batch_email}"
 }
 
+# Phase 2-X1: bank プール接続用に line_bot SA にも cloudsql_password accessor を付与
+resource "google_secret_manager_secret_iam_member" "line_bot_cloudsql_password" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.cloudsql_password.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${local.sa_line_bot_email}"
+}
+
 # ---- Phase 2-C3: sa-admin-ui 用 secret accessor ----
 
 # Cloud SQL password: pgvector へ接続するため

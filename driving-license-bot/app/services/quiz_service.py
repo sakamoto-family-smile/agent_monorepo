@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from app.models import Question, QuizMode, Session, SessionState
 from app.repositories.protocols import AnswerHistoryRepo, SessionRepo
-from app.repositories.question_pool import QuestionPool
+from app.repositories.question_pool import QuestionPoolLike
 
 
 class QuizService:
@@ -15,11 +15,14 @@ class QuizService:
 
     - `start_question`: ユーザーに次の 1 問を出す（直近出題を除外）
     - `consume_active_session`: 回答受付時にセッションを完了状態に遷移
+
+    `pool` は `QuestionPoolLike` Protocol を満たす任意の実装を受け取る。
+    Phase 2-X1 で `BankBackedQuestionPool` への差し替えに対応。
     """
 
     def __init__(
         self,
-        pool: QuestionPool,
+        pool: QuestionPoolLike,
         sessions: SessionRepo,
         answer_histories: AnswerHistoryRepo,
         *,

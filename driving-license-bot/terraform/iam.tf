@@ -35,6 +35,14 @@ resource "google_project_iam_member" "line_bot_metric_writer" {
   member  = "serviceAccount:${local.sa_line_bot_email}"
 }
 
+# Phase 2-X1: bank プール (pgvector) 接続権限。
+# line_bot_pool_source=bank の時のみ実利用するが、project IAM は冪等なので常時付与。
+resource "google_project_iam_member" "line_bot_cloudsql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${local.sa_line_bot_email}"
+}
+
 # ---- Phase 2-A3: sa-batch (Cloud Run Job 自動生成バッチ) ----
 
 resource "google_service_account" "batch" {

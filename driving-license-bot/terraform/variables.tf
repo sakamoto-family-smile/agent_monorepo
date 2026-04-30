@@ -53,6 +53,17 @@ variable "line_bot_invoker_members" {
   default     = ["allUsers"]
 }
 
+variable "line_bot_pool_source" {
+  type        = string
+  description = "line-bot の出題プール source: 'seed' (Phase 1 既定、シード JSON) または 'bank' (Phase 2-X1、pgvector + Firestore の published 問題)。"
+  default     = "seed"
+
+  validation {
+    condition     = contains(["seed", "bank"], var.line_bot_pool_source)
+    error_message = "line_bot_pool_source must be 'seed' or 'bank'."
+  }
+}
+
 # ---- Firestore ----
 
 variable "firestore_location" {

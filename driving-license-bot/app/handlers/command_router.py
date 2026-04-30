@@ -30,7 +30,7 @@ from app.repositories.protocols import (
     SessionRepo,
     UserRepo,
 )
-from app.repositories.question_pool import QuestionPool
+from app.repositories.question_pool import QuestionPoolLike
 from app.services.identity import IdentityService
 from app.services.quiz_service import QuizService
 from app.services.scoring import ScoringService
@@ -73,7 +73,7 @@ class HandlerDeps:
     line_user_index: LineUserIndexRepo
     sessions: SessionRepo
     answer_histories: AnswerHistoryRepo
-    pool: QuestionPool
+    pool: QuestionPoolLike
 
     @property
     def identity(self) -> IdentityService:
