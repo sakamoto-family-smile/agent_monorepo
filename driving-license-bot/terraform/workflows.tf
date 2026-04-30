@@ -15,6 +15,10 @@ resource "google_workflows_workflow" "generation_pipeline" {
   source_contents = file("${path.module}/../workflows/generation_pipeline.yaml")
   labels          = local.labels
 
+  # Provider 6.x で default true。dev/PoC では teardown を妨げないよう
+  # var.deletion_protection (既定 false) に追従。
+  deletion_protection = var.deletion_protection
+
   depends_on = [
     google_project_service.workflows,
     google_project_iam_member.workflow_run_invoker,

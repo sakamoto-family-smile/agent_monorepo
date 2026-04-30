@@ -15,6 +15,10 @@ resource "google_cloud_run_v2_service" "line_bot" {
 
   ingress = "INGRESS_TRAFFIC_ALL"
 
+  # Provider 6.x で default true。dev/PoC では teardown を妨げないよう
+  # var.deletion_protection (既定 false) に追従。
+  deletion_protection = var.deletion_protection
+
   labels = local.labels
 
   template {
