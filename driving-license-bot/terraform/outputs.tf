@@ -89,6 +89,18 @@ output "sa_admin_ui_email" {
   value       = local.deploy_admin_ui ? google_service_account.admin_ui.email : null
 }
 
+# ---- Backup bucket (Phase 2-Y1) ----
+
+output "backup_bucket_name" {
+  description = "Firestore + Cloud SQL のバックアップ先 GCS bucket 名。"
+  value       = google_storage_bucket.backups.name
+}
+
+output "backup_bucket_uri" {
+  description = "バックアップ先 GCS URI (gs://...)。scripts/backup_data.sh が使用。"
+  value       = "gs://${google_storage_bucket.backups.name}"
+}
+
 # Artifact Registry
 output "ar_image_uri_base" {
   description = "Cloud Build / push 時に使う image base. tag を付けて push する: <base>:<sha>"

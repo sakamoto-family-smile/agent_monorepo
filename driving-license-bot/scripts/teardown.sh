@@ -25,6 +25,14 @@ TF_DIR="$(dirname "$0")/../terraform"
 
 echo "[teardown] project=${PROJECT} region=${REGION}"
 echo "[teardown] このスクリプトは driving-license-bot のリソースをほぼすべて削除します。"
+echo "[teardown]"
+echo "[teardown] ⚠️  Firestore / Cloud SQL のデータも消えます。必要なら先に backup を:"
+echo "[teardown]      make backup        # GCS bucket に Firestore + Cloud SQL を export"
+echo "[teardown]"
+echo "[teardown]   backup bucket は force_destroy=false なら destroy 後も残ります"
+echo "[teardown]   (再構築後 make restore で戻せる)。完全に消したい場合は"
+echo "[teardown]   terraform.tfvars に backup_bucket_force_destroy=true を設定してから実行。"
+echo "[teardown]"
 read -r -p "[teardown] よろしいですか？ (yes/no): " CONFIRM
 if [[ "${CONFIRM}" != "yes" ]]; then
     echo "[teardown] aborted"
