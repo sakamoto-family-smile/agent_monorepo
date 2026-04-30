@@ -41,8 +41,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project --no-dev --no-editable --extra pgvector
 
 # アプリ本体 + バッチスクリプト（Cloud Run Job が `python -m scripts.run_batch` 起動）
+# review_admin_ui は同一 image を CMD override で再利用 (Phase 2-C3)
 COPY driving-license-bot/app /app/app
 COPY driving-license-bot/scripts /app/scripts
+COPY driving-license-bot/review_admin_ui /app/review_admin_ui
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --no-editable --extra pgvector
@@ -68,6 +70,7 @@ RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin runner
 COPY --from=builder --chown=runner:runner /app/.venv /app/.venv
 COPY --from=builder --chown=runner:runner /app/app /app/app
 COPY --from=builder --chown=runner:runner /app/scripts /app/scripts
+COPY --from=builder --chown=runner:runner /app/review_admin_ui /app/review_admin_ui
 
 USER runner
 

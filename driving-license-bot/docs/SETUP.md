@@ -275,62 +275,99 @@ gcloud run deploy line-bot-service \
 デプロイ完了後の URL を `https://<cloud-run-url>/webhook` として LINE Developers
 Console の Webhook URL に設定。
 
-### 6.5 review-admin-ui (IAP, Phase 2-C3)
+### 6.5 review-admin-ui (App-level Google OAuth, Phase 2-C3)
 
-運営者向けレビュー Web UI を IAP で公開する。
+運営者向けレビュー Web UI を、アプリ内蔵の Google OAuth + signed session cookie
+で認証する。Cloud Run service 自体は `allUsers` invoker（パブリック）として公開し、
+未ログイン request は `/login` にリダイレクト → Google → `/auth/callback` で認証情報を
+session cookie に保存 → email allowlist で認可、という流れ。
+
+> **なぜ IAP ではないか:** Cloud Run direct IAP は個人 GCP project（組織所属なし）で
+> OAuth client の自動 provisioning が動かず "Empty Google Account OAuth client ID(s)/secret(s)"
+> エラーで利用不可。同じ理由で legacy IAP の `gcloud iap oauth-brands` も `Project must
+> belong to an organization` で蹴られる。App-level OAuth は組織不要で、PC・スマホどちらでも
+> 通常のブラウザログインで動く。
 
 #### 6.5.1 OAuth consent screen を configure（1 度だけ）
 
-IAP は OAuth consent screen が必要。GCP Console で:
+GCP Console で:
 
-1. **APIs & Services > OAuth consent screen** を開く
+1. **APIs & Services > OAuth consent screen**: https://console.cloud.google.com/apis/credentials/consent
 2. **External**（個人 Google アカウント）を選択して "Create"
-3. App name: `driving-license-bot-admin`、User support email を入力
-4. **Test users** に運営者の Google アカウント email を追加（External + unverified の場合は test user 設定が必要）
+3. App name: `driving-license-bot-admin`、User support email + Developer contact email を入力
+4. **Test users** に運営者の Google アカウント email を追加（External + Testing の場合は test user 必須）
 5. **Save and continue**（Scopes は default で OK）
 
-> "Internal" は Google Workspace でのみ。個人 GCP project では External を選ぶ。
+> "Internal" は Google Workspace 限定。個人 GCP project では External を選ぶ。
+> Publishing status は "Testing" のままで OK（test users に登録した email でログイン可能）。
 
-#### 6.5.2 tfvars に値を設定
+#### 6.5.2 OAuth 2.0 Client ID を作成
+
+1. **APIs & Services > Credentials**: https://console.cloud.google.com/apis/credentials
+2. **+ CREATE CREDENTIALS > OAuth client ID**
+3. Application type: **Web application**
+4. Name: `driving-license-bot-admin-oauth`
+5. Authorized redirect URIs: 一旦空のまま **CREATE**（Cloud Run URL がまだ確定していないため）
+6. ダイアログで表示される **Client ID** と **Client Secret** をコピー保存
+
+#### 6.5.3 Secret Manager に値を投入
+
+```bash
+# OAuth Client ID
+echo -n "123456789012-xxx.apps.googleusercontent.com" | \
+  gcloud secrets versions add driving-license-bot-admin-oauth-client-id --data-file=-
+
+# OAuth Client Secret
+echo -n "GOCSPX-xxxxxxxxxxxx" | \
+  gcloud secrets versions add driving-license-bot-admin-oauth-client-secret --data-file=-
+
+# Session secret (32 bytes ランダム)
+openssl rand -hex 32 | \
+  gcloud secrets versions add driving-license-bot-admin-session-secret --data-file=-
+```
+
+> Secret 枠自体は terraform で作成済 (`make tf-apply` 後に `gcloud secrets list` で確認可能)。
+> 初回 apply はこの 3 つの secret に value version が無い状態でも進む（Cloud Run service
+> 起動時に Secret Manager 参照で 500 になるので、必ず value 投入後に再 apply or revision 再生成）。
+
+#### 6.5.4 tfvars に値を設定
 
 ```hcl
 # image は line-bot と共有（CMD で uvicorn review_admin_ui.main:app に切替）
 review_admin_image = "asia-northeast1-docker.pkg.dev/<PROJECT>/driving-license-bot/line-bot:latest"
 
-# IAP 経由でアクセス許可するアカウント
+# App-level OAuth でログイン許可する email リスト (空なら fail-closed)
 review_admin_allowed_emails = ["operator@example.com"]
 ```
 
-#### 6.5.3 Apply + URL 確認
+#### 6.5.5 Apply + URL 確認
 
 ```bash
 make tf-apply
-cd terraform && terraform output review_admin_url
-# 例: https://driving-license-bot-admin-ui-XXXX.a.run.app
+cd terraform && terraform output review_admin_url review_admin_oauth_redirect_url
+# review_admin_url               = "https://driving-license-bot-admin-ui-XXXX.a.run.app"
+# review_admin_oauth_redirect_url = "https://driving-license-bot-admin-ui-XXXX.a.run.app/auth/callback"
 ```
 
-ブラウザで上記 URL を開くと:
-- 未ログインなら Google 認証画面（IAP）
-- allowlist 外の email なら 403
-- 許可された email なら `Review queue` 画面
+#### 6.5.6 OAuth client に redirect URI を登録
 
-#### 6.5.4 IAP audience の確認 / 調整
+6.5.5 で取得した `review_admin_oauth_redirect_url` を Console で登録:
 
-`ADMIN_IAP_AUDIENCE` env はアプリ側の JWT 検証で使われる。Cloud Run direct IAP の audience は GCP の実装で決まるため、deploy 後 1 度ブラウザの DevTools で:
+1. **APIs & Services > Credentials > OAuth 2.0 Client IDs > driving-license-bot-admin-oauth**
+2. **Authorized redirect URIs > + ADD URI**: `https://driving-license-bot-admin-ui-XXXX.a.run.app/auth/callback`
+3. **Save**
 
-```
-Network → / リクエスト → Request Headers → x-goog-iap-jwt-assertion
-```
+これで OAuth client が Cloud Run service の callback URL を受け入れるようになる。
 
-の payload を [jwt.io](https://jwt.io) で decode し、`aud` claim を控えて、必要なら:
+#### 6.5.7 ブラウザでログイン確認
 
-```bash
-gcloud run services update driving-license-bot-admin-ui \
-  --project=$GOOGLE_CLOUD_PROJECT --region=asia-northeast1 \
-  --update-env-vars="ADMIN_IAP_AUDIENCE=<実際の aud>"
-```
+PC でも iPad でも `review_admin_url` を開くと:
 
-で env を上書きする（terraform 側のデフォルトは典型値）。
+1. 未ログインなら自動で `/login` → Google アカウント選択
+2. 初回は consent screen (Test users 登録済みなら警告は出るが進める)
+3. `/auth/callback` 経由で session cookie が降って `/` (review queue) が表示
+4. allowlist 外の email でログインすると 403
+5. session 寿命は 7 日（`ADMIN_SESSION_MAX_AGE_SECONDS` で変更可能）
 
 ---
 

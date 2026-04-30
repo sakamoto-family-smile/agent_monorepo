@@ -145,3 +145,67 @@ resource "google_secret_manager_secret_iam_member" "admin_ui_cloudsql_password" 
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.admin_ui.email}"
 }
+
+# ---- Phase 2-C3: Google OAuth 2.0 secrets (admin UI 認証用) ----
+# 値は手動投入。OAuth client は Console > APIs & Services > Credentials で作成。
+# session_secret は 32+ bytes のランダム文字列を `openssl rand -hex 32` 等で生成。
+
+resource "google_secret_manager_secret" "admin_oauth_client_id" {
+  project   = var.project_id
+  secret_id = "${var.name_prefix}-admin-oauth-client-id"
+
+  replication {
+    auto {}
+  }
+
+  labels = local.labels
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret" "admin_oauth_client_secret" {
+  project   = var.project_id
+  secret_id = "${var.name_prefix}-admin-oauth-client-secret"
+
+  replication {
+    auto {}
+  }
+
+  labels = local.labels
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret" "admin_session_secret" {
+  project   = var.project_id
+  secret_id = "${var.name_prefix}-admin-session-secret"
+
+  replication {
+    auto {}
+  }
+
+  labels = local.labels
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_iam_member" "admin_ui_oauth_client_id" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.admin_oauth_client_id.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.admin_ui.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "admin_ui_oauth_client_secret" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.admin_oauth_client_secret.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.admin_ui.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "admin_ui_session_secret" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.admin_session_secret.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.admin_ui.email}"
+}

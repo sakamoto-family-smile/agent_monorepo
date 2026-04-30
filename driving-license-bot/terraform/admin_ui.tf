@@ -1,32 +1,32 @@
-# Phase 2-C3: review-admin-ui Cloud Run service (IAP 直接適用)。
+# Phase 2-C3: review-admin-ui Cloud Run service。
+#
+# 認証認可は App-level Google OAuth + signed session cookie に切り替え (元々は
+# Cloud Run direct IAP だったが、個人 GCP project は組織所属なしで IAP brand の
+# 自動 provisioning が動かないため変更)。
 #
 # 設計判断:
-# - HTTPS LB を介さない Cloud Run direct IAP を採用 (2024 GA)。
-#   標準 Cloud Run URL でブラウザから IAP の Google ログインが走る。
-#   ドメイン / SSL 証明書 / LB / serverless NEG 不要。
+# - Cloud Run service は allUsers invoker (パブリック)。アプリ内の OAuth flow と
+#   email allowlist で認可するため、未ログインの request は /login にリダイレクト。
 # - line-bot と同 image を共有。CMD で uvicorn review_admin_ui.main:app に切替。
 # - Cloud SQL Unix socket (/cloudsql/...) を batch と同じパターンで mount。
 # - Firestore は ADC + datastore.user role で接続。
-# - allowlist 外は IAP が 403 → アプリ側の email check も fail-closed で二段防御。
+# - OAuth client ID / secret / session secret は Secret Manager 管理。
 #
 # 必要な事前手動作業 (1 度だけ、Console):
-#   - OAuth consent screen を Configure (External / unverified でも個人利用は OK)
-#   - 上記後、IAP brand が project に作られる (auto)
+#   - OAuth consent screen を Configure (External、test users に operator email を登録)
+#   - OAuth 2.0 Client ID (Web application) を作成
+#   - 作成した Client ID / Secret を Secret Manager に投入
 #   - 詳細: docs/SETUP.md §6.5
 
 resource "google_cloud_run_v2_service" "admin_ui" {
-  count    = local.deploy_admin_ui ? 1 : 0
-  provider = google-beta # iap_enabled は google-beta provider のみ
+  count = local.deploy_admin_ui ? 1 : 0
 
   project  = var.project_id
   location = var.region
   name     = local.admin_ui_service_name
 
-  ingress     = "INGRESS_TRAFFIC_ALL"
-  iap_enabled = true
+  ingress = "INGRESS_TRAFFIC_ALL"
 
-  # Provider 6.x で default true。dev/PoC では teardown を妨げないよう
-  # var.deletion_protection (既定 false) に追従。
   deletion_protection = var.deletion_protection
 
   labels = local.labels
@@ -75,14 +75,43 @@ resource "google_cloud_run_v2_service" "admin_ui" {
         name  = "ADMIN_ALLOWED_EMAILS"
         value = join(",", var.review_admin_allowed_emails)
       }
-      # IAP audience: Cloud Run direct IAP の場合、JWT の aud claim は
-      # /projects/<NUMBER>/global/backendServices/<UID> 形式 (LB 介在時) ではなく
-      # Cloud Run service URL になるケースがある。値は deploy 後に
-      # `terraform output review_admin_iap_audience` で確認 + 必要なら手動更新。
-      # 既定では service URL を使用 (一致しない場合は network tab で確認可能)。
+
+      # OAuth callback URL (Cloud Run service URL + /auth/callback)
+      # OAuth client の Authorized redirect URIs と一致する必要あり。
+      # apply 後に terraform output review_admin_oauth_redirect_url で値を取得し、
+      # Console で OAuth client に追加する (deploy 1 サイクル目は値が確定しない
+      # ので, /auth/callback を空にしておくと request.url_for で動的生成される)
       env {
-        name  = "ADMIN_IAP_AUDIENCE"
-        value = "/projects/${data.google_project.this.number}/global/backendServices/${local.admin_ui_service_name}"
+        name  = "ADMIN_OAUTH_REDIRECT_URL"
+        value = "" # 動的生成 (request.url_for) を許容
+      }
+
+      env {
+        name = "ADMIN_OAUTH_CLIENT_ID"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.admin_oauth_client_id.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "ADMIN_OAUTH_CLIENT_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.admin_oauth_client_secret.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "ADMIN_SESSION_SECRET_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.admin_session_secret.secret_id
+            version = "latest"
+          }
+        }
       }
 
       # アプリ層 (app.config.settings) が読む env
@@ -162,11 +191,24 @@ resource "google_cloud_run_v2_service" "admin_ui" {
 
   depends_on = [
     google_project_service.run,
-    google_project_service.iap,
     google_project_iam_member.admin_ui_cloudsql_client,
     google_project_iam_member.admin_ui_datastore_user,
     google_secret_manager_secret_iam_member.admin_ui_cloudsql_password,
+    google_secret_manager_secret_iam_member.admin_ui_oauth_client_id,
+    google_secret_manager_secret_iam_member.admin_ui_oauth_client_secret,
+    google_secret_manager_secret_iam_member.admin_ui_session_secret,
   ]
+}
+
+# パブリック invoker. 認可はアプリ内 OAuth + email allowlist で実施。
+resource "google_cloud_run_v2_service_iam_member" "admin_ui_invoker" {
+  count = local.deploy_admin_ui ? 1 : 0
+
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.admin_ui[0].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }
 
 data "google_project" "this" {

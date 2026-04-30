@@ -218,7 +218,7 @@ variable "review_admin_memory" {
 
 variable "review_admin_allowed_emails" {
   type        = list(string)
-  description = "review-admin-ui への IAP アクセスを許可する Google アカウント email のリスト。空なら誰もアクセスできない（fail-closed）。"
+  description = "review-admin-ui の app-level OAuth でログイン許可する Google アカウント email のリスト。空なら誰もアクセスできない（fail-closed）。"
   default     = []
 }
 
