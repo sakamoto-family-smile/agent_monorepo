@@ -46,6 +46,11 @@ resource "google_cloud_run_v2_service" "admin_ui" {
         "review_admin_ui.main:app",
         "--host=0.0.0.0",
         "--port=8080",
+        # Cloud Run の proxy IP (169.254.x) を信頼して X-Forwarded-Proto / Host
+        # を反映させる。これが無いと request.url.scheme="http" になり、
+        # OAuth redirect_uri が http:// になって Google から redirect_uri_mismatch
+        "--proxy-headers",
+        "--forwarded-allow-ips=*",
       ]
 
       ports {
@@ -60,7 +65,14 @@ resource "google_cloud_run_v2_service" "admin_ui" {
       }
 
       env {
+        # app.config (LINE bot 側) が読む env
         name  = "ENV"
+        value = "gcp"
+      }
+      env {
+        # review_admin_ui.config (env_prefix="ADMIN_") が読む env。
+        # https_only cookie 判定 (settings.env != "local") で必須。
+        name  = "ADMIN_ENV"
         value = "gcp"
       }
       env {
