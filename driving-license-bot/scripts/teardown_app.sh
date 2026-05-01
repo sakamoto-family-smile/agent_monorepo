@@ -101,11 +101,18 @@ terraform destroy -auto-approve \
     -target=google_project_iam_member.admin_ui_datastore_user \
     -target=google_project_iam_member.admin_ui_log_writer \
     -target=google_project_iam_member.admin_ui_metric_writer \
-    -target=google_secret_manager_secret_iam_member.admin_ui_cloudsql_password
+    -target=google_secret_manager_secret_iam_member.admin_ui_cloudsql_password \
+    -target=google_secret_manager_secret_iam_member.admin_ui_oauth_client_id \
+    -target=google_secret_manager_secret_iam_member.admin_ui_oauth_client_secret \
+    -target=google_secret_manager_secret_iam_member.admin_ui_session_secret
 # NOTE: LINE 系の Secret (google_secret_manager_secret.line_*) と
 # google_secret_manager_secret.cloudsql_password の「枠」はあえて -target に含めない
 # → LINE token は次回 apply 後に再投入不要、cloudsql-password の枠も残るが値は次回
 #   apply で random_password が再生成されて上書きされる（DB 自体が新規生成のため整合）。
+# admin OAuth secret 3 件 (driving-license-bot-admin-oauth-client-id /
+# -client-secret / -session-secret) も「枠」は残す → 値ごと残るので再投入不要。
+# accessor IAM binding は -target に含めて消す (sa-admin-ui が再生成されるため
+# 同じ email で binding が再付与される)。
 # Secret に紐づく sa-line-bot accessor binding も残るが、SA 不在中は orphan として
 # 安全（次の tf-apply で SA 復活時に同じ email で binding が有効化される）。
 
@@ -125,7 +132,8 @@ cat <<'DONE'
   - Cloud Scheduler (batch-nightly)
   - Cloud Run service (driving-license-bot-admin-ui)
   - sa-admin-ui SA + IAM 5 件
-  - IAP IAM bindings (allowed_emails)
+  - admin_ui_invoker IAM (allUsers)
+  - admin OAuth secret accessor IAM 3 件
 
 [teardown_app] 残っているもの:
 
@@ -140,6 +148,9 @@ cat <<'DONE'
   - driving-license-bot-line-channel-access-token
   - driving-license-bot-line-login-channel-secret
   - driving-license-bot-operator-line-user-ids
+  - driving-license-bot-admin-oauth-client-id
+  - driving-license-bot-admin-oauth-client-secret
+  - driving-license-bot-admin-session-secret
 
   Secret 枠のみ（値は次回 apply で再生成）:
   - driving-license-bot-cloudsql-password
