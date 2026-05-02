@@ -24,6 +24,7 @@ HELP_TEXT = (
     "【ぴよログ分析 Bot】\n"
     "■ 取り込み\n"
     "  ・ぴよログアプリからエクスポートした .txt を添付で送信\n"
+    "  ・取り消し / undo — 直近の取り込みを取り消し\n"
     "\n"
     "■ サマリ (テキストコマンド)\n"
     "  ・今日 / today — 今日のサマリ\n"
@@ -69,6 +70,14 @@ _SLEEP_TOKENS = frozenset({"睡眠", "sleep"})
 _WEIGHT_TOKENS = frozenset({"体重", "weight"})
 _HEATMAP_TOKENS = frozenset({"時間帯", "heatmap", "ヒートマップ"})
 _DASHBOARD_TOKENS = frozenset({"ダッシュボード", "dashboard"})
+
+# Phase 1.5 ロールバック
+_UNDO_TOKENS = frozenset({"取り消し", "取消", "undo", "rollback"})
+
+UNDO_NO_BATCH_HINT = (
+    "取り消せる取り込み履歴がありません。\n"
+    "( .txt の取り込みが 1 件もないか、既にすべて取り消し済みです)"
+)
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -134,6 +143,9 @@ async def handle_text_command(
             return CommandResult(reply=INVALID_PERIOD_HINT)
         return CommandResult(reply=render_summary_text(s))
 
+    if cmd in _UNDO_TOKENS or cmd_lower in _UNDO_TOKENS:
+        return await _handle_undo(repo=repo, family_id=family_id)
+
     chart_result = await _try_chart_command(
         cmd, cmd_lower, args, repo=repo, family_id=family_id, now=now
     )
@@ -141,6 +153,27 @@ async def handle_text_command(
         return chart_result
 
     return CommandResult(reply=UNKNOWN_HINT)
+
+
+async def _handle_undo(*, repo: EventRepo, family_id: str) -> CommandResult:
+    """直近の取り込みバッチを論理削除。
+
+    `EventRepo.rollback_latest_batch` の戻り値で確認メッセージを生成する。
+    対象なしなら UNDO_NO_BATCH_HINT を返す (fail-safe)。
+    """
+    batch = await repo.rollback_latest_batch(family_id=family_id)
+    if batch is None:
+        return CommandResult(reply=UNDO_NO_BATCH_HINT)
+    filename = batch.source_filename or "(no name)"
+    imported_at_short = batch.imported_at[:19].replace("T", " ")
+    msg = (
+        "🔄 直近の取り込みを取り消しました。\n"
+        f"ファイル: {filename}\n"
+        f"取り込み日時: {imported_at_short} UTC\n"
+        f"件数: {batch.event_count} 件\n"
+        "この同じ .txt は再度送信して取り込み直すことができます。"
+    )
+    return CommandResult(reply=msg)
 
 
 def _match_period(cmd: str, cmd_lower: str) -> str | None:
