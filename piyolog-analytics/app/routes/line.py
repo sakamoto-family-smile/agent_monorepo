@@ -121,6 +121,8 @@ async def line_webhook(
 
     repo = get_repo()
     await repo.initialize()
+    from services.image_store import get_image_store
+
     deps = HandlerDeps(
         line_client=line_client,
         repo=repo,
@@ -129,6 +131,8 @@ async def line_webhook(
         default_child_id=settings.default_child_id,
         upload_max_bytes=settings.upload_max_bytes,
         schedule_background=_make_scheduler(background_tasks),
+        public_base_url=settings.public_base_url.rstrip("/"),
+        image_store=get_image_store(),
         now_factory=lambda: datetime.now(UTC),
     )
 
@@ -159,7 +163,9 @@ async def line_webhook(
 
     logger.info(
         "LINE webhook processed: received=%d handled=%d failed=%d",
-        len(events), handled, failed,
+        len(events),
+        handled,
+        failed,
     )
 
     al.emit(

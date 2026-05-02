@@ -9,6 +9,7 @@ from config import settings
 from fastapi import FastAPI
 from instrumentation import setup_observability, shutdown_observability
 from routes.health import router as health_router
+from routes.image import router as image_router
 from routes.line import get_repo
 from routes.line import router as line_router
 
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health_router)
     app.include_router(line_router, prefix="/api")
+    app.include_router(image_router, prefix="/api")
     return app
 
 

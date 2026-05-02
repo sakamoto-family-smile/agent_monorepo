@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 
 from repositories.event_repo import EventRepo
 from services.command_router import handle_text_command
+from services.image_store import ImageStore
 from services.import_service import (
     DuplicateImportError,
     ImportOutcome,
@@ -37,6 +38,9 @@ class HandlerDeps:
     default_child_id: str
     upload_max_bytes: int
     schedule_background: Callable[[Callable[[], Awaitable[None]]], None]
+    # Phase 1.5: グラフ画像の一時保管 + 公開 URL 構築
+    public_base_url: str = ""
+    image_store: ImageStore | None = None
     # Optional: テストで時刻を固定したい場合に注入
     now_factory: Callable[[], datetime] = lambda: datetime.now(UTC)
 
@@ -82,9 +86,37 @@ async def _handle_text(event: LineTextEvent, deps: HandlerDeps) -> None:
         family_id=deps.family_id,
         now=deps.now_factory(),
     )
-    await deps.line_client.reply_text(
-        reply_token=event.reply_token, text=result.reply
-    )
+    if result.image_png is not None:
+        await _send_image_or_fallback(event, deps, result)
+        return
+    await deps.line_client.reply_text(reply_token=event.reply_token, text=result.reply)
+
+
+async def _send_image_or_fallback(event: LineTextEvent, deps: HandlerDeps, result) -> None:
+    """画像送信。public_base_url 未設定 / image_store 未配線ならテキスト fallback。"""
+    if not deps.public_base_url or deps.image_store is None:
+        logger.warning(
+            "image command but public_base_url or image_store unavailable; falling back to text"
+        )
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text=(
+                f"{result.reply}\n"
+                "(画像送信は公開 URL 未設定のため利用できません。"
+                "PUBLIC_BASE_URL を設定してください)"
+            ),
+        )
+        return
+    image_id = deps.image_store.put(result.image_png)
+    image_url = f"{deps.public_base_url}/api/line/image/{image_id}.png"
+    try:
+        await deps.line_client.reply_image(reply_token=event.reply_token, image_url=image_url)
+    except Exception:
+        logger.exception("reply_image failed; falling back to text")
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text=f"{result.reply}\n(画像送信に失敗しました)",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -93,8 +125,7 @@ async def _handle_text(event: LineTextEvent, deps: HandlerDeps) -> None:
 
 
 _ACK_TEMPLATE = (
-    "📥 ファイル「{filename}」を受信しました。\n"
-    "取り込みを開始します。完了したらお知らせします。"
+    "📥 ファイル「{filename}」を受信しました。\n取り込みを開始します。完了したらお知らせします。"
 )
 
 _SUCCESS_TEMPLATE = (
@@ -105,8 +136,7 @@ _SUCCESS_TEMPLATE = (
 )
 
 _DUPLICATE_TEMPLATE = (
-    "ℹ️ すでに取り込み済みのファイルでした (batch={batch_id})。\n"
-    "重複登録はしていません。"
+    "ℹ️ すでに取り込み済みのファイルでした (batch={batch_id})。\n重複登録はしていません。"
 )
 
 _INVALID_TEMPLATE = (
@@ -114,9 +144,7 @@ _INVALID_TEMPLATE = (
     "ぴよログアプリからエクスポートした .txt をそのまま送ってください。"
 )
 
-_UNEXPECTED_TEMPLATE = (
-    "⚠️ 取り込み中にエラーが発生しました。少し時間を置いて再度お試しください。"
-)
+_UNEXPECTED_TEMPLATE = "⚠️ 取り込み中にエラーが発生しました。少し時間を置いて再度お試しください。"
 
 
 async def _handle_file(event: LineFileEvent, deps: HandlerDeps) -> None:
@@ -140,9 +168,7 @@ async def _handle_file(event: LineFileEvent, deps: HandlerDeps) -> None:
 
     async def _job() -> None:
         try:
-            data = await deps.line_client.fetch_message_content(
-                message_id=event.message_id
-            )
+            data = await deps.line_client.fetch_message_content(message_id=event.message_id)
         except Exception as e:
             logger.exception("failed to fetch message content")
             await deps.line_client.push_text(
