@@ -16,6 +16,7 @@ from linebot.v3.messaging import (
     ApiClient,
     Configuration,
     MessagingApi,
+    PushMessageRequest,
     ReplyMessageRequest,
     TextMessage,
 )
@@ -71,9 +72,7 @@ class LineBotClient:
         """
         if not signature:
             raise InvalidSignatureError("missing signature header")
-        mac = hmac.new(
-            self._channel_secret.encode("utf-8"), body, hashlib.sha256
-        ).digest()
+        mac = hmac.new(self._channel_secret.encode("utf-8"), body, hashlib.sha256).digest()
         expected = base64.b64encode(mac).decode("utf-8")
         if not hmac.compare_digest(expected, signature):
             raise InvalidSignatureError("signature mismatch")
@@ -92,9 +91,20 @@ class LineBotClient:
         line_messages = [TextMessage(text=m) for m in messages[:5]]  # LINE 制限 5 通/回
         with ApiClient(self._configuration) as api_client:
             api = MessagingApi(api_client)
-            api.reply_message(
-                ReplyMessageRequest(reply_token=reply_token, messages=line_messages)
-            )
+            api.reply_message(ReplyMessageRequest(reply_token=reply_token, messages=line_messages))
+
+    def push_text(self, user_id: str, messages: list[str]) -> None:
+        """単一ユーザーへ Push Message。運営者通知 (B3 pool_low_alert) 等で使う。
+
+        失敗時は呼び出し側で握りつぶす想定 (本メソッドは raise する)。
+        Reply と異なり Push は LINE 側で月次クォータ消費するため呼び出し頻度に注意。
+        """
+        if not messages:
+            return
+        line_messages = [TextMessage(text=m) for m in messages[:5]]
+        with ApiClient(self._configuration) as api_client:
+            api = MessagingApi(api_client)
+            api.push_message(PushMessageRequest(to=user_id, messages=line_messages))
 
 
 __all__ = [

@@ -66,6 +66,17 @@ cloudsql_backup_enabled      = true
 # cloudsql_authorized_networks = [{ name = "office", value = "203.0.113.0/24" }]
 cloudsql_authorized_networks = []
 
+# ---- Monitoring alert (Phase 2-B3) ----
+# alert_notification_emails が空 → 通知チャネル / alert policy を deploy しない (LINE Push のみ)。
+# 1 件以上設定すると Cloud Monitoring で:
+#  - pool_low_alert ログメトリック発火 → email
+#  - Cloud Run Job (driving-license-bot-batch) 失敗 → email
+# が届く。
+alert_notification_emails = []
+# 例:
+# alert_notification_emails = ["operator@example.com"]
+pool_low_alert_threshold = 1
+
 # ---- Backup bucket (Phase 2-Y1) ----
 # teardown-app 時に Firestore + Cloud SQL を GCS にバックアップ → 再 apply 後に
 # make restore で復元することで、課金停止サイクルでデータが消えない。

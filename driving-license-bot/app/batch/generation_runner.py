@@ -107,9 +107,7 @@ class GenerationRunner:
                 result = await self._pipeline.run(request)
             except Exception as exc:  # noqa: BLE001
                 summary.total_errors += 1
-                summary.error_messages.append(
-                    f"[{idx}] {type(exc).__name__}: {exc}"
-                )
+                summary.error_messages.append(f"[{idx}] {type(exc).__name__}: {exc}")
                 emit_error_event(
                     error_type="batch_pipeline_exception",
                     error_message=str(exc),
@@ -161,12 +159,41 @@ class GenerationRunner:
                     "min": self._pool_min_size,
                 },
             )
+            self._notify_pool_low(
+                current=summary.pool_count_after,
+                threshold=self._pool_min_size,
+                by_outcome=summary.by_outcome,
+            )
 
         return summary
 
-    def _emit_per_question_events(
-        self, result: PipelineResult, request: GenerationRequest
+    def _notify_pool_low(
+        self,
+        *,
+        current: int | None,
+        threshold: int,
+        by_outcome: dict[str, int],
     ) -> None:
+        """pool_low_alert 検知時に運営者の LINE に Push 通知を送る (B3)。
+
+        失敗してもバッチを止めない (内部で握りつぶす)。`notify_operators` 自体が
+        個別 user の例外を吸収するので呼び出し側は薄く呼ぶだけで OK。
+        """
+        try:
+            from app.handlers.operator_notify import notify_operators
+
+            outcome_text = ", ".join(f"{k}={v}" for k, v in sorted(by_outcome.items())) or "(none)"
+            message = (
+                "🚨 driving-license-bot pool_low_alert\n"
+                f"current pool: {current}\n"
+                f"threshold: {threshold}\n"
+                f"by_outcome: {outcome_text}"
+            )
+            notify_operators([message])
+        except Exception:  # noqa: BLE001
+            logger.exception("operator_notify failed (continuing)")
+
+    def _emit_per_question_events(self, result: PipelineResult, request: GenerationRequest) -> None:
         """1 問あたりの business_event を emit（DESIGN.md §15.1.4 と整合）。
 
         outcome 種別ごとに細分化することで mart_generation_health の集計精度
@@ -188,12 +215,8 @@ class GenerationRunner:
             event_name="question_drafted",
             properties=common
             | {
-                "input_tokens": result.generation.input_tokens
-                if result.generation
-                else 0,
-                "output_tokens": result.generation.output_tokens
-                if result.generation
-                else 0,
+                "input_tokens": result.generation.input_tokens if result.generation else 0,
+                "output_tokens": result.generation.output_tokens if result.generation else 0,
                 "cache_read_input_tokens": result.generation.cache_read_input_tokens
                 if result.generation
                 else 0,
@@ -203,8 +226,7 @@ class GenerationRunner:
         if result.fact_check is not None:
             emit_business_event(
                 event_name=(
-                    "fact_check_passed" if result.fact_check.passed
-                    else "fact_check_rejected"
+                    "fact_check_passed" if result.fact_check.passed else "fact_check_rejected"
                 ),
                 properties=common
                 | {
@@ -215,9 +237,7 @@ class GenerationRunner:
 
         if result.dedup is not None:
             emit_business_event(
-                event_name=(
-                    "dedup_rejected" if result.dedup.is_duplicate else "dedup_passed"
-                ),
+                event_name=("dedup_rejected" if result.dedup.is_duplicate else "dedup_passed"),
                 properties=common
                 | {
                     "best_score": result.dedup.best_score,
@@ -228,8 +248,10 @@ class GenerationRunner:
         if result.quality_review is not None:
             verdict = result.quality_review.verdict
             event_name = (
-                "quality_review_approved" if verdict == "approve"
-                else "quality_review_rejected" if verdict == "reject"
+                "quality_review_approved"
+                if verdict == "approve"
+                else "quality_review_rejected"
+                if verdict == "reject"
                 else "quality_review_needs_human"
             )
             emit_business_event(

@@ -222,6 +222,20 @@ variable "review_admin_allowed_emails" {
   default     = []
 }
 
+# ---- Monitoring alert (Phase 2-B3) ----
+
+variable "alert_notification_emails" {
+  type        = list(string)
+  description = "Cloud Monitoring alert を email 通知する宛先リスト。Cloud Run Job 失敗 / pool_low_alert 等で発火。空なら notification channel を作らず、alert policy も deploy しない。"
+  default     = []
+}
+
+variable "pool_low_alert_threshold" {
+  type        = number
+  description = "Cloud Logging metric `business_event.pool_low_alert` の発火回数閾値 (5 分窓)。1 以上で運営者に通知。"
+  default     = 1
+}
+
 # ---- Backup bucket (Phase 2-Y1) ----
 
 variable "backup_retention_days" {
