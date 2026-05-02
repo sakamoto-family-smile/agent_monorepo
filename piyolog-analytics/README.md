@@ -457,12 +457,58 @@ MVP (Phase 1) がマージ済。本節は **次回着手時に planning コス�
 
 Phase 1 の Definition of Done に対して、実機運用で顕在化しうる項目:
 
-- [ ] **実機 dogfooding**: LINE Developers Console で Channel 作成 → `.env` 設定 → 自分の LINE userId を `FAMILY_USER_IDS` に登録 → ngrok で webhook を立てる → 過去 1 週間分の .txt で取り込み確認
-- [ ] **Noto Sans CJK フォント**: Phase 1.5 のグラフで必須。hotcook-agent / lifeplanner-agent が既に使っている置き場所 (`analytics-platform` 共通 or 各エージェント内) を確認し、fontconfig の探索パスを揃える
-- [ ] **`setup_database.sh`**: SQLite の初期化を手動で打てる形に。Phase 1 は lifespan 経由で自動初期化しているが、ops 用途で欲しい
-- [ ] **LINE userId 確認手順の README 明記**: 現状は「webhook ログから拾う」記載のみ。LINE Developers の User ID 取得方法をもう少し丁寧に書く
-- [ ] **コマンド aliases 検証**: `today` / `week` が意図通り半角・全角空白両方でマッチするかを実機で
-- [ ] **Phoenix トレース動作確認** (analytics-platform 起動時): `OTEL_EXPORTER_OTLP_ENDPOINT` を設定した場合に span が Phoenix UI で見えるか
+- [ ] **実機 dogfooding**: 詳細は §0.5 参照
+- [x] **Noto Sans CJK フォント**: Phase 1.5 PR で `Dockerfile` に `fonts-noto-cjk` apt インストール済 (matplotlib が fontconfig 自動認識)
+- [x] **`setup_database.sh`**: `scripts/setup_database.sh` を追加。SQLite の場合は metadata.create_all を流す。Postgres は `alembic upgrade head` を使うよう警告
+- [x] **LINE userId 確認手順の README 明記**: §0.5 に整理 (本セクション直後)
+- [x] **コマンド aliases 検証**: `tests/test_command_router_aliases.py` で半角/全角空白・大文字小文字・先頭スラッシュをユニットテスト化
+- [ ] **Phoenix トレース動作確認** (analytics-platform 起動時): `OTEL_EXPORTER_OTLP_ENDPOINT` を設定した場合に span が Phoenix UI で見えるか — 実機運用でのみ検証可能
+
+---
+
+### 0.5 LINE userId 取得手順 (Phase 1 残 TODO 対応)
+
+`FAMILY_USER_IDS` には 33 文字の LINE User ID (`U` + 32 hex) を入れる必要がある。
+取得の **3 通り** を、簡単な順に記載:
+
+#### A. 自分の Channel に紐付いた User ID を表示する (最速)
+
+LINE Developers Console > 対象 Provider > 対象 Channel > Basic settings タブで:
+- "Your user ID" 欄に自分の User ID が直接表示される
+- ただし「Bot 開発者本人」の User ID であり、家族メンバの ID は別途必要
+
+#### B. webhook ログから拾う (推奨、家族の ID も取れる)
+
+1. piyolog-analytics を Cloud Run / ngrok で起動し、Webhook URL を Channel に登録
+2. LINE bot を友だち追加してもらい、テキストメッセージを送ってもらう
+3. アプリログを以下の手順で確認:
+
+```bash
+# Cloud Run の場合
+gcloud logging read \
+  'resource.type="cloud_run_revision" "user_id"' \
+  --project=$PROJECT --limit=20 --format=json | python3 -c "
+import sys, json, re
+for log in json.load(sys.stdin):
+    text = json.dumps(log)
+    for m in re.findall(r'U[a-f0-9]{32}', text):
+        print(m)
+" | sort -u
+```
+
+bootstrap mode (`FAMILY_USER_IDS` 未設定 / 空) では line_handler が完全な userId を WARN ログに出すので、それも参照可能。
+
+#### C. Firestore / SQLite から拾う (取り込み実績がある場合)
+
+Phase 1 は SQLite なので:
+
+```bash
+sqlite3 data/piyolog.db "SELECT DISTINCT source_user_id FROM piyolog_events;"
+```
+
+Cloud SQL (Postgres) なら `psql ... -c "SELECT DISTINCT source_user_id FROM piyolog_events"`。
+
+---
 
 ---
 

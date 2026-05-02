@@ -63,13 +63,22 @@ class Settings(BaseSettings):
     # --- Upload limits ---
     upload_max_bytes: int = 5 * 1024 * 1024
 
+    # --- Phase 1.5: 一時画像配信 ---
+    # LINE ImageMessage は HTTPS の公開 URL を要求する。
+    # Cloud Run の場合は `https://<service>-<...>.run.app`、
+    # ローカル開発では ngrok の HTTPS URL を入れる。
+    # 末尾スラッシュなし、空ならアプリは画像コマンドを reject する。
+    public_base_url: str = ""
+
+    # ImageStore 容量・TTL
+    image_store_max_entries: int = 50
+    image_store_ttl_seconds: int = 3600
+
     @property
     def family_user_id_set(self) -> frozenset[str]:
         if not self.family_user_ids:
             return frozenset()
-        return frozenset(
-            uid.strip() for uid in self.family_user_ids.split(",") if uid.strip()
-        )
+        return frozenset(uid.strip() for uid in self.family_user_ids.split(",") if uid.strip())
 
 
 settings = Settings()

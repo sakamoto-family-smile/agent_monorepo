@@ -61,7 +61,15 @@ class LineBotClient(Protocol):
 
     async def reply_text(self, *, reply_token: str, text: str) -> None: ...
 
+    async def reply_image(
+        self, *, reply_token: str, image_url: str, preview_url: str | None = None
+    ) -> None: ...
+
     async def push_text(self, *, to: str, text: str) -> None: ...
+
+    async def push_image(
+        self, *, to: str, image_url: str, preview_url: str | None = None
+    ) -> None: ...
 
     async def fetch_message_content(self, *, message_id: str) -> bytes: ...
 
@@ -154,6 +162,26 @@ class LineBotSdkClient:
             )
         )
 
+    async def reply_image(
+        self, *, reply_token: str, image_url: str, preview_url: str | None = None
+    ) -> None:
+        from linebot.v3.messaging import ImageMessage, ReplyMessageRequest
+
+        if not reply_token:
+            logger.warning("reply_image called without reply_token; skipping")
+            return
+        await self._messaging.reply_message(
+            ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[
+                    ImageMessage(
+                        original_content_url=image_url,
+                        preview_image_url=preview_url or image_url,
+                    )
+                ],
+            )
+        )
+
     async def push_text(self, *, to: str, text: str) -> None:
         from linebot.v3.messaging import PushMessageRequest, TextMessage
 
@@ -164,6 +192,24 @@ class LineBotSdkClient:
             PushMessageRequest(
                 to=to,
                 messages=[TextMessage(text=self._trim_text(text))],
+            )
+        )
+
+    async def push_image(self, *, to: str, image_url: str, preview_url: str | None = None) -> None:
+        from linebot.v3.messaging import ImageMessage, PushMessageRequest
+
+        if not to:
+            logger.warning("push_image called without target user_id; skipping")
+            return
+        await self._messaging.push_message(
+            PushMessageRequest(
+                to=to,
+                messages=[
+                    ImageMessage(
+                        original_content_url=image_url,
+                        preview_image_url=preview_url or image_url,
+                    )
+                ],
             )
         )
 

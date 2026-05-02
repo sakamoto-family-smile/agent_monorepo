@@ -15,6 +15,9 @@ dependencies = [
     "asyncpg>=0.30.0",
     "alembic>=1.13.0",
     "line-bot-sdk>=3.11.0",
+    # Phase 1.5: グラフ可視化 (matplotlib + Agg backend で headless PNG 出力)。
+    # 日本語フォント (Noto Sans CJK JP) は Dockerfile 側で apt 経由で入れる。
+    "matplotlib>=3.9.0",
     "analytics-platform",
 ]
 
