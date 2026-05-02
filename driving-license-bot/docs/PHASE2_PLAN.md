@@ -252,9 +252,31 @@ A3 完了時点で **B 系列と C 系列は並列着手可**。Marketplace 承�
 
 ## 8. 完了判定（Phase 2 全体の DoD）
 
-- [ ] Cloud SQL 上で `find_similar` が < 200ms で返る
-- [ ] 夜間バッチが連続 7 日間自動実行され、毎日 ≥ 10 問が `needs_review` に積まれる
-- [ ] 運営者が IAP 経由で review-admin-ui にログイン → 1 日 30 問レビューできる
-- [ ] LINE Bot が bank 由来の published 問題を出題でき、analytics-platform の `mart_quiz_metrics` に流れる
-- [ ] BigQuery に `batch_started/completed`, `fact_check_*`, `dedup_*`, `quality_review_*`, `question_published`, `human_review_decided` の 7 種以上が日次で蓄積
+- [x] **A1〜A3, B1〜B3, C1〜C3, X1, Y1 全 PR 実装 + 本番反映完了 (2026-04〜05)**
+- [ ] Cloud SQL 上で `find_similar` が < 200ms で返る — 実装済 / 測定未実施
+- [ ] 夜間バッチが連続 7 日間自動実行され、毎日 ≥ 10 問が `needs_review` に積まれる — Scheduler 稼働、連続稼働実績の観測待ち
+- [x] 運営者が **App-level OAuth** 経由で review-admin-ui にログイン → 1 日 30 問レビューできる（C3 は IAP から OAuth に方針転換）
+- [x] LINE Bot が bank 由来の published 問題を出題でき、analytics-platform の `mart_quiz_metrics` に流れる
+- [x] BigQuery に `batch_started/completed`, `fact_check_*`, `dedup_*`, `quality_review_*`, `question_published`, `human_review_decided` の 7 種以上が日次で蓄積（PR #85 の business_event schema 修正で復活）
+
+## 9. Phase 2 残件 / 後続課題
+
+Phase 2 全 PR は merge 済だが、運用・実装上の積み残しを下記に整理。Phase 2.5 hardening
+or Phase 3 の前段として扱う。
+
+### 9.1 運用課題
+
+| ID | 課題 | 優先度 | メモ |
+|---|---|---|---|
+| O1 | batch dedup の過敏 (small pool) | 中 | プール 4-5 問時に 19/20 が dedup 棄却。temperature 上げ / 多様性プロンプト / プール拡大で緩和 |
+| O2 | `:latest` tag の自動 update 検知不可 | 中 | terraform が digest 変更を見ない → `gcloud run services update --image=DIGEST` で手動強制が必要。tfvars で SHA pin する運用に変更検討 |
+| O3 | review-admin-ui `/healthz` 404 | 低 | line-bot の /healthz は OK。admin_ui には route 未実装。Cloud Run startup probe には影響なし（`/` 経由で probe 通過済） |
+| O4 | DESIGN §B1 系の TODO 残: prompt caching / Model Armor Tokyo | 低 | INFRA_DECISIONS.md で先送り判断済 |
+| O5 | dedup 閾値 / テンパレチャ等の生成パラメータ調整 | 中 | プールが 50+ になってからの再評価が現実的 |
+
+### 9.2 観測完了確認 (DoD 残)
+
+- [ ] `find_similar` レイテンシ実測（Cloud SQL Auth Proxy 経由 or batch から計測）
+- [ ] 夜間 batch 7 日連続稼働の Cloud Logging 確認
+- [ ] BigQuery `analytics_staging.stg_agent_events` への business_event 流入実機確認 (PR #85 反映後)
 - [ ] 月額 < $70 で運用できている
