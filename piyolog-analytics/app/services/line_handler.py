@@ -24,7 +24,15 @@ from services.import_service import (
     InvalidPiyologFileError,
     import_piyolog_bytes,
 )
-from services.line_client import LineBotClient, LineEvent, LineFileEvent, LineTextEvent
+from services.line_client import (
+    LineBotClient,
+    LineEvent,
+    LineFileEvent,
+    LineFollowEvent,
+    LinePostbackEvent,
+    LineTextEvent,
+)
+from services.postback_router import handle_postback
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +78,10 @@ async def handle_event(event: LineEvent, deps: HandlerDeps) -> None:
         await _handle_text(event, deps)
     elif isinstance(event, LineFileEvent):
         await _handle_file(event, deps)
+    elif isinstance(event, LinePostbackEvent):
+        await _handle_postback(event, deps)
+    elif isinstance(event, LineFollowEvent):
+        await _handle_follow(event, deps)
     else:
         logger.warning("unsupported event type: %r", event)
 
@@ -92,7 +104,40 @@ async def _handle_text(event: LineTextEvent, deps: HandlerDeps) -> None:
     await deps.line_client.reply_text(reply_token=event.reply_token, text=result.reply)
 
 
-async def _send_image_or_fallback(event: LineTextEvent, deps: HandlerDeps, result) -> None:
+_WELCOME_TEXT = (
+    "👋 はじめまして！ぴよログ分析 Bot です。\n"
+    "\n"
+    "ぴよログアプリから export した .txt を添付で送ると、\n"
+    "授乳・睡眠・排泄等のサマリやグラフを返します。\n"
+    "\n"
+    "「ヘルプ」と送るとコマンド一覧が表示されます。"
+)
+
+
+async def _handle_postback(event: LinePostbackEvent, deps: HandlerDeps) -> None:
+    result = await handle_postback(
+        event.data,
+        repo=deps.repo,
+        family_id=deps.family_id,
+        now=deps.now_factory(),
+    )
+    if result.image_png is not None:
+        await _send_image_or_fallback(event, deps, result)
+        return
+    await deps.line_client.reply_text(reply_token=event.reply_token, text=result.reply)
+
+
+async def _handle_follow(event: LineFollowEvent, deps: HandlerDeps) -> None:
+    """友だち追加: Welcome テキストを reply。
+
+    rich menu の per-user 紐付けはここでは行わない (default rich menu を
+    `setDefaultRichMenu` で global に設定する想定。`scripts/setup_richmenu.py`)。
+    許可リスト判定は handle_event 側で済んでいる前提。
+    """
+    await deps.line_client.reply_text(reply_token=event.reply_token, text=_WELCOME_TEXT)
+
+
+async def _send_image_or_fallback(event, deps: HandlerDeps, result) -> None:
     """画像送信。public_base_url 未設定 / image_store 未配線ならテキスト fallback。"""
     if not deps.public_base_url or deps.image_store is None:
         logger.warning(
