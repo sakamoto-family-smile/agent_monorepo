@@ -88,3 +88,70 @@ async def test_help_text_contains_chart_section() -> None:
     assert "ミルク" in HELP_TEXT
     assert "ダッシュボード" in HELP_TEXT
     assert "Phase 1.5" in HELP_TEXT
+    assert "期間" in HELP_TEXT  # 期間 syntax のヒント
+
+
+async def test_chart_command_custom_period_syntax() -> None:
+    """`ミルク 期間 YYYY-MM-DD YYYY-MM-DD` で任意範囲を fetch する。"""
+    from services.command_router import handle_text_command
+
+    repo = _FakeRepo([_milk("2026-02-15", 9, 100)])
+    now = datetime(2026, 5, 3, 10, 0, tzinfo=JST)
+    result = await handle_text_command(
+        "ミルク 期間 2026-02-01 2026-02-28",
+        repo=repo,
+        family_id="f1",
+        now=now,
+    )
+    assert result.image_png is not None
+    assert repo.calls
+    assert repo.calls[-1]["date_from"] == "2026-02-01"
+    assert repo.calls[-1]["date_to"] == "2026-02-28"
+
+
+async def test_chart_command_period_alias() -> None:
+    """`dashboard period 2026-02-01 2026-02-28` も同じく動く (英語 alias)。"""
+    from services.command_router import handle_text_command
+
+    repo = _FakeRepo([_milk("2026-02-15", 9, 100)])
+    now = datetime(2026, 5, 3, 10, 0, tzinfo=JST)
+    result = await handle_text_command(
+        "dashboard period 2026-02-01 2026-02-28",
+        repo=repo,
+        family_id="f1",
+        now=now,
+    )
+    assert result.image_png is not None
+    assert repo.calls[-1]["date_from"] == "2026-02-01"
+    assert repo.calls[-1]["date_to"] == "2026-02-28"
+
+
+async def test_chart_command_period_invalid_dates_returns_hint() -> None:
+    """`ミルク 期間 hoge fuga` は INVALID_PERIOD_HINT。"""
+    from services.command_router import INVALID_PERIOD_HINT, handle_text_command
+
+    repo = _FakeRepo([_milk("2026-02-15", 9, 100)])
+    now = datetime(2026, 5, 3, 10, 0, tzinfo=JST)
+    result = await handle_text_command(
+        "ミルク 期間 not-a-date 2026-02-28",
+        repo=repo,
+        family_id="f1",
+        now=now,
+    )
+    assert result.image_png is None
+    assert result.reply == INVALID_PERIOD_HINT
+
+
+async def test_chart_command_period_missing_args_returns_hint() -> None:
+    """`ミルク 期間 2026-02-01` (片方のみ) は INVALID_PERIOD_HINT。"""
+    from services.command_router import INVALID_PERIOD_HINT, handle_text_command
+
+    repo = _FakeRepo([])
+    now = datetime(2026, 5, 3, 10, 0, tzinfo=JST)
+    result = await handle_text_command(
+        "ミルク 期間 2026-02-01",
+        repo=repo,
+        family_id="f1",
+        now=now,
+    )
+    assert result.reply == INVALID_PERIOD_HINT
