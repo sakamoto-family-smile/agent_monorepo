@@ -242,12 +242,42 @@ async def _try_chart_command(
             if period_resolved is not None:
                 requested_period = period_resolved
         date_from, date_to, label = resolve_period(requested_period, now=now)
-    events = await repo.fetch_events_in_range(
-        family_id=family_id,
+
+    return await render_chart(
+        chart_kind=chart_kind,
         date_from=date_from.isoformat(),
         date_to=date_to.isoformat(),
+        label=label,
+        repo=repo,
+        family_id=family_id,
     )
 
+
+CHART_KINDS = ("milk", "sleep", "weight", "heatmap", "dashboard")
+
+
+async def render_chart(
+    *,
+    chart_kind: str,
+    date_from: str,
+    date_to: str,
+    label: str,
+    repo: EventRepo,
+    family_id: str,
+) -> CommandResult:
+    """指定の chart_kind と期間 (ISO date 文字列) で events 取得 → 画像生成。
+
+    text コマンド (handle_text_command 経由) と Postback Router の両方から
+    呼び出される共通エントリポイント。
+
+    chart_kind は CHART_KINDS のいずれか。範囲内に events が無ければ
+    CHART_NO_DATA_HINT のテキスト reply を返す。
+    """
+    if chart_kind not in CHART_KINDS:
+        return CommandResult(reply=UNKNOWN_HINT)
+    events = await repo.fetch_events_in_range(
+        family_id=family_id, date_from=date_from, date_to=date_to
+    )
     if not events:
         return CommandResult(reply=CHART_NO_DATA_HINT)
 
@@ -259,13 +289,32 @@ async def _try_chart_command(
         png = visualizer.weight_height_timeline(events, period=label)
     elif chart_kind == "heatmap":
         png = visualizer.feeding_heatmap(events, period=label)
-    elif chart_kind == "dashboard":
+    else:  # dashboard
         png = visualizer.dashboard(events, period=label)
-    else:
-        return None  # unreachable
 
     return CommandResult(
         reply=f"📊 {chart_kind} ({label})",
         image_png=png,
         chart_kind=chart_kind,
     )
+
+
+async def render_summary(
+    *,
+    period: str,
+    repo: EventRepo,
+    family_id: str,
+    now: datetime | None = None,
+    custom_from: str | None = None,
+    custom_to: str | None = None,
+) -> CommandResult:
+    """Postback / text command 共通の summary エントリポイント。"""
+    s = await summarize(
+        repo=repo,
+        family_id=family_id,
+        period=period,
+        now=now,
+        custom_from=custom_from,
+        custom_to=custom_to,
+    )
+    return CommandResult(reply=render_summary_text(s))

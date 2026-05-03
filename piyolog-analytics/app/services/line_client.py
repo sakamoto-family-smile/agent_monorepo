@@ -39,7 +39,30 @@ class LineFileEvent:
     file_size: int
 
 
-LineEvent = LineTextEvent | LineFileEvent
+@dataclass(frozen=True)
+class LinePostbackEvent:
+    """リッチメニュー / クイックリプライ等から飛んでくる Postback イベント。
+
+    `data` は URL クエリ風の文字列 (例: `action=chart&kind=milk&period=week`)。
+    Postback Router 側で解析してアクションに振り分ける。
+    """
+
+    event_type: str  # "postback"
+    line_user_id: str
+    reply_token: str
+    data: str
+
+
+@dataclass(frozen=True)
+class LineFollowEvent:
+    """友だち追加イベント (Phase 2 で Welcome メッセージ + リッチメニュー紐付け)。"""
+
+    event_type: str  # "follow"
+    line_user_id: str
+    reply_token: str
+
+
+LineEvent = LineTextEvent | LineFileEvent | LinePostbackEvent | LineFollowEvent
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +125,9 @@ class LineBotSdkClient:
         from linebot.v3.exceptions import InvalidSignatureError as _SdkInvalidSignature
         from linebot.v3.webhooks import (
             FileMessageContent,
+            FollowEvent,
             MessageEvent,
+            PostbackEvent,
             TextMessageContent,
         )
 
@@ -113,34 +138,58 @@ class LineBotSdkClient:
 
         result: list[LineEvent] = []
         for ev in raw_events:
-            if not isinstance(ev, MessageEvent):
-                continue
             source = getattr(ev, "source", None)
             user_id = getattr(source, "user_id", None) if source else None
             if not user_id:
                 continue
             reply_token = getattr(ev, "reply_token", "") or ""
-            msg = ev.message
-            if isinstance(msg, TextMessageContent):
+
+            if isinstance(ev, MessageEvent):
+                msg = ev.message
+                if isinstance(msg, TextMessageContent):
+                    result.append(
+                        LineTextEvent(
+                            event_type="text",
+                            line_user_id=user_id,
+                            reply_token=reply_token,
+                            text=msg.text or "",
+                        )
+                    )
+                elif isinstance(msg, FileMessageContent):
+                    result.append(
+                        LineFileEvent(
+                            event_type="file",
+                            line_user_id=user_id,
+                            reply_token=reply_token,
+                            message_id=msg.id,
+                            filename=msg.file_name or "",
+                            file_size=int(msg.file_size or 0),
+                        )
+                    )
+                continue
+
+            if isinstance(ev, PostbackEvent):
+                postback = getattr(ev, "postback", None)
+                data = getattr(postback, "data", "") if postback else ""
                 result.append(
-                    LineTextEvent(
-                        event_type="text",
+                    LinePostbackEvent(
+                        event_type="postback",
                         line_user_id=user_id,
                         reply_token=reply_token,
-                        text=msg.text or "",
+                        data=data or "",
                     )
                 )
-            elif isinstance(msg, FileMessageContent):
+                continue
+
+            if isinstance(ev, FollowEvent):
                 result.append(
-                    LineFileEvent(
-                        event_type="file",
+                    LineFollowEvent(
+                        event_type="follow",
                         line_user_id=user_id,
                         reply_token=reply_token,
-                        message_id=msg.id,
-                        filename=msg.file_name or "",
-                        file_size=int(msg.file_size or 0),
                     )
                 )
+                continue
         return result
 
     @staticmethod
