@@ -92,13 +92,9 @@ NORMAL_CELLS: list[CellSpec] = [
     CellSpec("ヘルプ", "❓", "action=help"),
 ]
 
-# 絵文字描画用フォント候補。Cloud Run image (Linux) と macOS 両対応。
-# Linux: fonts-noto-color-emoji が必要 (Dockerfile では未追加。本 PR 範囲外、
-# 当面は label の絵文字をフォントで描画せず、絵文字部分は半透明の小サイズ
-# (テキスト) としてフォールバック。Noto Sans CJK が絵文字には対応していない
-# ため "□" になる可能性あり。実用上は label 文字が読めれば OK)
+# 日本語ラベル用フォント候補 (mono 描画)。Cloud Run image (Linux) と macOS 両対応。
 JP_FONT_CANDIDATES = [
-    # Linux (Docker)
+    # Linux (Docker, fonts-noto-cjk apt から)
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
@@ -106,6 +102,19 @@ JP_FONT_CANDIDATES = [
     "/System/Library/Fonts/HiraginoSans-W6.ttc",
     "/System/Library/Fonts/Hiragino Sans GB.ttc",
     "/Library/Fonts/Arial Unicode.ttf",
+]
+
+# 色付き絵文字フォント。bitmap 形式 (Apple Color Emoji の ttc) は固定サイズで
+# しか load できないため、各候補の supported size を併記する。
+# Pillow >= 10 の `ImageFont.truetype(... size=...)` + `draw.text(..., embedded_color=True)`
+# で描画可能。
+COLOR_EMOJI_FONTS: list[tuple[str, int]] = [
+    # macOS: Apple Color Emoji.ttc (bitmap size = 137 が最大、PIL は再スケール可)
+    ("/System/Library/Fonts/Apple Color Emoji.ttc", 137),
+    # Linux: Noto Color Emoji (apt: fonts-noto-color-emoji)
+    ("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf", 109),
+    # 古い Debian 命名規則 fallback
+    ("/usr/share/fonts/truetype/noto-emoji/NotoColorEmoji.ttf", 109),
 ]
 
 
@@ -121,7 +130,25 @@ def _resolve_jp_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
+def _resolve_emoji_font() -> tuple[ImageFont.FreeTypeFont | None, int]:
+    """色付き絵文字フォントを返す。見つからなければ (None, 0)。
+
+    bitmap fontの fixed size を併せて返す (描画時の倍率調整用)。
+    """
+    for path, native_size in COLOR_EMOJI_FONTS:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size=native_size), native_size
+            except OSError:
+                continue
+    logger.warning(
+        "color emoji font not found; icons will be drawn as plain text (□ may appear)"
+    )
+    return None, 0
+
+
 def _draw_cell(
+    img: Image.Image,
     draw: ImageDraw.ImageDraw,
     *,
     x: int,
@@ -131,20 +158,43 @@ def _draw_cell(
     cell: CellSpec,
     color: tuple[int, int, int],
     label_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
-    icon_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    emoji_font: ImageFont.FreeTypeFont | None,
+    emoji_native_size: int,
 ) -> None:
-    """1 セル分を描画 (背景の角丸矩形 + アイコン + ラベル)。"""
+    """1 セル分を描画 (背景の角丸矩形 + アイコン + ラベル)。
+
+    emoji_font が None なら icon は描画せず、ラベルのみで識別する。
+    色付き絵文字は `embedded_color=True` 必須 (Pillow >= 10)。
+    """
     pad = 24
     rect = (x + pad, y + pad, x + width - pad, y + height - pad)
     draw.rounded_rectangle(rect, radius=32, fill=color, outline=GRID_COLOR, width=2)
+
     # アイコン (中央上寄り)
-    icon_text = cell.icon
-    icon_bbox = draw.textbbox((0, 0), icon_text, font=icon_font)
-    icon_w = icon_bbox[2] - icon_bbox[0]
-    icon_h = icon_bbox[3] - icon_bbox[1]
-    icon_x = x + (width - icon_w) // 2
-    icon_y = y + height // 2 - icon_h - 20
-    draw.text((icon_x, icon_y), icon_text, fill=FG_COLOR, font=icon_font)
+    if emoji_font is not None:
+        # bitmap の native size のまま draw → 別 layer に描画後 resize して合成
+        # (color bitmap は draw 時に rescale できないため小 image に描いてから resize)
+        target_icon_size = 200  # 目標表示サイズ (px)
+        scale = target_icon_size / emoji_native_size
+        # 一時 RGBA layer に native size で描画
+        tmp = Image.new("RGBA", (emoji_native_size * 2, emoji_native_size * 2), (0, 0, 0, 0))
+        tmp_draw = ImageDraw.Draw(tmp)
+        try:
+            tmp_draw.text(
+                (0, 0), cell.icon, font=emoji_font, embedded_color=True
+            )
+        except Exception:
+            # 古い PIL 等で embedded_color が無い場合は plain text fallback
+            tmp_draw.text((0, 0), cell.icon, fill=FG_COLOR, font=emoji_font)
+        # bbox で実描画範囲を取り、リサイズして合成
+        bbox = tmp.getbbox() or (0, 0, emoji_native_size, emoji_native_size)
+        cropped = tmp.crop(bbox)
+        new_size = (max(1, int(cropped.width * scale)), max(1, int(cropped.height * scale)))
+        resized = cropped.resize(new_size, Image.LANCZOS)
+        ix = x + (width - resized.width) // 2
+        iy = y + height // 2 - resized.height - 20
+        img.paste(resized, (ix, iy), resized)
+
     # ラベル (中央下寄り)
     label_bbox = draw.textbbox((0, 0), cell.label, font=label_font)
     label_w = label_bbox[2] - label_bbox[0]
@@ -160,7 +210,7 @@ def render_richmenu_image(cells: list[CellSpec]) -> Image.Image:
     img = Image.new("RGB", (LARGE_WIDTH, LARGE_HEIGHT), BG_COLOR)
     draw = ImageDraw.Draw(img)
     label_font = _resolve_jp_font(72)
-    icon_font = _resolve_jp_font(160)
+    emoji_font, emoji_size = _resolve_emoji_font()
 
     for idx, cell in enumerate(cells):
         col = idx % GRID_COLS
@@ -168,6 +218,7 @@ def render_richmenu_image(cells: list[CellSpec]) -> Image.Image:
         x = col * CELL_WIDTH
         y = row * CELL_HEIGHT
         _draw_cell(
+            img,
             draw,
             x=x,
             y=y,
@@ -176,7 +227,8 @@ def render_richmenu_image(cells: list[CellSpec]) -> Image.Image:
             cell=cell,
             color=CELL_COLORS[idx],
             label_font=label_font,
-            icon_font=icon_font,
+            emoji_font=emoji_font,
+            emoji_native_size=emoji_size,
         )
     return img
 

@@ -61,11 +61,12 @@ FROM python:3.12-slim-bookworm AS runtime
 
 # tini: PID 1 として SIGTERM を child に伝搬する (Cloud Run の graceful shutdown)
 # fonts-noto-cjk: matplotlib で日本語ラベルを描画する (Phase 1.5 グラフ機能)。
-#                 fc-cache 不要で fontconfig が自動認識する。
+# fonts-noto-color-emoji: Phase 2 リッチメニューで色付き絵文字を描画 (Pillow)。
+#                          fc-cache 不要で fontconfig が自動認識する。
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       tini ca-certificates curl \
-      fonts-noto-cjk fonts-noto-cjk-extra \
+      fonts-noto-cjk fonts-noto-cjk-extra fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \
