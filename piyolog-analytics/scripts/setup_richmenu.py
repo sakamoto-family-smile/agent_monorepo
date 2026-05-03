@@ -109,9 +109,10 @@ JP_FONT_CANDIDATES = [
 # Pillow >= 10 の `ImageFont.truetype(... size=...)` + `draw.text(..., embedded_color=True)`
 # で描画可能。
 COLOR_EMOJI_FONTS: list[tuple[str, int]] = [
-    # macOS: Apple Color Emoji.ttc (bitmap size = 137 が最大、PIL は再スケール可)
-    ("/System/Library/Fonts/Apple Color Emoji.ttc", 137),
-    # Linux: Noto Color Emoji (apt: fonts-noto-color-emoji)
+    # macOS: Apple Color Emoji.ttc は bitmap font で固定 size しか load できない。
+    # 利用可能 size = 20 / 32 / 40 / 48 / 64 / 96。96 が最大。
+    ("/System/Library/Fonts/Apple Color Emoji.ttc", 96),
+    # Linux: Noto Color Emoji (apt: fonts-noto-color-emoji) は size 109 のみ
     ("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf", 109),
     # 古い Debian 命名規則 fallback
     ("/usr/share/fonts/truetype/noto-emoji/NotoColorEmoji.ttf", 109),
