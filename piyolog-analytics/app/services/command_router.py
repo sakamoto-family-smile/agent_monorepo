@@ -39,6 +39,7 @@ HELP_TEXT = (
     "  ・体重 / weight — 体重・身長・頭囲の推移 (1 ヶ月)\n"
     "  ・時間帯 / heatmap — 授乳ヒートマップ (1 ヶ月)\n"
     "  ・ダッシュボード / dashboard — 4 種を 1 枚に集約\n"
+    "  ※ 期間指定: 例 ミルク 期間 2026-02-01 2026-02-28\n"
     "\n"
     "■ その他\n"
     "  ・ヘルプ / help — このメッセージ\n"
@@ -216,16 +217,31 @@ async def _try_chart_command(
     if chart_kind is None:
         return None
 
-    # 引数があれば period override
-    requested_period = default_period
-    if args:
-        candidate = args[0].lower()
-        period_resolved = _match_period(args[0], candidate)
-        if period_resolved is not None:
-            requested_period = period_resolved
-
-    # 範囲決定 → fetch
-    date_from, date_to, label = resolve_period(requested_period, now=now)
+    # ---- 引数解析 ----
+    # サポート形式:
+    #   <chart>                              → default_period
+    #   <chart> 今日 / 週間 / 月間 ...      → preset period override
+    #   <chart> 期間 YYYY-MM-DD YYYY-MM-DD  → 任意期間 (summary と同 syntax)
+    is_period_keyword = bool(args) and (
+        args[0] in _PERIOD_TOKENS or args[0].lower() in _PERIOD_TOKENS
+    )
+    if is_period_keyword:
+        if len(args) < 3 or not _DATE_RE.match(args[1]) or not _DATE_RE.match(args[2]):
+            return CommandResult(reply=INVALID_PERIOD_HINT)
+        try:
+            date_from, date_to, label = resolve_period(
+                "period", now=now, custom_from=args[1], custom_to=args[2]
+            )
+        except ValueError:
+            return CommandResult(reply=INVALID_PERIOD_HINT)
+    else:
+        requested_period = default_period
+        if args:
+            candidate = args[0].lower()
+            period_resolved = _match_period(args[0], candidate)
+            if period_resolved is not None:
+                requested_period = period_resolved
+        date_from, date_to, label = resolve_period(requested_period, now=now)
     events = await repo.fetch_events_in_range(
         family_id=family_id,
         date_from=date_from.isoformat(),
