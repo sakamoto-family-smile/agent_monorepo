@@ -44,7 +44,10 @@ class _State(Enum):
 _HEADER_RE = re.compile(r"^【ぴよログ】(\d{4}/\d{1,2}(?:/\d{1,2}(?:\([^)]+\))?)?)\s*$")
 _DATE_LINE_RE = re.compile(r"^(\d{4}/\d{1,2}/\d{1,2})\([^)]+\)\s*$")
 _NAME_AGE_RE = re.compile(
-    r"^(\S+)\s*\(\s*(\d+)歳(\d+)か月(?:(\d+)日)?\s*\)\s*$"
+    # 1 歳未満 (`歳` 部分が無く `(0か月2日)` 等) も許容するため `\d+歳` を optional に。
+    # これが無いと 0 歳児の export で名前行が認識されず、後続イベントが
+    # コメント扱いになって 0 件取り込みになる。
+    r"^(\S+)\s*\(\s*(?:(\d+)歳)?(\d+)か月(?:(\d+)日)?\s*\)\s*$"
 )
 _EVENT_RE = re.compile(r"^(\d{1,2}):(\d{2})\s{1,}(.+)$")
 _SEPARATOR_RE = re.compile(r"^-{5,}\s*$")
@@ -191,7 +194,8 @@ def parse_piyolog_text(text: str) -> ParseResult:
                 current_name = m.group(1)
                 if baby_name_first is None:
                     baby_name_first = current_name
-                age_years = int(m.group(2))
+                # group(2) は「歳」が無い場合 None になるため 0 を default に
+                age_years = int(m.group(2)) if m.group(2) else 0
                 age_months = int(m.group(3))
                 age_days = int(m.group(4)) if m.group(4) else None
                 current_age = (age_years, age_months, age_days)
