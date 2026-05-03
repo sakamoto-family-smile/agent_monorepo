@@ -161,10 +161,14 @@ class EventRepo:
         """dialect 別 INSERT ... ON CONFLICT DO NOTHING。"""
         if self.dialect == "postgresql":
             stmt = pg_insert(model).values(rows)
-            return stmt.on_conflict_do_nothing(index_elements=[model.__table__.primary_key.columns.values()[0].name])
+            return stmt.on_conflict_do_nothing(
+                index_elements=[model.__table__.primary_key.columns.values()[0].name]
+            )
         if self.dialect == "sqlite":
             stmt = sqlite_insert(model).values(rows)
-            return stmt.on_conflict_do_nothing(index_elements=[model.__table__.primary_key.columns.values()[0].name])
+            return stmt.on_conflict_do_nothing(
+                index_elements=[model.__table__.primary_key.columns.values()[0].name]
+            )
         raise RuntimeError(f"Unsupported dialect for upsert: {self.dialect}")
 
     async def import_events(
@@ -298,3 +302,46 @@ class EventRepo:
         async with self._sessionmaker() as session:
             result = await session.execute(stmt)
             return [tuple(row) for row in result.all()]
+
+    # ----------------------------------------------------------------
+    # Rollback (Phase 1.5)
+    # ----------------------------------------------------------------
+
+    async def rollback_latest_batch(self, *, family_id: str) -> ImportBatch | None:
+        """直近の active な ImportBatch を rolled_back_at で論理削除。
+
+        - active = `rolled_back_at IS NULL` の中で `imported_at` が最大のもの
+        - 集計系クエリ (`fetch_events_in_range` / `count_events`) は既に
+          `rolled_back_at IS NULL` で絞っているため、SQL 追加変更は不要
+        - dedup 用の partial unique index も `WHERE rolled_back_at IS NULL` 付きなので
+          rollback 後は同じ raw_text_hash を再 import 可能
+        - 返り値: ロールバック対象の ImportBatch (UI 確認メッセージ用)
+        - 対象 batch が無い場合 None
+        """
+        now_iso = datetime.now(UTC).isoformat()
+        async with self._sessionmaker() as session:
+            stmt = (
+                select(ImportBatchRow)
+                .where(
+                    ImportBatchRow.family_id == family_id,
+                    ImportBatchRow.rolled_back_at.is_(None),
+                )
+                .order_by(ImportBatchRow.imported_at.desc())
+                .limit(1)
+            )
+            row = (await session.execute(stmt)).scalar_one_or_none()
+            if row is None:
+                return None
+            row.rolled_back_at = now_iso
+            await session.commit()
+            await session.refresh(row)
+            return ImportBatch(
+                batch_id=row.batch_id,
+                family_id=row.family_id,
+                source_user_id=row.source_user_id,
+                source_filename=row.source_filename,
+                raw_text_hash=row.raw_text_hash,
+                event_count=row.event_count,
+                imported_at=row.imported_at,
+                rolled_back_at=row.rolled_back_at,
+            )
