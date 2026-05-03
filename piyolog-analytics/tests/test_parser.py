@@ -132,6 +132,31 @@ def test_monthly_left_only_breast_milk():
     assert len(right_only) == 1
 
 
+def test_parse_under_1yo_sample():
+    """生後 1 年未満 ((0か月2日) 形式) でも events が取り込めるかの回帰テスト。
+
+    `_NAME_AGE_RE` で `\\d+歳` を必須にしていたバグの再発防止。
+    本ケースは 2026/2/1 (3 ミルク + 2 おしっこ + 1 うんち + 1 お風呂 = 7 件) と
+    2026/2/2 (2 ミルク + 1 おしっこ + 1 うんち = 4 件) の合計 11 件を期待。
+    """
+    text = load_fixture("under_1yo_sample.txt")
+    result = parse_piyolog_text(text)
+    assert len(result.days) == 2
+    assert result.total_events == 11
+    # baby_name と age_years=0 が正しく拾えていること
+    day1 = result.days[0]
+    assert day1.baby_name == "べびきち"
+    assert day1.age_years == 0
+    assert day1.age_months == 0
+    assert day1.age_days == 2
+    # 個別イベント type の確認
+    types = [e.event_type for e in day1.events]
+    assert EventType.FORMULA in types
+    assert EventType.PEE in types
+    assert EventType.POO in types
+    assert EventType.BATH in types
+
+
 def test_unknown_event_falls_back_to_other_with_memo():
     text = load_fixture("edge_cases.txt")
     result = parse_piyolog_text(text)
