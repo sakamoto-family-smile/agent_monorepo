@@ -69,3 +69,85 @@ class ImportBatchRow(Base):
             postgresql_where=text("rolled_back_at IS NULL"),
         ),
     )
+
+
+# ---- Phase 3: 相談 + 自然言語分析 ----
+
+
+class SessionRow(Base):
+    """LINE user 単位の現在モード。"""
+
+    __tablename__ = "sessions"
+
+    line_user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    family_id: Mapped[str] = mapped_column(String, nullable=False)
+    mode: Mapped[str] = mapped_column(String, nullable=False, default="normal")
+    consulting_since: Mapped[str | None] = mapped_column(String, nullable=True)
+    current_conversation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+    __table_args__ = (Index("idx_sessions_family_mode", "family_id", "mode"),)
+
+
+class ConversationRow(Base):
+    __tablename__ = "conversations"
+
+    conversation_id: Mapped[str] = mapped_column(String, primary_key=True)
+    family_id: Mapped[str] = mapped_column(String, nullable=False)
+    line_user_id: Mapped[str] = mapped_column(String, nullable=False)
+    started_at: Mapped[str] = mapped_column(String, nullable=False)
+    ended_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    system_prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    total_input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_cache_read_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (Index("idx_conversations_family_started", "family_id", "started_at"),)
+
+
+class ConversationMessageRow(Base):
+    """会話の 1 メッセージ。
+
+    role:
+      - user           : ユーザーの発話
+      - assistant      : LLM の text 応答
+      - tool_use       : LLM の tool call (content に tool 名 + JSON 引数)
+      - tool_result    : tool 実行結果 (content に出力テキスト)
+    capability_gap (assistant message のみ意味を持つタグ):
+      - asked_clarification : 不足情報を質問した
+      - out_of_scope        : 対応範囲外と判断
+      - data_missing        : 必要なデータが piyolog 側に無かった
+      - tool_error          : tool 実行失敗
+      - refused             : 安全ガード等で拒否
+      - completed           : 完答 (default)
+    """
+
+    __tablename__ = "conversation_messages"
+
+    message_id: Mapped[str] = mapped_column(String, primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    llm_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tool_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    capability_gap: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "idx_messages_conversation_created",
+            "conversation_id",
+            "created_at",
+        ),
+        Index(
+            "idx_messages_capability_gap",
+            "capability_gap",
+            sqlite_where=text("capability_gap IS NOT NULL"),
+            postgresql_where=text("capability_gap IS NOT NULL"),
+        ),
+    )
