@@ -74,6 +74,26 @@ class Settings(BaseSettings):
     image_store_max_entries: int = 50
     image_store_ttl_seconds: int = 3600
 
+    # --- Phase 3: Vertex AI Gemini (LLM 相談 + 自然言語分析) ---
+    # 空ならコンサルティングモードを deploy しない (テキストで stub 応答)
+    vertex_project: str = ""
+    vertex_location: str = "asia-northeast1"
+    # Gemini モデル ID。tool use 対応、prompt caching は実装側で chunk 分割。
+    vertex_model: str = "gemini-2.5-pro"
+    # consultation の生成パラメータ
+    vertex_max_output_tokens: int = 2048
+    vertex_temperature: float = 0.4
+    # 1 conversation の最大 tool use ループ回数 (暴走防止)
+    vertex_max_tool_iterations: int = 5
+    # 1 conversation で保持する直近メッセージ数 (context window 節約)
+    vertex_history_window: int = 20
+    # 子の生年月日 (YYYY-MM-DD)。空なら context builder で月齢を計算しない
+    child_birth_date: str = ""
+
+    @property
+    def vertex_configured(self) -> bool:
+        return bool(self.vertex_project)
+
     @property
     def family_user_id_set(self) -> frozenset[str]:
         if not self.family_user_ids:
