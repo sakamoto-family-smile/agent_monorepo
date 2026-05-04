@@ -54,3 +54,12 @@ resource "google_artifact_registry_repository_iam_member" "piyolog_ar_reader" {
   role       = "roles/artifactregistry.reader"
   member     = "serviceAccount:${google_service_account.piyolog.email}"
 }
+
+# Phase 3: Vertex AI Gemini 呼び出し権限 (consultation 機能で使う)。
+# `roles/aiplatform.user` で `aiplatform.endpoints.predict` 等の generate_content
+# 権限を付与する。
+resource "google_project_iam_member" "piyolog_aiplatform_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.piyolog.email}"
+}
