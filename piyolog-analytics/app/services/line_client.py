@@ -96,6 +96,11 @@ class LineBotClient(Protocol):
 
     async def fetch_message_content(self, *, message_id: str) -> bytes: ...
 
+    # Phase 2 リッチメニュー: per-user の link/unlink (mode 切替時に使う)
+    async def link_richmenu_to_user(self, *, user_id: str, rich_menu_id: str) -> None: ...
+
+    async def unlink_richmenu_from_user(self, *, user_id: str) -> None: ...
+
     async def close(self) -> None: ...
 
 
@@ -278,6 +283,20 @@ class LineBotSdkClient:
             if isinstance(data, bytes):
                 return data
         return bytes(resp)
+
+    async def link_richmenu_to_user(self, *, user_id: str, rich_menu_id: str) -> None:
+        """per-user に rich menu を紐付け (consulting mode 切替時)。"""
+        if not user_id or not rich_menu_id:
+            logger.warning("link_richmenu skipped (empty user_id/rich_menu_id)")
+            return
+        await self._messaging.link_rich_menu_id_to_user(user_id=user_id, rich_menu_id=rich_menu_id)
+
+    async def unlink_richmenu_from_user(self, *, user_id: str) -> None:
+        """per-user の rich menu 紐付けを解除 (default rich menu に戻る)。"""
+        if not user_id:
+            logger.warning("unlink_richmenu skipped (empty user_id)")
+            return
+        await self._messaging.unlink_rich_menu_id_from_user(user_id=user_id)
 
     async def close(self) -> None:
         await self._api_client.close()

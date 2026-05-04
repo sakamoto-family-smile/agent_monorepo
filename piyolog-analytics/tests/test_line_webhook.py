@@ -46,7 +46,13 @@ def _text_event_body(user_id: str, text: str, reply_token: str = "rt1") -> bytes
     return json.dumps(payload).encode("utf-8")
 
 
-def _file_event_body(user_id: str, filename: str, file_size: int, message_id: str = "mfile1", reply_token: str = "rt2") -> bytes:
+def _file_event_body(
+    user_id: str,
+    filename: str,
+    file_size: int,
+    message_id: str = "mfile1",
+    reply_token: str = "rt2",
+) -> bytes:
     payload = {
         "events": [
             {
@@ -151,13 +157,26 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setenv("ANALYTICS_DATA_DIR", str(tmp_path / "analytics"))
     # reload config + instrumentation singletons
     import config as cfg
+
     importlib.reload(cfg)
     import instrumentation.setup as obs_setup
+
     importlib.reload(obs_setup)
+    # services.line_client を reload した場合、その中の DTO 型 (LineTextEvent 等) が
+    # 別オブジェクトになる。services.line_handler はそれらを isinstance check する
+    # ので handler 側も reload しないと event 振り分けが落ちる (整合性必須)。
+    import services.line_client as lc
+
+    importlib.reload(lc)
+    import services.line_handler as lh
+
+    importlib.reload(lh)
     # main / routes もリロードして新 settings を拾わせる
     import routes.line as line_route
+
     importlib.reload(line_route)
     import main as main_mod
+
     importlib.reload(main_mod)
     return main_mod
 
@@ -166,6 +185,7 @@ def env(monkeypatch, tmp_path):
 def stub(env):
     stub_client = StubLineClient(secret="testsecret")
     import services.line_client as lc
+
     lc.set_line_bot_client(stub_client)
     yield stub_client
     lc.set_line_bot_client(None)
@@ -190,15 +210,20 @@ def test_503_when_line_unconfigured(monkeypatch, tmp_path):
     monkeypatch.setenv("ANALYTICS_ENABLED", "false")
     monkeypatch.setenv("ANALYTICS_DATA_DIR", str(tmp_path / "analytics"))
     import config as cfg
+
     importlib.reload(cfg)
     import instrumentation.setup as obs_setup
+
     importlib.reload(obs_setup)
     import services.line_client as lc
+
     importlib.reload(lc)
     lc.set_line_bot_client(None)
     import routes.line as rl
+
     importlib.reload(rl)
     import main as main_mod
+
     importlib.reload(main_mod)
     with TestClient(main_mod.app) as client:
         resp = client.post("/api/line/webhook", content=b"{}", headers={"X-Line-Signature": "x"})
@@ -233,9 +258,7 @@ def test_401_when_signature_invalid(client):
 def test_rejects_non_family_user_silently(client, stub):
     body = _text_event_body("UOUTSIDER", "ヘルプ")
     sig = _sign(body, "testsecret")
-    resp = client.post(
-        "/api/line/webhook", content=body, headers={"X-Line-Signature": sig}
-    )
+    resp = client.post("/api/line/webhook", content=body, headers={"X-Line-Signature": sig})
     assert resp.status_code == 200
     # 無視されたので reply は飛ばない
     assert stub.reply_messages == []
@@ -246,9 +269,7 @@ def test_rejects_non_family_user_silently(client, stub):
 # ---------------------------------------------------------------------------
 
 
-def test_bootstrap_mode_logs_full_userid_when_family_user_ids_empty(
-    monkeypatch, tmp_path, caplog
-):
+def test_bootstrap_mode_logs_full_userid_when_family_user_ids_empty(monkeypatch, tmp_path, caplog):
     """`FAMILY_USER_IDS=""` で deploy したとき、メッセージ受信で full userId を WARN log。"""
     monkeypatch.setenv("LINE_CHANNEL_SECRET", "testsecret")
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "testtoken")
@@ -272,9 +293,7 @@ def test_bootstrap_mode_logs_full_userid_when_family_user_ids_empty(
     body = _text_event_body("Uffffffffffffffffffffffffffffffff", "hi")
     sig = _sign(body, "testsecret")
     with TestClient(main_mod.app) as client, caplog.at_level("WARNING"):
-        resp = client.post(
-            "/api/line/webhook", content=body, headers={"X-Line-Signature": sig}
-        )
+        resp = client.post("/api/line/webhook", content=body, headers={"X-Line-Signature": sig})
     lc.set_line_bot_client(None)
 
     assert resp.status_code == 200
@@ -294,9 +313,7 @@ def test_bootstrap_mode_logs_full_userid_when_family_user_ids_empty(
 def test_help_command_returns_help_text(client, stub):
     body = _text_event_body("UALLOWED1", "ヘルプ")
     sig = _sign(body, "testsecret")
-    resp = client.post(
-        "/api/line/webhook", content=body, headers={"X-Line-Signature": sig}
-    )
+    resp = client.post("/api/line/webhook", content=body, headers={"X-Line-Signature": sig})
     assert resp.status_code == 200
     assert len(stub.reply_messages) == 1
     token, text = stub.reply_messages[0]
@@ -307,9 +324,7 @@ def test_help_command_returns_help_text(client, stub):
 def test_today_command_with_no_data_returns_empty_message(client, stub):
     body = _text_event_body("UALLOWED1", "今日")
     sig = _sign(body, "testsecret")
-    resp = client.post(
-        "/api/line/webhook", content=body, headers={"X-Line-Signature": sig}
-    )
+    resp = client.post("/api/line/webhook", content=body, headers={"X-Line-Signature": sig})
     assert resp.status_code == 200
     assert len(stub.reply_messages) == 1
     _, text = stub.reply_messages[0]
@@ -326,9 +341,7 @@ def test_file_message_triggers_ack_and_import(client, stub):
     stub.fetched_content = raw
     body = _file_event_body("UALLOWED1", "piyolog.txt", len(raw))
     sig = _sign(body, "testsecret")
-    resp = client.post(
-        "/api/line/webhook", content=body, headers={"X-Line-Signature": sig}
-    )
+    resp = client.post("/api/line/webhook", content=body, headers={"X-Line-Signature": sig})
     assert resp.status_code == 200
     # ack (reply) は必ず出ている
     assert len(stub.reply_messages) == 1
@@ -362,9 +375,7 @@ def test_file_message_rejects_non_piyolog_content(client, stub):
     stub.fetched_content = b"hello world, not piyolog"
     body = _file_event_body("UALLOWED1", "x.txt", len(stub.fetched_content))
     sig = _sign(body, "testsecret")
-    resp = client.post(
-        "/api/line/webhook", content=body, headers={"X-Line-Signature": sig}
-    )
+    resp = client.post("/api/line/webhook", content=body, headers={"X-Line-Signature": sig})
     assert resp.status_code == 200
     # 失敗 push
     fail_push = [m for m in stub.push_messages if "失敗" in m[1]]
@@ -385,9 +396,7 @@ def test_end_to_end_import_then_summary(client, stub):
     stub.reply_messages.clear()
     body = _text_event_body("UALLOWED1", "期間 2026-04-22 2026-04-22")
     sig = _sign(body, "testsecret")
-    resp = client.post(
-        "/api/line/webhook", content=body, headers={"X-Line-Signature": sig}
-    )
+    resp = client.post("/api/line/webhook", content=body, headers={"X-Line-Signature": sig})
     assert resp.status_code == 200
     _, text = stub.reply_messages[0]
     assert "260ml" in text

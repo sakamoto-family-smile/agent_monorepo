@@ -90,6 +90,13 @@ class Settings(BaseSettings):
     # 子の生年月日 (YYYY-MM-DD)。空なら context builder で月齢を計算しない
     child_birth_date: str = ""
 
+    # --- Phase 3-C: リッチメニュー切替 ---
+    # consulting mode に入った時に user に紐付ける rich menu の ID。
+    # `scripts/setup_richmenu.py --mode consulting` で生成された ID を入れる。
+    # 空なら mode 切替時に rich menu の link/unlink を行わない (default の normal
+    # メニューがそのまま表示される)。
+    rich_menu_id_consulting: str = ""
+
     @property
     def vertex_configured(self) -> bool:
         return bool(self.vertex_project)
