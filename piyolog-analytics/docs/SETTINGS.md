@@ -32,17 +32,17 @@
 - バリデーション: 1〜32 文字、改行 / タブ不可
 - 「名前: キャンセル」で設定終了 (DB は更新しない)
 
-## context_builder の優先順位
+## context_builder のソース
 
-`build_recent_context()` は子のプロフィールを以下の順で解決する:
+`build_recent_context()` は子の生年月日 / 名前を `children` テーブル
+(= ChildRepo) から `(family_id, child_id)` で取得する。
 
-1. 関数引数の `birth_date` / `child_name` (env 由来) が non-empty なら使う
-2. `child_repo` (= ChildRepo) が渡されていれば `(family_id, child_id)` で
-   `children` table を fetch、不足部分のみ補う
-3. それでも空なら「月齢: 不明」表示
+未登録なら「月齢: 不明 (⚙️ 設定 から子の生年月日を登録してください)」と
+出る (LLM はこの旨を読み取って、ユーザに登録を促す挙動になる)。
 
-env (`CHILD_BIRTH_DATE`) は **優先して残す** ことで、Cloud Run の
-config-as-code 運用とエンドユーザの DB 上書きの両立を担保する。
+env (`CHILD_BIRTH_DATE`) は廃止 (`children` テーブルに一本化)。
+テストから直接注入したい場合のみ `birth_date` / `child_name` 引数で
+override 可能 (本番では使わない)。
 
 ## DB スキーマ (alembic 0003_children)
 

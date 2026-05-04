@@ -159,11 +159,11 @@ async def build_recent_context(
       - 直近 72 時間サマリ
       - 直近 7 日サマリ
 
-    `birth_date` / `child_name` が空かつ `child_repo` が渡されていれば、
-    children テーブルから (family_id, child_id) で fallback する。
-    Phase 4-B で追加 (Phase 3 の env-only セットアップとの後方互換維持)。
+    子の生年月日 / 名前は `children` テーブル (= ChildRepo) から
+    `(family_id, child_id)` で取得する。テスト等で直接注入したい場合のみ
+    `birth_date` / `child_name` 引数を使う (デフォルトは DB 由来)。
     """
-    # env / 引数指定が空なら DB から fallback
+    # 引数指定がなければ DB から取得
     if (not birth_date or not child_name) and child_repo is not None:
         try:
             child = await child_repo.get(family_id=family_id, child_id=child_id)
@@ -206,7 +206,7 @@ async def build_recent_context(
     if age:
         profile_lines.append(f"- 月齢: {age}")
     else:
-        profile_lines.append("- 月齢: 不明 (生年月日が未設定。⚙️ 設定から登録してください)")
+        profile_lines.append("- 月齢: 不明 (⚙️ 設定 から子の生年月日を登録してください)")
     weight = _latest_metric(events_30d, event_type="weight", value_idx=_WEIGHT_KG)
     height = _latest_metric(events_30d, event_type="height", value_idx=_HEIGHT_CM)
     head = _latest_metric(events_30d, event_type="head_circumference", value_idx=_HEAD_CM)

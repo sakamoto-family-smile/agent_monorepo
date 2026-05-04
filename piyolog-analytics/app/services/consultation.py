@@ -151,7 +151,6 @@ class Consultation:
         recent_ctx = await build_recent_context(
             repo=self._repo,
             family_id=self._family_id,
-            birth_date=settings.child_birth_date,
             child_repo=self._child_repo,
             child_id=self._child_id,
         )

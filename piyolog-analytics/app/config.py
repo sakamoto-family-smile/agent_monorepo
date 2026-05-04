@@ -87,8 +87,6 @@ class Settings(BaseSettings):
     vertex_max_tool_iterations: int = 5
     # 1 conversation で保持する直近メッセージ数 (context window 節約)
     vertex_history_window: int = 20
-    # 子の生年月日 (YYYY-MM-DD)。空なら context builder で月齢を計算しない
-    child_birth_date: str = ""
 
     # --- Phase 3-C: リッチメニュー切替 ---
     # consulting mode に入った時に user に紐付ける rich menu の ID。

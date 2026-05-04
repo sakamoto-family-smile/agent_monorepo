@@ -302,7 +302,7 @@ LINE の `line_user_id` は必ず `sha256:<hex>` 化して流す。
 
 - `children` table (family_id + child_id PK / birth_date / name)。
 - ⚙️ 設定 ボタンで Quick Reply (datetime picker / 名前入力 / キャンセル)。
-- env `CHILD_BIRTH_DATE` を残しつつ、空なら DB を fallback (env 優先)。
+- 旧 env `CHILD_BIRTH_DATE` は廃止 (`children` テーブルに一本化)。
 - 名前は「名前: たろう」のテキスト入力で保存。
 
 ---

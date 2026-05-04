@@ -117,14 +117,12 @@ class _FakeChildRepo:
 
 
 @pytest.mark.asyncio
-async def test_build_context_uses_child_repo_when_birth_date_empty() -> None:
-    """env (birth_date 引数) が空なら children テーブルから補う。"""
+async def test_build_context_uses_child_repo() -> None:
+    """children テーブルから生年月日 / 名前を取得して month-age を計算。"""
     now = datetime(2026, 5, 4, 10, 0, tzinfo=JST)
     repo = _FakeRepo({})
     cr = _FakeChildRepo(birth_date="2026-04-01", name="たろう")
-    text = await build_recent_context(
-        repo=repo, family_id="f1", now=now, birth_date="", child_repo=cr
-    )
+    text = await build_recent_context(repo=repo, family_id="f1", now=now, child_repo=cr)
     # name が context に出る
     assert "たろう" in text
     # 月齢計算が走る (約 1 か月)
@@ -132,8 +130,17 @@ async def test_build_context_uses_child_repo_when_birth_date_empty() -> None:
 
 
 @pytest.mark.asyncio
-async def test_build_context_env_takes_priority_over_child_repo() -> None:
-    """env (引数 birth_date) が指定済みなら DB は読まない (env 優先)。"""
+async def test_build_context_no_child_repo_no_age() -> None:
+    """child_repo 未配線なら月齢は不明扱い (env からは取らない)。"""
+    now = datetime(2026, 5, 4, 10, 0, tzinfo=JST)
+    repo = _FakeRepo({})
+    text = await build_recent_context(repo=repo, family_id="f1", now=now)
+    assert "月齢: 不明" in text
+
+
+@pytest.mark.asyncio
+async def test_build_context_explicit_arg_overrides_child_repo() -> None:
+    """テスト用に直接渡した `birth_date` 引数は DB より優先される。"""
     now = datetime(2026, 5, 4, 10, 0, tzinfo=JST)
     repo = _FakeRepo({})
     cr = _FakeChildRepo(birth_date="2025-01-01", name="DB太郎")
@@ -141,9 +148,8 @@ async def test_build_context_env_takes_priority_over_child_repo() -> None:
         repo=repo,
         family_id="f1",
         now=now,
-        birth_date="2026-04-01",  # こちらが優先
+        birth_date="2026-04-01",  # 引数が優先
         child_repo=cr,
     )
-    # env の 2026-04-01 から計算 → 1 か月、DB の 2025-01-01 (1 年) ではない
     assert "1か月" in text or "0か月" in text
     assert "1歳" not in text
