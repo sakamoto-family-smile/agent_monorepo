@@ -43,6 +43,18 @@ output "secret_database_url" {
   value       = google_secret_manager_secret.database_url.secret_id
 }
 
+# ---- Phase 4-A: Backup bucket ----
+
+output "backup_bucket_name" {
+  description = "Cloud SQL バックアップ先 GCS bucket 名。"
+  value       = google_storage_bucket.backups.name
+}
+
+output "backup_bucket_uri" {
+  description = "バックアップ先 GCS URI (gs://...)。scripts/backup_data.sh が使用。"
+  value       = "gs://${google_storage_bucket.backups.name}"
+}
+
 # `make deploy-cloud-run` が読む env を一括出力。
 # `terraform output -json env_for_deploy | jq -r 'to_entries[]|"\(.key)=\(.value)"' >> .env.deploy`
 output "env_for_deploy" {

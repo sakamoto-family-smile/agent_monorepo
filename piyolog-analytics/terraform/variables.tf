@@ -94,3 +94,17 @@ variable "line_channel_access_token_value" {
   default     = ""
   sensitive   = true
 }
+
+# ---- Phase 4-A: Backup bucket ----
+
+variable "backup_retention_days" {
+  type        = number
+  description = "GCS backup bucket の current version 保持日数 (lifecycle で自動削除)。"
+  default     = 90
+}
+
+variable "backup_bucket_force_destroy" {
+  type        = bool
+  description = "true で `terraform destroy` 時に backup bucket もオブジェクトごと削除。既定 false で backup を保護。"
+  default     = false
+}
