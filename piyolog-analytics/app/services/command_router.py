@@ -75,6 +75,10 @@ _DASHBOARD_TOKENS = frozenset({"ダッシュボード", "dashboard"})
 # Phase 1.5 ロールバック
 _UNDO_TOKENS = frozenset({"取り消し", "取消", "undo", "rollback"})
 
+# Phase 3 consulting mode 切替 (line_handler 側で intercept される)
+CONSULT_ENTER_TOKENS = frozenset({"相談", "consult", "相談開始"})
+CONSULT_EXIT_TOKENS = frozenset({"相談終了", "exit", "終了"})
+
 UNDO_NO_BATCH_HINT = (
     "取り消せる取り込み履歴がありません。\n"
     "( .txt の取り込みが 1 件もないか、既にすべて取り消し済みです)"

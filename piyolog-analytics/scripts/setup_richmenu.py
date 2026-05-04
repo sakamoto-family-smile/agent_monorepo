@@ -92,6 +92,19 @@ NORMAL_CELLS: list[CellSpec] = [
     CellSpec("ヘルプ", "❓", "action=help"),
 ]
 
+# Phase 3-C: consulting mode 中に表示する 8 ボタン版。「💬 相談」を「🚪 相談終了」に
+# 差し替え、それ以外は normal と同じ。consulting 中もサマリ/グラフ参照は可能にする。
+CONSULTING_CELLS: list[CellSpec] = [
+    CellSpec("今日", "📊", "action=summary&period=today"),
+    CellSpec("ミルク", "📈", "action=chart&kind=milk&period=week"),
+    CellSpec("睡眠", "💤", "action=chart&kind=sleep&period=week"),
+    CellSpec("体重", "⚖️", "action=chart&kind=weight&period=month"),
+    CellSpec("週間", "📅", "action=summary&period=week"),
+    CellSpec("ヒートマップ", "🔥", "action=chart&kind=heatmap&period=month"),
+    CellSpec("相談終了", "🚪", "action=consult&op=exit"),
+    CellSpec("ヘルプ", "❓", "action=help"),
+]
+
 # 日本語ラベル用フォント候補 (mono 描画)。Cloud Run image (Linux) と macOS 両対応。
 JP_FONT_CANDIDATES = [
     # Linux (Docker, fonts-noto-cjk apt から)
@@ -142,9 +155,7 @@ def _resolve_emoji_font() -> tuple[ImageFont.FreeTypeFont | None, int]:
                 return ImageFont.truetype(path, size=native_size), native_size
             except OSError:
                 continue
-    logger.warning(
-        "color emoji font not found; icons will be drawn as plain text (□ may appear)"
-    )
+    logger.warning("color emoji font not found; icons will be drawn as plain text (□ may appear)")
     return None, 0
 
 
@@ -181,9 +192,7 @@ def _draw_cell(
         tmp = Image.new("RGBA", (emoji_native_size * 2, emoji_native_size * 2), (0, 0, 0, 0))
         tmp_draw = ImageDraw.Draw(tmp)
         try:
-            tmp_draw.text(
-                (0, 0), cell.icon, font=emoji_font, embedded_color=True
-            )
+            tmp_draw.text((0, 0), cell.icon, font=emoji_font, embedded_color=True)
         except Exception:
             # 古い PIL 等で embedded_color が無い場合は plain text fallback
             tmp_draw.text((0, 0), cell.icon, fill=FG_COLOR, font=emoji_font)
@@ -319,6 +328,36 @@ def set_default_richmenu(*, access_token: str, rich_menu_id: str, timeout: float
 # ---- main ----
 
 
+def _build_and_register_one(
+    *,
+    cells: list[CellSpec],
+    name: str,
+    image_path: Path,
+    access_token: str | None,
+    set_as_default: bool,
+) -> str | None:
+    """1 mode 分の生成 + 登録。dry-run なら画像のみ作って return None。"""
+    logger.info("rendering richmenu image '%s' (%dx%d)", name, LARGE_WIDTH, LARGE_HEIGHT)
+    img = render_richmenu_image(cells)
+    img.save(image_path, format="PNG")
+    logger.info("image saved: %s", image_path)
+    if access_token is None:
+        return None
+    payload = build_richmenu_payload(cells, name=f"piyolog_{name}")
+    rich_menu_id = create_richmenu(access_token=access_token, payload=payload)
+    logger.info("[%s] rich_menu_id=%s", name, rich_menu_id)
+    with open(image_path, "rb") as f:
+        upload_richmenu_image(
+            access_token=access_token,
+            rich_menu_id=rich_menu_id,
+            image_bytes=f.read(),
+        )
+    if set_as_default:
+        logger.info("[%s] setting as default for all users", name)
+        set_default_richmenu(access_token=access_token, rich_menu_id=rich_menu_id)
+    return rich_menu_id
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -332,44 +371,55 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("RICHMENU_DRY_RUN", "").lower() == "true",
         help="LINE API 呼び出しを skip して画像のみ出力 (CI / debug 用)",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["normal", "consulting", "both"],
+        default="normal",
+        help=(
+            "生成・登録するメニュー mode。"
+            "normal (default): 通常メニューのみ。"
+            "consulting: 相談用メニューのみ。"
+            "both: 両方を生成・登録 (normal を default として set)。"
+        ),
+    )
     args = parser.parse_args(argv)
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    image_path = out_dir / "richmenu_normal.png"
 
-    logger.info("rendering richmenu image (%dx%d)", LARGE_WIDTH, LARGE_HEIGHT)
-    img = render_richmenu_image(NORMAL_CELLS)
-    img.save(image_path, format="PNG")
-    logger.info("image saved: %s", image_path)
+    access_token: str | None = None
+    if not args.dry_run:
+        access_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+        if not access_token:
+            logger.error("LINE_CHANNEL_ACCESS_TOKEN env is required (or use --dry-run)")
+            return 2
+
+    output_ids: dict[str, str] = {}
+    targets = []
+    if args.mode in {"normal", "both"}:
+        targets.append(("normal", NORMAL_CELLS, out_dir / "richmenu_normal.png", True))
+    if args.mode in {"consulting", "both"}:
+        # consulting は default に置かない (普段 normal、enter 時に per-user link)
+        targets.append(("consulting", CONSULTING_CELLS, out_dir / "richmenu_consulting.png", False))
+
+    for name, cells, path, set_default in targets:
+        rid = _build_and_register_one(
+            cells=cells,
+            name=name,
+            image_path=path,
+            access_token=access_token,
+            set_as_default=set_default,
+        )
+        if rid is not None:
+            output_ids[name] = rid
 
     if args.dry_run:
         logger.info("[dry-run] skip LINE API calls")
         return 0
 
-    access_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
-    if not access_token:
-        logger.error("LINE_CHANNEL_ACCESS_TOKEN env is required (or use --dry-run)")
-        return 2
-
-    payload = build_richmenu_payload(NORMAL_CELLS)
-    logger.info("creating richmenu via LINE API ...")
-    rich_menu_id = create_richmenu(access_token=access_token, payload=payload)
-    logger.info("rich_menu_id=%s", rich_menu_id)
-
-    logger.info("uploading image to richmenu ...")
-    with open(image_path, "rb") as f:
-        upload_richmenu_image(
-            access_token=access_token,
-            rich_menu_id=rich_menu_id,
-            image_bytes=f.read(),
-        )
-
-    logger.info("setting default richmenu for all users ...")
-    set_default_richmenu(access_token=access_token, rich_menu_id=rich_menu_id)
-
     print()  # ops が grep しやすいよう一行空ける
-    print(f"RICH_MENU_ID_NORMAL={rich_menu_id}")
+    for name, rid in output_ids.items():
+        print(f"RICH_MENU_ID_{name.upper()}={rid}")
     return 0
 
 

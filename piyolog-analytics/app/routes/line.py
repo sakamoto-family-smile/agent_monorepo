@@ -121,6 +121,7 @@ async def line_webhook(
 
     repo = get_repo()
     await repo.initialize()
+    from repositories.session_repo import SessionRepo
     from services.image_store import get_image_store
 
     deps = HandlerDeps(
@@ -133,6 +134,10 @@ async def line_webhook(
         schedule_background=_make_scheduler(background_tasks),
         public_base_url=settings.public_base_url.rstrip("/"),
         image_store=get_image_store(),
+        # Phase 3: consultation 用
+        session_repo=SessionRepo(engine=repo.engine),
+        analytics_logger=al,
+        rich_menu_id_consulting=settings.rich_menu_id_consulting,
         now_factory=lambda: datetime.now(UTC),
     )
 
