@@ -12,12 +12,13 @@ LINE のリッチメニュー仕様:
   4. setDefaultRichMenu で全ユーザに紐付け
   5. 標準出力に `RICH_MENU_ID_NORMAL=...` を print
 
-normal mode (Phase 2): 8 ボタン
+normal mode (Phase 4-B): 8 ボタン
   📊 今日 | 📈 ミルク | 💤 睡眠 | ⚖️ 体重
-  📅 週間 | 🔥 ヒートマップ | 💬 相談 | ❓ ヘルプ
+  📅 週間 | 🔥 ヒートマップ | 💬 相談 | ⚙️ 設定
 
-consulting mode (Phase 3 で別途登録、stub のみ): `💬 相談` を `🚪 相談終了` に
-差し替えた版。本 PR では生成のみで未使用。
+consulting mode: `💬 相談` を `🚪 相談終了` に差し替えた版。
+Phase 4-B で `❓ ヘルプ` を `⚙️ 設定` に置換 (Quick Reply で datetime
+picker を出すための entry point)。`ヘルプ` は text コマンドで利用可能。
 
 使い方:
   cd piyolog-analytics
@@ -66,7 +67,7 @@ CELL_COLORS = [
     (245, 214, 128),  # Butter (週間)
     (245, 214, 128),  # Butter (ヒートマップ)
     (200, 180, 220),  # Lilac (相談)
-    (220, 220, 220),  # Mute (ヘルプ)
+    (220, 220, 220),  # Mute (設定)
 ]
 
 
@@ -89,7 +90,7 @@ NORMAL_CELLS: list[CellSpec] = [
     CellSpec("週間", "📅", "action=summary&period=week"),
     CellSpec("ヒートマップ", "🔥", "action=chart&kind=heatmap&period=month"),
     CellSpec("相談", "💬", "action=consult&op=enter"),
-    CellSpec("ヘルプ", "❓", "action=help"),
+    CellSpec("設定", "⚙️", "action=settings"),
 ]
 
 # Phase 3-C: consulting mode 中に表示する 8 ボタン版。「💬 相談」を「🚪 相談終了」に
@@ -102,7 +103,7 @@ CONSULTING_CELLS: list[CellSpec] = [
     CellSpec("週間", "📅", "action=summary&period=week"),
     CellSpec("ヒートマップ", "🔥", "action=chart&kind=heatmap&period=month"),
     CellSpec("相談終了", "🚪", "action=consult&op=exit"),
-    CellSpec("ヘルプ", "❓", "action=help"),
+    CellSpec("設定", "⚙️", "action=settings"),
 ]
 
 # 日本語ラベル用フォント候補 (mono 描画)。Cloud Run image (Linux) と macOS 両対応。

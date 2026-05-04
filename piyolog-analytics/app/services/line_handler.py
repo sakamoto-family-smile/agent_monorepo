@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from repositories.child_repo import ChildRepo, is_valid_name
 from repositories.event_repo import EventRepo
 from repositories.session_repo import (
     MODE_CONSULTING,
@@ -66,6 +67,8 @@ class HandlerDeps:
     session_repo: SessionRepo | None = None
     analytics_logger: object | None = None
     rich_menu_id_consulting: str = ""
+    # Phase 4-B: 子情報 DB (env が空なら DB を読む)
+    child_repo: ChildRepo | None = None
     # Optional: テストで時刻を固定したい場合に注入
     now_factory: Callable[[], datetime] = lambda: datetime.now(UTC)
 
@@ -108,13 +111,19 @@ async def handle_event(event: LineEvent, deps: HandlerDeps) -> None:
 # ---------------------------------------------------------------------------
 
 
+# 「名前: XXX」「名前 XXX」を受け付ける。半角/全角コロンと半角/全角空白に対応。
+_NAME_PREFIXES = ("名前:", "名前\uff1a", "名前 ", "名前\u3000", "name:", "name ")
+_CANCEL_TOKENS = frozenset({"キャンセル", "cancel"})
+
+
 async def _handle_text(event: LineTextEvent, deps: HandlerDeps) -> None:
     """text の振り分け。
 
     優先順:
       1. consulting mode 切替コマンド (相談 / 相談終了) を intercept
-      2. consulting mode → emergency_gate → Consultation.respond
-      3. normal mode → command_router (chart / summary / undo / help)
+      2. 「名前: XXX」/「名前 XXX」を child_repo に upsert (Phase 4-B)
+      3. consulting mode → emergency_gate → Consultation.respond
+      4. normal mode → command_router (chart / summary / undo / help)
     """
     text_norm = (event.text or "").strip().replace("\u3000", " ")
     # 1. consulting mode 切替を最優先
@@ -125,14 +134,18 @@ async def _handle_text(event: LineTextEvent, deps: HandlerDeps) -> None:
         await _exit_consulting(event, deps)
         return
 
-    # 2. consulting mode 中なら Consultation に流す
+    # 2. 名前変更の text コマンド (settings UI から導かれる)
+    if await _maybe_handle_name_input(text_norm, event, deps):
+        return
+
+    # 3. consulting mode 中なら Consultation に流す
     if deps.session_repo is not None:
         mode = await deps.session_repo.get_mode(line_user_id=event.line_user_id)
         if mode == MODE_CONSULTING:
             await _handle_consulting_text(event, deps)
             return
 
-    # 3. normal mode: 既存 command_router
+    # 4. normal mode: 既存 command_router
     result = await handle_text_command(
         event.text,
         repo=deps.repo,
@@ -142,7 +155,85 @@ async def _handle_text(event: LineTextEvent, deps: HandlerDeps) -> None:
     if result.image_png is not None:
         await _send_image_or_fallback(event, deps, result)
         return
-    await deps.line_client.reply_text(reply_token=event.reply_token, text=result.reply)
+    await _reply_with_optional_quick_reply(event, deps, result)
+
+
+async def _maybe_handle_name_input(
+    text_norm: str, event: LineTextEvent, deps: HandlerDeps
+) -> bool:
+    """「名前: XXX」「名前 XXX」を子の名前として保存。マッチしたら True。
+
+    settings UI の「✏️ 子の名前」を選択した後の text 入力を想定。
+    キャンセル時は SETTINGS_CANCELLED を返す。
+    """
+    matched_prefix: str | None = None
+    for prefix in _NAME_PREFIXES:
+        if text_norm.startswith(prefix):
+            matched_prefix = prefix
+            break
+    if matched_prefix is None:
+        return False
+    candidate = text_norm[len(matched_prefix):].strip()
+    if candidate.lower() in _CANCEL_TOKENS or candidate in _CANCEL_TOKENS:
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token, text="設定を閉じました。"
+        )
+        return True
+    if not candidate:
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text="名前が空でした。「名前: たろう」のように送ってください。",
+        )
+        return True
+    if not is_valid_name(candidate):
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text="名前の形式が不正でした (32 文字以内、改行・タブ不可)。",
+        )
+        return True
+    if deps.child_repo is None:
+        logger.warning("name input: child_repo not wired")
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text="設定機能は現在利用できません。少し時間を置いてからもう一度お試しください。",
+        )
+        return True
+    try:
+        await deps.child_repo.upsert_name(
+            family_id=deps.family_id,
+            child_id=deps.default_child_id,
+            name=candidate,
+        )
+    except ValueError:
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text="名前の形式が不正でした。",
+        )
+        return True
+    except Exception:
+        logger.exception("failed to upsert child name")
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text="設定の保存に失敗しました。少し時間を置いてからもう一度お試しください。",
+        )
+        return True
+    await deps.line_client.reply_text(
+        reply_token=event.reply_token,
+        text=f"✅ 子の名前を「{candidate}」に設定しました。",
+    )
+    return True
+
+
+async def _reply_with_optional_quick_reply(
+    event, deps: HandlerDeps, result
+) -> None:
+    """CommandResult.quick_reply があれば付けて、無ければ通常 text reply。"""
+    quick_reply = list(result.quick_reply) if result.quick_reply else None
+    await deps.line_client.reply_text(
+        reply_token=event.reply_token,
+        text=result.reply,
+        quick_reply=quick_reply,
+    )
 
 
 async def _handle_consulting_text(event: LineTextEvent, deps: HandlerDeps) -> None:
@@ -165,6 +256,8 @@ async def _handle_consulting_text(event: LineTextEvent, deps: HandlerDeps) -> No
         analytics_logger=deps.analytics_logger,
         family_id=deps.family_id,
         line_user_id=event.line_user_id,
+        child_repo=deps.child_repo,
+        child_id=deps.default_child_id,
     )
     reply = await consultant.respond(event.text or "")
     await deps.line_client.reply_text(reply_token=event.reply_token, text=reply)
@@ -263,11 +356,14 @@ async def _handle_postback(event: LinePostbackEvent, deps: HandlerDeps) -> None:
         repo=deps.repo,
         family_id=deps.family_id,
         now=deps.now_factory(),
+        postback_params=event.params,
+        child_repo=deps.child_repo,
+        default_child_id=deps.default_child_id,
     )
     if result.image_png is not None:
         await _send_image_or_fallback(event, deps, result)
         return
-    await deps.line_client.reply_text(reply_token=event.reply_token, text=result.reply)
+    await _reply_with_optional_quick_reply(event, deps, result)
 
 
 async def _handle_follow(event: LineFollowEvent, deps: HandlerDeps) -> None:

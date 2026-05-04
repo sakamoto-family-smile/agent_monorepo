@@ -8,7 +8,7 @@ stock-analysis-agent 流儀を踏襲しつつ、ぴよログ固有の差分:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from config import settings
@@ -44,13 +44,33 @@ class LinePostbackEvent:
     """リッチメニュー / クイックリプライ等から飛んでくる Postback イベント。
 
     `data` は URL クエリ風の文字列 (例: `action=chart&kind=milk&period=week`)。
-    Postback Router 側で解析してアクションに振り分ける。
+    `params` は datetime picker 等から付与されるユーザー選択値 (例:
+    `{"date": "2025-08-15"}`)。Postback Router 側で解析する。
     """
 
     event_type: str  # "postback"
     line_user_id: str
     reply_token: str
     data: str
+    params: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class QuickReplyAction:
+    """LINE Quick Reply の 1 ボタン仕様。
+
+    `kind="postback"` は固定 `data` を送る。`kind="datetimepicker"` は
+    ユーザーが選んだ日付 / 時刻を `params` 付きの postback で返す
+    (LINE 仕様: action.type=datetimepicker, mode=date|time|datetime)。
+    """
+
+    kind: str  # "postback" | "datetimepicker"
+    label: str
+    data: str
+    mode: str = "date"  # datetimepicker のみ
+    initial: str | None = None
+    max_value: str | None = None
+    min_value: str | None = None
 
 
 @dataclass(frozen=True)
@@ -82,7 +102,13 @@ class InvalidSignatureError(Exception):
 class LineBotClient(Protocol):
     def parse_events(self, *, body: bytes, signature: str) -> list[LineEvent]: ...
 
-    async def reply_text(self, *, reply_token: str, text: str) -> None: ...
+    async def reply_text(
+        self,
+        *,
+        reply_token: str,
+        text: str,
+        quick_reply: list[QuickReplyAction] | None = None,
+    ) -> None: ...
 
     async def reply_image(
         self, *, reply_token: str, image_url: str, preview_url: str | None = None
@@ -176,12 +202,25 @@ class LineBotSdkClient:
             if isinstance(ev, PostbackEvent):
                 postback = getattr(ev, "postback", None)
                 data = getattr(postback, "data", "") if postback else ""
+                params_obj = getattr(postback, "params", None) if postback else None
+                params: dict[str, str] = {}
+                if params_obj is not None:
+                    # SDK は属性 (model) または dict のいずれか。両対応。
+                    for key in ("date", "time", "datetime"):
+                        val = (
+                            params_obj.get(key)
+                            if isinstance(params_obj, dict)
+                            else getattr(params_obj, key, None)
+                        )
+                        if val:
+                            params[key] = str(val)
                 result.append(
                     LinePostbackEvent(
                         event_type="postback",
                         line_user_id=user_id,
                         reply_token=reply_token,
                         data=data or "",
+                        params=params,
                     )
                 )
                 continue
@@ -203,18 +242,63 @@ class LineBotSdkClient:
             return text
         return text[:limit] + "\n…(以下省略)"
 
-    async def reply_text(self, *, reply_token: str, text: str) -> None:
+    async def reply_text(
+        self,
+        *,
+        reply_token: str,
+        text: str,
+        quick_reply: list[QuickReplyAction] | None = None,
+    ) -> None:
         from linebot.v3.messaging import ReplyMessageRequest, TextMessage
 
         if not reply_token:
             logger.warning("reply_text called without reply_token; skipping")
             return
+        message = TextMessage(text=self._trim_text(text))
+        if quick_reply:
+            message.quick_reply = self._build_quick_reply(quick_reply)
         await self._messaging.reply_message(
-            ReplyMessageRequest(
-                reply_token=reply_token,
-                messages=[TextMessage(text=self._trim_text(text))],
-            )
+            ReplyMessageRequest(reply_token=reply_token, messages=[message])
         )
+
+    @staticmethod
+    def _build_quick_reply(actions: list[QuickReplyAction]):
+        """QuickReplyAction (DTO) → SDK QuickReply 構造体への変換。
+
+        LINE 仕様で 1 トーク内に最大 13 アイテム。本アプリでは 3〜4 個しか
+        使わないので length 制約のチェックは省略 (将来拡張時に追加)。
+        """
+        from linebot.v3.messaging import (
+            DatetimePickerAction,
+            PostbackAction,
+            QuickReply,
+            QuickReplyItem,
+        )
+
+        items = []
+        for a in actions:
+            if a.kind == "datetimepicker":
+                action = DatetimePickerAction(
+                    type="datetimepicker",
+                    label=a.label,
+                    data=a.data,
+                    mode=a.mode,
+                    initial=a.initial,
+                    max=a.max_value,
+                    min=a.min_value,
+                )
+            elif a.kind == "postback":
+                action = PostbackAction(
+                    type="postback",
+                    label=a.label,
+                    data=a.data,
+                    display_text=a.label,
+                )
+            else:
+                logger.warning("unknown QuickReplyAction kind: %s", a.kind)
+                continue
+            items.append(QuickReplyItem(type="action", action=action))
+        return QuickReply(items=items)
 
     async def reply_image(
         self, *, reply_token: str, image_url: str, preview_url: str | None = None

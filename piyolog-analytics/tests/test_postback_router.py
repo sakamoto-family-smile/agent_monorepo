@@ -245,3 +245,149 @@ async def test_postback_empty_data() -> None:
 
     result = await handle_postback("", repo=_FakeRepo(), family_id="f1", now=_now())
     assert result.reply == UNKNOWN_HINT
+
+
+# ---- Phase 4-B: settings UI ----
+
+
+class _FakeChildRepo:
+    def __init__(self, *, birth_date: str | None = None, name: str | None = None) -> None:
+        self._birth_date = birth_date
+        self._name = name
+        self.upsert_birth_date_calls: list[tuple[str, str, str]] = []
+
+    async def get(self, *, family_id: str, child_id: str):
+        if self._birth_date is None and self._name is None:
+            return None
+        from repositories.child_repo import Child
+
+        return Child(
+            family_id=family_id,
+            child_id=child_id,
+            birth_date=self._birth_date,
+            name=self._name,
+            updated_at="2026-05-05T00:00:00+00:00",
+        )
+
+    async def upsert_birth_date(
+        self, *, family_id: str, child_id: str, birth_date: str
+    ):
+        from repositories.child_repo import Child, is_valid_birth_date
+
+        if not is_valid_birth_date(birth_date):
+            raise ValueError(birth_date)
+        self.upsert_birth_date_calls.append((family_id, child_id, birth_date))
+        self._birth_date = birth_date
+        return Child(
+            family_id=family_id,
+            child_id=child_id,
+            birth_date=birth_date,
+            name=self._name,
+            updated_at="2026-05-05T00:00:00+00:00",
+        )
+
+
+async def test_postback_settings_returns_quick_reply_with_no_initial() -> None:
+    from services.postback_router import SETTINGS_PROMPT, handle_postback
+
+    cr = _FakeChildRepo()
+    result = await handle_postback(
+        "action=settings", repo=_FakeRepo(), family_id="f1", child_repo=cr, now=_now()
+    )
+    assert result.reply == SETTINGS_PROMPT
+    assert len(result.quick_reply) == 3
+    # 1 つ目は datetime picker
+    dp = result.quick_reply[0]
+    assert dp.kind == "datetimepicker"
+    assert dp.mode == "date"
+    assert dp.data == "action=child_set_birth_date"
+    assert dp.initial is None  # 未登録なので initial なし
+    # 2 つ目は postback (名前)
+    assert result.quick_reply[1].kind == "postback"
+    assert result.quick_reply[1].data == "action=child_set_name"
+    # 3 つ目は postback (キャンセル)
+    assert result.quick_reply[2].data == "action=settings_cancel"
+
+
+async def test_postback_settings_uses_existing_birth_date_as_initial() -> None:
+    from services.postback_router import handle_postback
+
+    cr = _FakeChildRepo(birth_date="2025-08-15")
+    result = await handle_postback(
+        "action=settings", repo=_FakeRepo(), family_id="f1", child_repo=cr, now=_now()
+    )
+    assert result.quick_reply[0].initial == "2025-08-15"
+
+
+async def test_postback_settings_cancel() -> None:
+    from services.postback_router import SETTINGS_CANCELLED, handle_postback
+
+    result = await handle_postback(
+        "action=settings_cancel", repo=_FakeRepo(), family_id="f1", now=_now()
+    )
+    assert result.reply == SETTINGS_CANCELLED
+
+
+async def test_postback_child_set_birth_date_persists() -> None:
+    from services.postback_router import handle_postback
+
+    cr = _FakeChildRepo()
+    result = await handle_postback(
+        "action=child_set_birth_date",
+        repo=_FakeRepo(),
+        family_id="f1",
+        postback_params={"date": "2025-08-15"},
+        child_repo=cr,
+        default_child_id="default",
+        now=_now(),
+    )
+    assert "2025-08-15" in result.reply
+    assert cr.upsert_birth_date_calls == [("f1", "default", "2025-08-15")]
+
+
+async def test_postback_child_set_birth_date_rejects_invalid_date() -> None:
+    from services.postback_router import (
+        SETTINGS_BIRTH_DATE_INVALID,
+        handle_postback,
+    )
+
+    cr = _FakeChildRepo()
+    result = await handle_postback(
+        "action=child_set_birth_date",
+        repo=_FakeRepo(),
+        family_id="f1",
+        postback_params={"date": "bad-date"},
+        child_repo=cr,
+        now=_now(),
+    )
+    assert result.reply == SETTINGS_BIRTH_DATE_INVALID
+    assert cr.upsert_birth_date_calls == []
+
+
+async def test_postback_child_set_birth_date_without_repo() -> None:
+    from services.postback_router import (
+        SETTINGS_REPO_UNAVAILABLE,
+        handle_postback,
+    )
+
+    result = await handle_postback(
+        "action=child_set_birth_date",
+        repo=_FakeRepo(),
+        family_id="f1",
+        postback_params={"date": "2025-08-15"},
+        child_repo=None,
+        now=_now(),
+    )
+    assert result.reply == SETTINGS_REPO_UNAVAILABLE
+
+
+async def test_postback_child_set_name_returns_prompt() -> None:
+    from services.postback_router import SETTINGS_NAME_PROMPT, handle_postback
+
+    result = await handle_postback(
+        "action=child_set_name",
+        repo=_FakeRepo(),
+        family_id="f1",
+        now=_now(),
+    )
+    assert result.reply == SETTINGS_NAME_PROMPT

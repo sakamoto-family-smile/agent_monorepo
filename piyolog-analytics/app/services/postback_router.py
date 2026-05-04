@@ -6,8 +6,12 @@ Postback `data` は URL クエリ文字列形式。例:
     action=chart&kind=dashboard&period_from=2026-02-01&period_to=2026-02-28
     action=help
     action=undo
-    action=consult&op=enter        # Phase 3 stub
-    action=consult&op=exit         # Phase 3 stub
+    action=consult&op=enter
+    action=consult&op=exit
+    action=settings                   # Phase 4-B: 設定 UI を開く
+    action=child_set_birth_date       # datetime picker の params.date を保存
+    action=child_set_name             # 名前入力モード開始 (text 待ち受け)
+    action=settings_cancel            # 設定 UI を閉じる
 
 未知の action / 不正パラメータは text fallback (UNKNOWN_HINT 等) で返す。
 """
@@ -19,6 +23,7 @@ import re
 from datetime import datetime
 from urllib.parse import parse_qs
 
+from repositories.child_repo import ChildRepo, is_valid_birth_date
 from repositories.event_repo import EventRepo
 from services.analytics import resolve_period
 from services.command_router import (
@@ -32,6 +37,7 @@ from services.command_router import (
     render_chart,
     render_summary,
 )
+from services.line_client import QuickReplyAction
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +48,48 @@ CONSULT_STUB_REPLY = (
     "💬 相談機能は Phase 3 で実装予定です。\n現在はサマリ・グラフ・取り込みのみ利用できます。"
 )
 
+# ---- Phase 4-B: 設定 UI ----
+
+SETTINGS_PROMPT = (
+    "⚙️ 設定メニュー\n"
+    "下のボタンから変更したい項目を選んでください。"
+)
+SETTINGS_CANCELLED = "設定を閉じました。"
+SETTINGS_NAME_PROMPT = (
+    "✏️ 子の名前を変更します。\n"
+    "「名前: たろう」のように送ってください (32 文字以内)。\n"
+    "キャンセルする場合は「キャンセル」と送ってください。"
+)
+SETTINGS_BIRTH_DATE_INVALID = "日付の形式が不正でした。もう一度お試しください。"
+SETTINGS_REPO_UNAVAILABLE = "設定機能は現在利用できません。少し時間を置いてからもう一度お試しください。"
+
+
+def build_settings_quick_reply(*, current_birth_date: str | None) -> tuple[QuickReplyAction, ...]:
+    """⚙️ 設定 UI 用の Quick Reply ボタン群を組み立てる。
+
+    `current_birth_date` が DB に既登録なら datetime picker の `initial` に
+    その値を入れ、未登録なら省略 (LINE 側で当日が選ばれる)。
+    """
+    return (
+        QuickReplyAction(
+            kind="datetimepicker",
+            label="📅 子の生年月日",
+            data="action=child_set_birth_date",
+            mode="date",
+            initial=current_birth_date if current_birth_date else None,
+        ),
+        QuickReplyAction(
+            kind="postback",
+            label="✏️ 子の名前",
+            data="action=child_set_name",
+        ),
+        QuickReplyAction(
+            kind="postback",
+            label="キャンセル",
+            data="action=settings_cancel",
+        ),
+    )
+
 
 async def handle_postback(
     data: str,
@@ -49,10 +97,17 @@ async def handle_postback(
     repo: EventRepo,
     family_id: str,
     now: datetime | None = None,
+    postback_params: dict[str, str] | None = None,
+    child_repo: ChildRepo | None = None,
+    default_child_id: str = "default",
 ) -> CommandResult:
     """Postback `data` を解析して対応するアクションを実行。
 
     解析失敗・未知の action は UNKNOWN_HINT。
+
+    Phase 4-B 追加: `postback_params` (datetime picker の date 等) と
+    `child_repo` (children テーブルの DAO) を受け取る。Phase 2 / 3 までの
+    呼び出し側との後方互換のため、両方とも optional。
     """
     params = _parse_data(data)
     action = params.get("action", "")
@@ -86,8 +141,71 @@ async def handle_postback(
         # Phase 3 で実装予定。今は stub。
         return CommandResult(reply=CONSULT_STUB_REPLY)
 
+    if action == "settings":
+        return await _settings_open(
+            child_repo=child_repo, family_id=family_id, default_child_id=default_child_id
+        )
+
+    if action == "settings_cancel":
+        return CommandResult(reply=SETTINGS_CANCELLED)
+
+    if action == "child_set_birth_date":
+        return await _settings_set_birth_date(
+            postback_params=postback_params or {},
+            child_repo=child_repo,
+            family_id=family_id,
+            default_child_id=default_child_id,
+        )
+
+    if action == "child_set_name":
+        # 実際の保存は line_handler 側のテキスト待ち受けで行う。
+        return CommandResult(reply=SETTINGS_NAME_PROMPT)
+
     logger.info("unknown postback action: data=%r", data)
     return CommandResult(reply=UNKNOWN_HINT)
+
+
+async def _settings_open(
+    *, child_repo: ChildRepo | None, family_id: str, default_child_id: str
+) -> CommandResult:
+    """⚙️ 設定 UI: Quick Reply で 3 ボタンを返す。"""
+    current_birth_date: str | None = None
+    if child_repo is not None:
+        try:
+            child = await child_repo.get(family_id=family_id, child_id=default_child_id)
+            if child and child.birth_date:
+                current_birth_date = child.birth_date
+        except Exception:
+            logger.exception("failed to fetch child for settings open")
+    return CommandResult(
+        reply=SETTINGS_PROMPT,
+        quick_reply=build_settings_quick_reply(current_birth_date=current_birth_date),
+    )
+
+
+async def _settings_set_birth_date(
+    *,
+    postback_params: dict[str, str],
+    child_repo: ChildRepo | None,
+    family_id: str,
+    default_child_id: str,
+) -> CommandResult:
+    if child_repo is None:
+        logger.warning("child_set_birth_date: child_repo not wired")
+        return CommandResult(reply=SETTINGS_REPO_UNAVAILABLE)
+    date_value = postback_params.get("date", "")
+    if not is_valid_birth_date(date_value):
+        return CommandResult(reply=SETTINGS_BIRTH_DATE_INVALID)
+    try:
+        await child_repo.upsert_birth_date(
+            family_id=family_id, child_id=default_child_id, birth_date=date_value
+        )
+    except ValueError:
+        return CommandResult(reply=SETTINGS_BIRTH_DATE_INVALID)
+    except Exception:
+        logger.exception("failed to upsert birth_date")
+        return CommandResult(reply=SETTINGS_REPO_UNAVAILABLE)
+    return CommandResult(reply=f"✅ 子の生年月日を {date_value} に設定しました。")
 
 
 def _parse_data(data: str) -> dict[str, str]:
@@ -166,5 +284,11 @@ async def _chart_action(
 __all__ = [
     "CHART_NO_DATA_HINT",
     "CONSULT_STUB_REPLY",
+    "SETTINGS_BIRTH_DATE_INVALID",
+    "SETTINGS_CANCELLED",
+    "SETTINGS_NAME_PROMPT",
+    "SETTINGS_PROMPT",
+    "SETTINGS_REPO_UNAVAILABLE",
+    "build_settings_quick_reply",
     "handle_postback",
 ]

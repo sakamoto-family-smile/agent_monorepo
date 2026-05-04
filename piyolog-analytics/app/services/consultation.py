@@ -96,6 +96,8 @@ class Consultation:
         family_id: str,
         line_user_id: str,
         llm_client: GeminiClient | None = None,
+        child_repo=None,
+        child_id: str = "default",
     ) -> None:
         self._repo = repo
         self._session_repo = session_repo
@@ -104,6 +106,9 @@ class Consultation:
         self._line_user_id = line_user_id
         # llm_client が None なら lazy 構築 (テストで差し替え可能)
         self._llm = llm_client
+        # Phase 4-B: 子情報 DB (env が空なら DB から month-age を再構築)
+        self._child_repo = child_repo
+        self._child_id = child_id
 
     async def respond(self, user_message: str) -> str:
         """ユーザの 1 発話を処理し、最終応答テキストを返す。
@@ -147,6 +152,8 @@ class Consultation:
             repo=self._repo,
             family_id=self._family_id,
             birth_date=settings.child_birth_date,
+            child_repo=self._child_repo,
+            child_id=self._child_id,
         )
         history = await self._session_repo.fetch_history(
             conversation_id=cid, limit=settings.vertex_history_window

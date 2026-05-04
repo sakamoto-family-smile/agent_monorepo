@@ -56,11 +56,31 @@ def test_build_richmenu_payload_structure() -> None:
 
 def test_payload_postback_data_matches_postback_router_actions() -> None:
     """各セルの postback_data が postback_router.handle_postback で
-    エラーにならないことを軽く検証 (同じ syntax を持つ)。"""
+    エラーにならないことを軽く検証 (同じ syntax を持つ)。
+
+    Phase 4-B: ❓ヘルプ → ⚙️設定 に置換されたため `settings` も含む。
+    """
     from setup_richmenu import NORMAL_CELLS
 
     actions = {c.postback_data.split("&")[0].split("=")[1] for c in NORMAL_CELLS}
-    assert actions <= {"summary", "chart", "consult", "help"}
+    assert actions <= {"summary", "chart", "consult", "settings"}
+
+
+def test_normal_cells_replaces_help_with_settings() -> None:
+    """Phase 4-B: ヘルプ ボタンは廃止され、⚙️設定 が入る。"""
+    from setup_richmenu import NORMAL_CELLS
+
+    labels = {c.label for c in NORMAL_CELLS}
+    assert "設定" in labels
+    assert "ヘルプ" not in labels
+
+
+def test_consulting_cells_replaces_help_with_settings() -> None:
+    from setup_richmenu import CONSULTING_CELLS
+
+    labels = {c.label for c in CONSULTING_CELLS}
+    assert "設定" in labels
+    assert "ヘルプ" not in labels
 
 
 def test_main_dry_run_creates_image(tmp_path) -> None:

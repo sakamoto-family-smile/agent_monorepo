@@ -121,6 +121,7 @@ async def line_webhook(
 
     repo = get_repo()
     await repo.initialize()
+    from repositories.child_repo import ChildRepo
     from repositories.session_repo import SessionRepo
     from services.image_store import get_image_store
 
@@ -138,6 +139,8 @@ async def line_webhook(
         session_repo=SessionRepo(engine=repo.engine),
         analytics_logger=al,
         rich_menu_id_consulting=settings.rich_menu_id_consulting,
+        # Phase 4-B: 子情報 DB
+        child_repo=ChildRepo(engine=repo.engine),
         now_factory=lambda: datetime.now(UTC),
     )
 
