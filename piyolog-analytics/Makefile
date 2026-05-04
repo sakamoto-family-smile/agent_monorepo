@@ -1,7 +1,7 @@
 .PHONY: install test lint format check run migrate migrate-down migrate-revision \
         docker-build docker-run docker-shell cloudbuild-submit deploy-cloud-run \
         tf-init tf-fmt tf-fmt-check tf-validate tf-plan tf-apply tf-output-env \
-        bootstrap-gcp help
+        bootstrap-gcp backup restore help
 
 IMAGE_NAME ?= piyolog-analytics
 IMAGE_TAG ?= local
@@ -122,6 +122,22 @@ tf-output-env:
 	  > ../$(TF_ENV_FILE)
 	@echo "[tf-output-env] wrote $(TF_ENV_FILE)"
 
+# ---- Phase 4-A: Backup / Restore ----
+# Cloud SQL を GCS bucket にバックアップ / 復元する。tf-destroy 前に backup
+# しておけば、再 apply 後に restore で全テーブル (events / sessions /
+# conversations / messages) が復元される。
+#
+# 必須 env: PIYOLOG_GCP_PROJECT
+# 任意 env: PIYOLOG_NAME_PREFIX (default: piyolog),
+#           PIYOLOG_CLOUD_SQL_INSTANCE_NAME (default: piyolog),
+#           PIYOLOG_DB_NAME (default: piyolog)
+
+backup:
+	bash scripts/backup_data.sh
+
+restore:
+	bash scripts/restore_data.sh
+
 help:
 	@echo "Targets:"
 	@echo "  install              - uv sync"
@@ -146,3 +162,7 @@ help:
 	@echo "  tf-validate          - terraform init -backend=false + validate (no creds)"
 	@echo "  tf-plan / tf-apply   - 通常の plan / apply (要 backend.tf + tfvars)"
 	@echo "  tf-output-env        - terraform output env_for_deploy -> $(TF_ENV_FILE)"
+	@echo ""
+	@echo "Targets (Backup / Restore、Phase 4-A):"
+	@echo "  backup               - Cloud SQL を GCS バケットにバックアップ"
+	@echo "  restore              - 最新 backup を Cloud SQL に復元 (なければ skip)"

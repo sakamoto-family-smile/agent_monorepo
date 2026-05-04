@@ -32,3 +32,9 @@ cloud_sql_deletion_protection = true
 create_line_secret_versions = false
 # line_channel_secret_value       = ""
 # line_channel_access_token_value = ""
+
+# ---- Phase 4-A: Backup bucket ----
+# `make tf-destroy` 前に `make backup` で Cloud SQL を GCS にバックアップ →
+# 再 apply 後に `make restore` で復元することで、課金停止サイクルでデータが消えない。
+backup_retention_days       = 90
+backup_bucket_force_destroy = false  # 完全削除時に bucket も消したい場合は true
