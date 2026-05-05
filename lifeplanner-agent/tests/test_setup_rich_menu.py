@@ -17,37 +17,60 @@ if str(_SCRIPT_DIR) not in sys.path:
 import setup_rich_menu as sm  # noqa: E402
 
 
-def test_build_menu_has_three_equal_buttons():
+def test_build_menu_has_six_buttons_3x2_grid():
+    """PR 2 で 6 ボタン (3x2 grid) に拡張。"""
     menu = sm.build_menu_request(liff_id=None)
-    assert menu["size"] == {"width": 2500, "height": 843}
-    assert len(menu["areas"]) == 3
-    # 3 ボタンの x 座標が 0 / 833 / 1666
-    xs = [a["bounds"]["x"] for a in menu["areas"]]
-    assert xs == [0, 833, 1666]
-    # 最後のボタンだけ残り幅を吸収して幅が +1 等ずれる可能性があるので合計は 2500
-    total = sum(a["bounds"]["width"] for a in menu["areas"])
-    assert total == 2500
+    assert menu["size"] == {"width": 2500, "height": 1686}
+    assert len(menu["areas"]) == 6
+    # 上段 3 ボタン (y=0)、下段 3 ボタン (y=843)
+    rows = {area["bounds"]["y"] for area in menu["areas"]}
+    assert rows == {0, 843}
+    # 各列の x 座標が 0 / 833 / 1666
+    top_row_xs = sorted(
+        a["bounds"]["x"] for a in menu["areas"] if a["bounds"]["y"] == 0
+    )
+    assert top_row_xs == [0, 833, 1666]
+    # 横方向の合計幅は 2500 (最右列が誤差吸収)
+    total_top = sum(
+        a["bounds"]["width"] for a in menu["areas"] if a["bounds"]["y"] == 0
+    )
+    assert total_top == 2500
 
 
 def test_build_menu_without_liff_uses_help_fallback_for_linking():
     menu = sm.build_menu_request(liff_id=None)
-    third = menu["areas"][2]
-    assert third["action"] == {"type": "message", "text": "/help"}
+    # 連携ボタンは BUTTONS の placeholder なので index で特定 (PR 2: index=4)
+    link_btn = menu["areas"][4]
+    assert link_btn["action"] == {"type": "message", "text": "/help"}
 
 
 def test_build_menu_with_liff_uses_uri_action_to_liff_url():
     menu = sm.build_menu_request(liff_id="1234567890-abcdefgh")
-    third = menu["areas"][2]
-    assert third["action"] == {
+    link_btn = menu["areas"][4]
+    assert link_btn["action"] == {
         "type": "uri",
         "uri": "https://liff.line.me/1234567890-abcdefgh",
     }
 
 
-def test_build_menu_scenarios_button_is_message_command():
+def test_build_menu_includes_pr2_analysis_buttons():
+    """PR 2: 上段 3 ボタンが /summary /networth /anomalies。"""
     menu = sm.build_menu_request(liff_id=None)
-    first = menu["areas"][0]
-    assert first["action"] == {"type": "message", "text": "/scenarios"}
+    actions_top_row = [
+        a["action"]["text"]
+        for a in menu["areas"]
+        if a["bounds"]["y"] == 0 and a["action"]["type"] == "message"
+    ]
+    assert "/summary" in actions_top_row
+    assert "/networth" in actions_top_row
+    assert "/anomalies" in actions_top_row
+
+
+def test_build_menu_scenarios_button_is_message_command():
+    """PR 2: シナリオボタンは下段の最初 (index=3)。"""
+    menu = sm.build_menu_request(liff_id=None)
+    scenarios_btn = menu["areas"][3]
+    assert scenarios_btn["action"] == {"type": "message", "text": "/scenarios"}
 
 
 def test_render_menu_image_returns_valid_png_bytes():
