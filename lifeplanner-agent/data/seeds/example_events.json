@@ -1,5 +1,6 @@
 {
   "_comment": "ライフイベントの一括投入用サンプル。`scripts/seed_events.py --scenario-id <id> --file <this>` で取り込む。",
+  "_note_granularity": "現状は年単位 (start_year のみ、月情報なし)。住宅購入を 2028/7 に設定したい場合でも 2028 年に 12 ヶ月分のローン返済が計上される。月単位プロレートは PR 1.5 or PR 4 (LINE イベント設定 UI) で追加予定。",
   "events": [
     {
       "event_type": "E01",

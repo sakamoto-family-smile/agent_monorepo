@@ -1,4 +1,9 @@
-"""/api/scenarios/{id}/simulate — シナリオ実行と結果返却。"""
+"""/api/scenarios/{id}/simulate — シナリオ実行と結果返却。
+
+時間粒度は **年単位**。月情報 (start_month) は未実装のため、購入月・
+復職月などの初年度プロレートは反映されない (30 年合計には影響なし、
+単年 CF は最大数十万円ズレうる)。詳細は `agents.simulator` の docstring。
+"""
 
 from __future__ import annotations
 
