@@ -18,6 +18,10 @@ GCS bucket: gs://<PROJECT>-piyolog-backups
 
 ## バックアップ対象（Cloud SQL `piyolog` database 内の全テーブル）
 
+`gcloud sql export sql --database=piyolog` を `--table` 指定なしで実行する
+ため、将来追加されるテーブルも自動的に含まれる (alembic migration を
+適用すれば DDL ごと dump される)。現状の対象:
+
 | テーブル | 内容 |
 |---|---|
 | `piyolog_events` | ぴよログイベント（授乳・睡眠・排泄・体重等）|
@@ -25,6 +29,8 @@ GCS bucket: gs://<PROJECT>-piyolog-backups
 | `sessions` | LINE user 単位の現在モード（normal / consulting）|
 | `conversations` | 1 つの相談セッション |
 | `conversation_messages` | 各メッセージ（user / assistant / tool_use / tool_result）|
+| `children` | 子の生年月日 / 名前 (Phase 4-B、⚙️設定 から書き込まれる)|
+| `alembic_version` | alembic migration のバージョン管理 |
 
 ## 必要な権限
 
