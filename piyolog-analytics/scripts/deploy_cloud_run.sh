@@ -76,7 +76,9 @@ ENV_VARS=(
 
 # `FAMILY_USER_IDS` は CSV で `,` を含むため、別途 `--update-env-vars` で
 # delimiter 指定で渡す。`^@^` を区切り文字に使うのが gcloud 推奨。
-SET_ENV_DELIM="--set-env-vars=^@^FAMILY_USER_IDS=${PIYOLOG_FAMILY_USER_IDS}"
+# (gcloud は --set-env-vars と --update-env-vars の併用を排他とするので、
+#  両方とも --update-env-vars を使う。複数指定 OK。)
+SET_ENV_DELIM="--update-env-vars=^@^FAMILY_USER_IDS=${PIYOLOG_FAMILY_USER_IDS}"
 
 gcloud run deploy "${SERVICE_NAME}" \
   --project="${PIYOLOG_GCP_PROJECT}" \
