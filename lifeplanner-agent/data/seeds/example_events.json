@@ -1,0 +1,47 @@
+{
+  "_comment": "ライフイベントの一括投入用サンプル。`scripts/seed_events.py --scenario-id <id> --file <this>` で取り込む。",
+  "events": [
+    {
+      "event_type": "E01",
+      "start_year": 2026,
+      "params": {
+        "birth_year": 2026,
+        "is_third_or_later": false,
+        "elementary_private": false,
+        "junior_high_private": false,
+        "high_school_private": false,
+        "university_track": "national_public",
+        "use_childcare": true,
+        "parental_leave_parent_salary": 4000000,
+        "parental_leave_months": 12,
+        "household_income_for_childcare": 7000000
+      }
+    },
+    {
+      "event_type": "E02",
+      "start_year": 2028,
+      "params": {
+        "purchase_year": 2028,
+        "price": 60000000,
+        "down_payment": 10000000,
+        "loan_term_years": 35,
+        "interest_rate": 0.014,
+        "property_type": "condo",
+        "property_condition": "new",
+        "energy_class": "general",
+        "include_mortgage_credit": true
+      }
+    },
+    {
+      "event_type": "E04",
+      "start_year": 2030,
+      "params": {
+        "first_purchase_year": 2030,
+        "vehicle_class": "compact",
+        "price": 2500000,
+        "hold_years": 7,
+        "repeat_replacement": true
+      }
+    }
+  ]
+}

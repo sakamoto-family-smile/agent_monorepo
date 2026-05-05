@@ -24,9 +24,12 @@ class CashFlowDelta:
     year: 西暦
     category: 分類
     label: 人間可読なラベル (UI 表示、監査ログ用)
+    event_type: 由来イベント種別 ("E01" / "E02" / "E04" 等)。
+        catalog 関数は空のまま生成し、scenario_runner が後付けする運用。
     """
 
     year: int
     amount: Decimal
     category: EventCategory
     label: str
+    event_type: str = ""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 
 from agents.event_catalog import (
@@ -17,6 +18,7 @@ from agents.simulator import (
     HouseholdProfile,
     SimulationAssumptions,
     SimulationResult,
+    _year_row_to_dict,
     run_projection,
 )
 from models.db import LifeEvent, Scenario
@@ -33,10 +35,15 @@ def _dec(v, default: Decimal = Decimal(0)) -> Decimal:
 
 
 def _build_profile(assumptions: dict) -> HouseholdProfile:
+    raw_baseline = assumptions.get("expense_baseline_by_category")
+    baseline_dict: dict[str, Decimal] | None = None
+    if isinstance(raw_baseline, dict) and raw_baseline:
+        baseline_dict = {str(k): _dec(v) for k, v in raw_baseline.items()}
     return HouseholdProfile(
         primary_salary=_dec(assumptions.get("primary_salary")),
         spouse_salary=_dec(assumptions.get("spouse_salary")),
         base_annual_expense=_dec(assumptions.get("base_annual_expense", 3_600_000)),
+        expense_baseline_by_category=baseline_dict,
         initial_net_worth=_dec(assumptions.get("initial_net_worth")),
     )
 
@@ -94,21 +101,26 @@ def _expand_vehicle_params(params: dict, start_year: int) -> VehicleEventParams:
 
 
 def _expand_events(events: list[LifeEvent], horizon_years: int) -> list[CashFlowDelta]:
-    """全イベントを CashFlowDelta 列に展開する。"""
+    """全イベントを CashFlowDelta 列に展開する。
+
+    catalog 関数は CashFlowDelta(event_type="") で生成するので、ここで
+    event_type を付与し直す (UI の event_breakdown で出典を表示するため)。
+    """
     deltas: list[CashFlowDelta] = []
     for e in events:
         if e.event_type == "E01":
             params = _expand_birth_params(e.params, e.start_year)
-            deltas.extend(expand_birth_event(params, horizon_years=horizon_years))
+            expanded = expand_birth_event(params, horizon_years=horizon_years)
         elif e.event_type == "E02":
             housing = _expand_housing_params(e.params, e.start_year)
-            deltas.extend(expand_housing_event(housing, horizon_years=horizon_years))
+            expanded = expand_housing_event(housing, horizon_years=horizon_years)
         elif e.event_type == "E04":
             vehicle = _expand_vehicle_params(e.params, e.start_year)
-            deltas.extend(expand_vehicle_event(vehicle, horizon_years=horizon_years))
+            expanded = expand_vehicle_event(vehicle, horizon_years=horizon_years)
         else:
-            # 未サポートのイベントは現状スキップ(E03/E05-E12 は Phase 4)
+            # 未サポートのイベントは現状スキップ(E03/E05-E12 は PR 5)
             continue
+        deltas.extend(replace(d, event_type=e.event_type) for d in expanded)
     return deltas
 
 
@@ -127,7 +139,7 @@ async def simulate_scenario(
     rows_payload = [
         {
             "year": row.year,
-            "metrics": {k: str(v) if isinstance(v, Decimal) else v for k, v in row.__dict__.items()},
+            "metrics": _year_row_to_dict(row),
         }
         for row in result.rows
     ]

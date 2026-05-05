@@ -17,6 +17,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/scenarios", tags=["simulate"])
 
 
+class EventLineOut(BaseModel):
+    """イベント明細 1 行 (PR 1 で追加)。"""
+
+    event_type: str
+    category: str
+    label: str
+    amount: str
+
+
 class YearMetricsOut(BaseModel):
     """1 年分のシミュレーション結果。Decimal は str で返却。"""
 
@@ -27,7 +36,9 @@ class YearMetricsOut(BaseModel):
     resident_tax: str
     take_home: str
     living_expense: str
+    expense_breakdown: dict[str, str] = {}      # PR 1 追加
     event_net: str
+    event_breakdown: list[EventLineOut] = []    # PR 1 追加
     annual_net: str
     investment_gain: str
     net_worth_end: str
@@ -88,7 +99,17 @@ async def simulate_endpoint(
                 resident_tax=str(row.resident_tax),
                 take_home=str(row.take_home),
                 living_expense=str(row.living_expense),
+                expense_breakdown={k: str(v) for k, v in row.expense_breakdown.items()},
                 event_net=str(row.event_net),
+                event_breakdown=[
+                    EventLineOut(
+                        event_type=line.event_type,
+                        category=line.category,
+                        label=line.label,
+                        amount=str(line.amount),
+                    )
+                    for line in row.event_breakdown
+                ],
                 annual_net=str(row.annual_net),
                 investment_gain=str(row.investment_gain),
                 net_worth_end=str(row.net_worth_end),
