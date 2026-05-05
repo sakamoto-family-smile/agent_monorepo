@@ -41,6 +41,10 @@ HELP_TEXT = (
     "  ・ダッシュボード / dashboard — 4 種を 1 枚に集約\n"
     "  ※ 期間指定: 例 ミルク 期間 2026-02-01 2026-02-28\n"
     "\n"
+    "■ 設定 (Phase 4-B)\n"
+    "  ・⚙️ 設定 ボタン — 子の生年月日 / 名前を登録\n"
+    "  ・名前: たろう — 子の名前を直接設定\n"
+    "\n"
     "■ その他\n"
     "  ・ヘルプ / help — このメッセージ\n"
     "\n"
@@ -94,11 +98,13 @@ class CommandResult:
     reply: テキスト応答 (画像送信時は alt 兼キャプション)
     image_png: 画像本体 (PNG bytes)。None ならテキストのみ
     chart_kind: 画像種別 (ログ・metrics 用、optional)
+    quick_reply: テキスト応答に付ける Quick Reply ボタン (Phase 4-B 設定 UI 用)
     """
 
     reply: str
     image_png: bytes | None = None
     chart_kind: str | None = None
+    quick_reply: tuple = ()  # tuple[QuickReplyAction, ...] (frozen friendly)
 
 
 def _normalize(raw: str) -> tuple[str, list[str]]:

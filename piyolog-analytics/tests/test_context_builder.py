@@ -95,3 +95,61 @@ async def test_build_context_72h_subset_of_7d() -> None:
     text = await build_recent_context(repo=repo, family_id="f1", now=now)
     # 72h section に 1 件 (120 ml), 7d section に 2 件 (220 ml) が反映される
     assert "120" in text or "220" in text
+
+
+# ---- Phase 4-B: ChildRepo fallback ----
+
+
+class _FakeChildRepo:
+    def __init__(self, *, birth_date: str | None, name: str | None) -> None:
+        from repositories.child_repo import Child
+
+        self._child = Child(
+            family_id="f1",
+            child_id="default",
+            birth_date=birth_date,
+            name=name,
+            updated_at="2026-05-05T00:00:00+00:00",
+        )
+
+    async def get(self, *, family_id: str, child_id: str):
+        return self._child
+
+
+@pytest.mark.asyncio
+async def test_build_context_uses_child_repo() -> None:
+    """children テーブルから生年月日 / 名前を取得して month-age を計算。"""
+    now = datetime(2026, 5, 4, 10, 0, tzinfo=JST)
+    repo = _FakeRepo({})
+    cr = _FakeChildRepo(birth_date="2026-04-01", name="たろう")
+    text = await build_recent_context(repo=repo, family_id="f1", now=now, child_repo=cr)
+    # name が context に出る
+    assert "たろう" in text
+    # 月齢計算が走る (約 1 か月)
+    assert "1か月" in text or "0か月" in text
+
+
+@pytest.mark.asyncio
+async def test_build_context_no_child_repo_no_age() -> None:
+    """child_repo 未配線なら月齢は不明扱い (env からは取らない)。"""
+    now = datetime(2026, 5, 4, 10, 0, tzinfo=JST)
+    repo = _FakeRepo({})
+    text = await build_recent_context(repo=repo, family_id="f1", now=now)
+    assert "月齢: 不明" in text
+
+
+@pytest.mark.asyncio
+async def test_build_context_explicit_arg_overrides_child_repo() -> None:
+    """テスト用に直接渡した `birth_date` 引数は DB より優先される。"""
+    now = datetime(2026, 5, 4, 10, 0, tzinfo=JST)
+    repo = _FakeRepo({})
+    cr = _FakeChildRepo(birth_date="2025-01-01", name="DB太郎")
+    text = await build_recent_context(
+        repo=repo,
+        family_id="f1",
+        now=now,
+        birth_date="2026-04-01",  # 引数が優先
+        child_repo=cr,
+    )
+    assert "1か月" in text or "0か月" in text
+    assert "1歳" not in text

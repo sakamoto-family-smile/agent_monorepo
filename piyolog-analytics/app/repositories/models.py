@@ -107,6 +107,22 @@ class ConversationRow(Base):
     __table_args__ = (Index("idx_conversations_family_started", "family_id", "started_at"),)
 
 
+class ChildRow(Base):
+    """家族ごとの子情報 (Phase 4-B)。
+
+    Phase 3 までは env `CHILD_BIRTH_DATE` で 1 値を持たせていたが、
+    本 table に upsert することで複数家族 / 複数子に対応する。
+    """
+
+    __tablename__ = "children"
+
+    family_id: Mapped[str] = mapped_column(String, primary_key=True)
+    child_id: Mapped[str] = mapped_column(String, primary_key=True)
+    birth_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class ConversationMessageRow(Base):
     """会話の 1 メッセージ。
 

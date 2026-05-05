@@ -125,7 +125,9 @@ class StubLineClient:
                 )
         return events
 
-    async def reply_text(self, *, reply_token: str, text: str) -> None:
+    async def reply_text(
+        self, *, reply_token: str, text: str, quick_reply=None
+    ) -> None:
         self.reply_messages.append((reply_token, text))
 
     async def push_text(self, *, to: str, text: str) -> None:

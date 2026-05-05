@@ -293,6 +293,18 @@ LINE の `line_user_id` は必ず `sha256:<hex>` 化して流す。
 - emergency_gate (regex)
 - consulting mode 切替
 
+### Phase 4-A: バックアップ / リストア
+
+- `make backup` / `make restore` で `gs://${PROJECT}-piyolog-backups` に dump。
+- 詳細は `docs/BACKUP_RESTORE.md`。
+
+### Phase 4-B: 子情報 DB + 設定 UI
+
+- `children` table (family_id + child_id PK / birth_date / name)。
+- ⚙️ 設定 ボタンで Quick Reply (datetime picker / 名前入力 / キャンセル)。
+- 旧 env `CHILD_BIRTH_DATE` は廃止 (`children` テーブルに一本化)。
+- 名前は「名前: たろう」のテキスト入力で保存。
+
 ---
 
 ## 9. 設計判断ログ

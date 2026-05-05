@@ -148,6 +148,9 @@ async def build_recent_context(
     family_id: str,
     now: datetime | None = None,
     birth_date: str | None = None,
+    child_repo=None,
+    child_id: str = "default",
+    child_name: str | None = None,
 ) -> str:
     """LLM に渡す RECENT CONTEXT 文字列を返す。
 
@@ -155,7 +158,23 @@ async def build_recent_context(
       - 子のプロフィール (月齢 + 直近の体重・身長・頭囲)
       - 直近 72 時間サマリ
       - 直近 7 日サマリ
+
+    子の生年月日 / 名前は `children` テーブル (= ChildRepo) から
+    `(family_id, child_id)` で取得する。テスト等で直接注入したい場合のみ
+    `birth_date` / `child_name` 引数を使う (デフォルトは DB 由来)。
     """
+    # 引数指定がなければ DB から取得
+    if (not birth_date or not child_name) and child_repo is not None:
+        try:
+            child = await child_repo.get(family_id=family_id, child_id=child_id)
+        except Exception:
+            logger.exception("child_repo.get failed; skipping DB fallback")
+            child = None
+        if child is not None:
+            if not birth_date and child.birth_date:
+                birth_date = child.birth_date
+            if not child_name and child.name:
+                child_name = child.name
     n = (now or datetime.now(UTC)).astimezone(JST)
     today_jst = n.date()
     span_72h_from = (n - timedelta(hours=72)).date().isoformat()
@@ -181,11 +200,13 @@ async def build_recent_context(
 
     # 子のプロフィール
     profile_lines = ["## 子のプロフィール"]
+    if child_name:
+        profile_lines.append(f"- 名前: {child_name}")
     age = _age_label(_parse_birth_date(birth_date or ""), today_jst)
     if age:
         profile_lines.append(f"- 月齢: {age}")
     else:
-        profile_lines.append("- 月齢: 不明 (CHILD_BIRTH_DATE 未設定)")
+        profile_lines.append("- 月齢: 不明 (⚙️ 設定 から子の生年月日を登録してください)")
     weight = _latest_metric(events_30d, event_type="weight", value_idx=_WEIGHT_KG)
     height = _latest_metric(events_30d, event_type="height", value_idx=_HEIGHT_CM)
     head = _latest_metric(events_30d, event_type="head_circumference", value_idx=_HEAD_CM)

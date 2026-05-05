@@ -20,12 +20,17 @@ from repositories.session_repo import MODE_CONSULTING, MODE_NORMAL, SessionRepo
 class _FakeLineClient:
     def __init__(self) -> None:
         self.replies: list[tuple[str, str]] = []
+        self.replies_with_qr: list[tuple[str, str, list]] = []
         self.linked: list[tuple[str, str]] = []
         self.unlinked: list[str] = []
         self.images_pushed: list[str] = []
 
-    async def reply_text(self, *, reply_token: str, text: str) -> None:
+    async def reply_text(
+        self, *, reply_token: str, text: str, quick_reply=None
+    ) -> None:
         self.replies.append((reply_token, text))
+        if quick_reply:
+            self.replies_with_qr.append((reply_token, text, list(quick_reply)))
 
     async def reply_image(self, *, reply_token: str, image_url: str, preview_url=None) -> None:
         self.images_pushed.append(image_url)
@@ -59,7 +64,8 @@ class _FakeAnalyticsLogger:
 
 @pytest.fixture
 async def env(monkeypatch: pytest.MonkeyPatch):
-    """EventRepo + SessionRepo + FakeLineClient を組み立てた deps。"""
+    """EventRepo + SessionRepo + FakeLineClient + ChildRepo を組み立てた deps。"""
+    from repositories.child_repo import ChildRepo
     from services.line_handler import HandlerDeps
 
     with tempfile.TemporaryDirectory() as td:
@@ -67,6 +73,7 @@ async def env(monkeypatch: pytest.MonkeyPatch):
         ev = EventRepo(database_url=f"sqlite+aiosqlite:///{db}")
         await ev.initialize()
         sr = SessionRepo(engine=ev.engine)
+        cr = ChildRepo(engine=ev.engine)
         client = _FakeLineClient()
         al = _FakeAnalyticsLogger()
         deps = HandlerDeps(
@@ -80,8 +87,9 @@ async def env(monkeypatch: pytest.MonkeyPatch):
             session_repo=sr,
             analytics_logger=al,
             rich_menu_id_consulting="richmenu-consulting",
+            child_repo=cr,
         )
-        yield deps, client, sr, al
+        yield deps, client, sr, al, cr
         await ev.dispose()
 
 
@@ -124,7 +132,7 @@ def _consult_replies():
 @pytest.mark.asyncio
 async def test_text_consult_enters_mode(env) -> None:
     """テキスト「相談」で consulting mode に入り rich menu link + welcome。"""
-    deps, client, sr, _ = env
+    deps, client, sr, _, _ = env
     enter_reply, _ = _consult_replies()
     ev = _make_text_event("U1", "rt1", "相談")
     await _handle_event()(ev, deps)
@@ -135,7 +143,7 @@ async def test_text_consult_enters_mode(env) -> None:
 
 @pytest.mark.asyncio
 async def test_text_exit_back_to_normal(env) -> None:
-    deps, client, sr, _ = env
+    deps, client, sr, _, _ = env
     _, exit_reply = _consult_replies()
     await sr.set_mode(line_user_id="U1", family_id="f1", mode=MODE_CONSULTING)
     ev = _make_text_event("U1", "rt1", "相談終了")
@@ -147,7 +155,7 @@ async def test_text_exit_back_to_normal(env) -> None:
 
 @pytest.mark.asyncio
 async def test_postback_consult_enter(env) -> None:
-    deps, client, sr, _ = env
+    deps, client, sr, _, _ = env
     enter_reply, _ = _consult_replies()
     ev = _make_postback_event("U1", "rt1", "action=consult&op=enter")
     await _handle_event()(ev, deps)
@@ -158,7 +166,7 @@ async def test_postback_consult_enter(env) -> None:
 
 @pytest.mark.asyncio
 async def test_postback_consult_exit(env) -> None:
-    deps, client, sr, _ = env
+    deps, client, sr, _, _ = env
     _, exit_reply = _consult_replies()
     await sr.set_mode(line_user_id="U1", family_id="f1", mode=MODE_CONSULTING)
     ev = _make_postback_event("U1", "rt1", "action=consult&op=exit")
@@ -171,7 +179,7 @@ async def test_postback_consult_exit(env) -> None:
 @pytest.mark.asyncio
 async def test_normal_mode_text_routes_to_command_router(env) -> None:
     """normal mode 中の通常テキストは command_router (HELP_TEXT 等) に流れる。"""
-    deps, client, _, _ = env
+    deps, client, _, _, _ = env
     ev = _make_text_event("U1", "rt1", "ヘルプ")
     await _handle_event()(ev, deps)
     assert len(client.replies) == 1
@@ -182,7 +190,7 @@ async def test_normal_mode_text_routes_to_command_router(env) -> None:
 @pytest.mark.asyncio
 async def test_consulting_text_with_emergency_returns_emergency_reply(env) -> None:
     """consulting mode 中に緊急ワード → LLM を呼ばずに #8000 案内。"""
-    deps, client, sr, al = env
+    deps, client, sr, al, _ = env
     await sr.set_mode(line_user_id="U1", family_id="f1", mode=MODE_CONSULTING)
     ev = _make_text_event("U1", "rt1", "40度の高熱でけいれんしてます")
     await _handle_event()(ev, deps)
@@ -199,7 +207,7 @@ async def test_consulting_mode_dispatch_to_consultation(
     env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """consulting mode 中の通常テキスト → Consultation.respond が呼ばれる。"""
-    deps, client, sr, _ = env
+    deps, client, sr, _, _ = env
     await sr.set_mode(line_user_id="U1", family_id="f1", mode=MODE_CONSULTING)
 
     # Consultation.respond を mock (line_handler の最新参照)
@@ -217,3 +225,98 @@ async def test_consulting_mode_dispatch_to_consultation(
     await _handle_event()(ev, deps)
     assert captured == ["2 月のミルク量は?"]
     assert client.replies == [("rt1", "FAKE LLM REPLY")]
+
+
+# ---- Phase 4-B: settings flow ----
+
+
+def _make_postback_event_with_params(
+    line_user_id: str, reply_token: str, data: str, params: dict[str, str]
+):
+    from services.line_client import LinePostbackEvent
+
+    return LinePostbackEvent(
+        event_type="postback",
+        line_user_id=line_user_id,
+        reply_token=reply_token,
+        data=data,
+        params=params,
+    )
+
+
+@pytest.mark.asyncio
+async def test_postback_settings_returns_quick_reply_through_handler(env) -> None:
+    """⚙️設定 ボタン → text + Quick Reply (datetime picker) で reply。"""
+    deps, client, _, _, _ = env
+    ev = _make_postback_event("U1", "rt1", "action=settings")
+    await _handle_event()(ev, deps)
+    assert len(client.replies_with_qr) == 1
+    rt, _, qr = client.replies_with_qr[0]
+    assert rt == "rt1"
+    # 1 つ目: datetime picker
+    assert qr[0].kind == "datetimepicker"
+    assert qr[0].mode == "date"
+
+
+@pytest.mark.asyncio
+async def test_postback_child_set_birth_date_persists_through_handler(env) -> None:
+    """datetime picker の選択 → children テーブルに upsert。"""
+    deps, client, _, _, child_repo = env
+    ev = _make_postback_event_with_params(
+        "U1", "rt1", "action=child_set_birth_date", {"date": "2025-08-15"}
+    )
+    await _handle_event()(ev, deps)
+    assert len(client.replies) == 1
+    _, text = client.replies[0]
+    assert "2025-08-15" in text
+    fetched = await child_repo.get(family_id="f1", child_id="default")
+    assert fetched is not None
+    assert fetched.birth_date == "2025-08-15"
+
+
+@pytest.mark.asyncio
+async def test_text_name_input_persists(env) -> None:
+    """「名前: たろう」で children テーブル name に upsert。"""
+    deps, client, _, _, child_repo = env
+    ev = _make_text_event("U1", "rt1", "名前: たろう")
+    await _handle_event()(ev, deps)
+    assert len(client.replies) == 1
+    _, text = client.replies[0]
+    assert "たろう" in text
+    fetched = await child_repo.get(family_id="f1", child_id="default")
+    assert fetched is not None
+    assert fetched.name == "たろう"
+
+
+@pytest.mark.asyncio
+async def test_text_name_input_with_fullwidth_colon(env) -> None:
+    """全角コロン (`：`) でも受け付ける。"""
+    deps, client, _, _, child_repo = env
+    ev = _make_text_event("U1", "rt1", "名前：たろう")
+    await _handle_event()(ev, deps)
+    fetched = await child_repo.get(family_id="f1", child_id="default")
+    assert fetched is not None
+    assert fetched.name == "たろう"
+
+
+@pytest.mark.asyncio
+async def test_text_name_input_cancel(env) -> None:
+    """「名前: キャンセル」で 設定キャンセル メッセージ。DB は更新されない。"""
+    deps, client, _, _, child_repo = env
+    ev = _make_text_event("U1", "rt1", "名前: キャンセル")
+    await _handle_event()(ev, deps)
+    assert len(client.replies) == 1
+    _, text = client.replies[0]
+    assert "閉じました" in text
+    fetched = await child_repo.get(family_id="f1", child_id="default")
+    assert fetched is None  # 何も保存されてない
+
+
+@pytest.mark.asyncio
+async def test_postback_settings_cancel_through_handler(env) -> None:
+    deps, client, _, _, _ = env
+    ev = _make_postback_event("U1", "rt1", "action=settings_cancel")
+    await _handle_event()(ev, deps)
+    assert len(client.replies) == 1
+    _, text = client.replies[0]
+    assert "閉じました" in text
