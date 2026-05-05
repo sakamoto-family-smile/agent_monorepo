@@ -1,9 +1,10 @@
 """LINE Rich Menu を 1 回だけ登録するスクリプト。
 
-構成:
-  - サイズ compact (2500x843) を 3 等分し、左から `[シナリオ一覧] [ヘルプ] [連携]` の
-    3 ボタンを配置
-  - メニュー画像は Pillow で自動生成 (テキスト 3 ブロック)
+構成 (PR 2 で 6 ボタンに拡張):
+  - サイズ large (2500x1686) を 3 列 × 2 行 = 6 等分のグリッド
+  - 上段: [📊 サマリ] [💰 純資産] [⚠️ 異常検知]
+  - 下段: [📋 シナリオ] [💬 連携] [❓ ヘルプ]
+  - メニュー画像は Pillow で自動生成 (絵文字 + ラベル)
   - LINE Messaging API の 3 エンドポイントを順に叩き、最後に default rich menu として設定
 
 依存:
@@ -33,16 +34,27 @@ LINE_API = "https://api.line.me"
 LINE_DATA_API = "https://api-data.line.me"
 
 WIDTH = 2500
-HEIGHT = 843
+HEIGHT = 1686
+GRID_COLS = 3
+GRID_ROWS = 2
+CELL_W = WIDTH // GRID_COLS
+CELL_H = HEIGHT // GRID_ROWS
 
 BG = (30, 64, 175)  # Indigo-ish
 FG = (255, 255, 255)
+DIVIDER = (255, 255, 255, 80)
 
+# 6 ボタン (3x2 grid)。PR 2 の分析コマンドを上段、既存 + 連携を下段。
+# 各ボタンの絵文字は `_load_emoji_font` でカラー絵文字フォントを試行し、
+# 失敗時はテキストラベルのみで描画する。
 BUTTONS: list[dict] = [
-    {"label": "シナリオ一覧", "action_type": "message", "payload": "/scenarios"},
-    {"label": "ヘルプ", "action_type": "message", "payload": "/help"},
+    {"label": "サマリ", "icon": "📊", "action_type": "message", "payload": "/summary"},
+    {"label": "純資産", "icon": "💰", "action_type": "message", "payload": "/networth"},
+    {"label": "異常検知", "icon": "⚠️", "action_type": "message", "payload": "/anomalies"},
+    {"label": "シナリオ", "icon": "📋", "action_type": "message", "payload": "/scenarios"},
     # 連携ボタンは build_menu_request() で LIFF_ID に応じて置き換える
-    {"label": "連携", "action_type": "placeholder", "payload": ""},
+    {"label": "連携", "icon": "💬", "action_type": "placeholder", "payload": ""},
+    {"label": "ヘルプ", "icon": "❓", "action_type": "message", "payload": "/help"},
 ]
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -55,7 +67,7 @@ logger = logging.getLogger("setup_rich_menu")
 
 
 def render_menu_image() -> bytes:
-    """compact サイズ (2500x843) の 3 等分ボタン画像を PNG バイト列で返す。"""
+    """large サイズ (2500x1686) の 3x2 グリッドボタン画像を PNG バイト列で返す。"""
     try:
         from PIL import Image, ImageDraw
     except ImportError as e:
@@ -66,23 +78,79 @@ def render_menu_image() -> bytes:
     img = Image.new("RGB", (WIDTH, HEIGHT), BG)
     draw = ImageDraw.Draw(img)
 
-    third = WIDTH // 3
-    # 境界線
-    for i in (1, 2):
-        x = third * i
-        draw.line([(x, 30), (x, HEIGHT - 30)], fill=(255, 255, 255, 128), width=4)
+    # グリッド境界線
+    for col in range(1, GRID_COLS):
+        x = CELL_W * col
+        draw.line([(x, 40), (x, HEIGHT - 40)], fill=(255, 255, 255, 100), width=4)
+    for row in range(1, GRID_ROWS):
+        y = CELL_H * row
+        draw.line([(40, y), (WIDTH - 40, y)], fill=(255, 255, 255, 100), width=4)
 
-    # フォント: プラットフォーム依存で落ちないよう、デフォルト + 大きめビットマップに fallback
     label_font = _load_font(size=96)
+    emoji_font, emoji_native = _load_emoji_font()
+
     for i, btn in enumerate(BUTTONS):
-        label = btn["label"]
-        cx = third * i + third // 2
-        cy = HEIGHT // 2
-        _draw_centered_text(draw, label, cx, cy, label_font)
+        col = i % GRID_COLS
+        row = i // GRID_COLS
+        cx = CELL_W * col + CELL_W // 2
+        # 絵文字は中央上、ラベルは中央下に配置
+        cy_icon = CELL_H * row + CELL_H // 2 - 100
+        cy_label = CELL_H * row + CELL_H // 2 + 130
+
+        if emoji_font is not None and btn.get("icon"):
+            _draw_emoji(img, btn["icon"], cx, cy_icon, emoji_font, emoji_native)
+        _draw_centered_text(draw, btn["label"], cx, cy_label, label_font)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
+
+
+def _load_emoji_font():
+    """カラー絵文字フォント (Apple Color Emoji / Noto Color Emoji)。
+
+    bitmap font は固定 size のみロード可能。見つからなければ (None, 0)。
+    戻り値: (font, native_size)。描画側で resize する。
+    """
+    try:
+        from PIL import ImageFont
+    except ImportError:
+        return None, 0
+    candidates = [
+        ("/System/Library/Fonts/Apple Color Emoji.ttc", 96),  # macOS
+        ("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf", 109),  # Linux
+        ("/usr/share/fonts/truetype/noto-emoji/NotoColorEmoji.ttf", 109),
+    ]
+    for path, native in candidates:
+        if Path(path).exists():
+            try:
+                return ImageFont.truetype(path, size=native), native
+            except OSError:
+                continue
+    return None, 0
+
+
+def _draw_emoji(img, emoji: str, cx: int, cy: int, emoji_font, native_size: int) -> None:
+    """カラー絵文字を中央配置で描画 (bitmap → resize → paste)。"""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return
+    target = 200
+    scale = target / native_size if native_size else 1.0
+    tmp = Image.new("RGBA", (native_size * 2, native_size * 2), (0, 0, 0, 0))
+    tmp_draw = ImageDraw.Draw(tmp)
+    try:
+        tmp_draw.text((0, 0), emoji, font=emoji_font, embedded_color=True)
+    except Exception:
+        return
+    bbox = tmp.getbbox()
+    if bbox is None:
+        return
+    cropped = tmp.crop(bbox)
+    new_size = (max(1, int(cropped.width * scale)), max(1, int(cropped.height * scale)))
+    resized = cropped.resize(new_size, Image.LANCZOS)
+    img.paste(resized, (cx - resized.width // 2, cy - resized.height // 2), resized)
 
 
 def _load_font(*, size: int):
@@ -121,9 +189,11 @@ def _draw_centered_text(draw, text: str, cx: int, cy: int, font) -> None:
 
 
 def build_menu_request(*, liff_id: str | None) -> dict:
-    third = WIDTH // 3
+    """3x2 グリッドの 6 ボタン Rich Menu JSON を生成。"""
     areas: list[dict] = []
     for i, btn in enumerate(BUTTONS):
+        col = i % GRID_COLS
+        row = i // GRID_COLS
         if btn["action_type"] == "placeholder":
             # 連携ボタン: LIFF_ID があれば LIFF URL、無ければ /help への message
             if liff_id:
@@ -137,14 +207,15 @@ def build_menu_request(*, liff_id: str | None) -> dict:
             action = {"type": "message", "text": btn["payload"]}
         else:
             raise ValueError(f"Unknown action_type: {btn['action_type']}")
+
+        # 最右列・最下行はピクセル誤差で残った 1px を吸収する
+        x = CELL_W * col
+        y = CELL_H * row
+        width = CELL_W if col < GRID_COLS - 1 else WIDTH - CELL_W * (GRID_COLS - 1)
+        height = CELL_H if row < GRID_ROWS - 1 else HEIGHT - CELL_H * (GRID_ROWS - 1)
         areas.append(
             {
-                "bounds": {
-                    "x": third * i,
-                    "y": 0,
-                    "width": third if i < 2 else WIDTH - third * 2,
-                    "height": HEIGHT,
-                },
+                "bounds": {"x": x, "y": y, "width": width, "height": height},
                 "action": action,
             }
         )

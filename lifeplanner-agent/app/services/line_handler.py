@@ -18,14 +18,28 @@ from repositories.household import ensure_household
 from repositories.line_link import create_link, delete_link, get_link
 from repositories.scenario import get_scenario_for_household, list_scenarios
 from repositories.transaction import upsert_transactions
+from services.anomalies import detect_anomalies
 from services.line_client import (
     LineBotClient,
     LineEvent,
     LineFileEvent,
     LineTextEvent,
 )
-from services.line_flex import narrative_bubble, scenarios_carousel
+from services.line_flex import (
+    anomalies_bubble,
+    narrative_bubble,
+    networth_bubble,
+    scenarios_carousel,
+    summary_bubble,
+)
+from services.line_period import (
+    parse_date_arg,
+    parse_month_arg,
+    parse_summary_period,
+)
 from services.llm_client import LLMClient
+from services.networth import compute_networth
+from services.summary import compute_summary
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -37,14 +51,24 @@ logger = logging.getLogger(__name__)
 
 HELP_TEXT = (
     "【ライフプランナー Bot コマンド】\n"
+    "■ 連携\n"
     "/help — このヘルプ\n"
     "/whoami — 連携状態を表示\n"
     "/invite — 配偶者に共有するコマンドを表示\n"
     "/link <世帯ID> — 既存の世帯に参加\n"
     "/unlink — 自分の連携を解除\n"
+    "\n"
+    "■ 分析 (PR 2)\n"
+    "/summary [今月|先月|今年|YYYY-MM YYYY-MM] — 月次サマリ\n"
+    "/networth [YYYY-MM-DD] — 純資産 (資産・負債内訳)\n"
+    "/anomalies [YYYY-MM] — 3σ 異常検知 (直近 6 ヶ月平均との比較)\n"
+    "\n"
+    "■ シナリオ\n"
     "/scenarios — シナリオ一覧\n"
     "/summarize <id> — シナリオの要約\n"
     "/compare <id1> <id2> [...] — シナリオ比較 (最大5件)\n"
+    "\n"
+    "■ 取り込み\n"
     "CSV を送ると家計データとして取り込みます"
 )
 
@@ -194,6 +218,19 @@ async def _dispatch_command(
 
     if cmd == "/compare":
         await _cmd_compare(args, event, link, deps)
+        return
+
+    # PR 2: 分析コマンド
+    if cmd == "/summary":
+        await _cmd_summary(args, event, link, deps)
+        return
+
+    if cmd == "/networth":
+        await _cmd_networth(args, event, link, deps)
+        return
+
+    if cmd == "/anomalies":
+        await _cmd_anomalies(args, event, link, deps)
         return
 
     await deps.line_client.reply_text(
@@ -392,6 +429,139 @@ async def _run_chat_reply(
         text=result.narrative,
         flex_contents=flex,
         alt_text=alt_text,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PR 2: 分析コマンド
+# ---------------------------------------------------------------------------
+
+
+async def _cmd_summary(
+    args: list[str], event: LineTextEvent, link, deps: HandlerDeps
+) -> None:
+    """`/summary [今月|先月|今年|YYYY-MM YYYY-MM]` — 月次サマリ。"""
+    try:
+        period = parse_summary_period(args)
+    except ValueError as e:
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token, text=f"使い方エラー: {e}"
+        )
+        return
+
+    summary = await compute_summary(
+        deps.session,
+        link.household_id,
+        start=period.start,
+        end=period.end,
+        top_categories=5,
+    )
+    top = [(c.category, c.expense) for c in summary.categories[:5]]
+    text_fallback = (
+        f"📊 サマリ ({period.label})\n"
+        f"収入 {int(summary.total_income):,} / "
+        f"支出 {int(summary.total_expense):,} / "
+        f"ネット {int(summary.net):+,}\n"
+        f"貯蓄率 {summary.savings_rate * 100:.1f}%"
+    )
+    flex = summary_bubble(
+        period_label=period.label,
+        total_income=summary.total_income,
+        total_expense=summary.total_expense,
+        net=summary.net,
+        savings_rate=summary.savings_rate,
+        fixed=summary.expense_types.fixed,
+        variable=summary.expense_types.variable,
+        top_categories=top,
+    )
+    await _reply_flex_or_text(
+        deps,
+        reply_token=event.reply_token,
+        text=text_fallback,
+        flex_contents=flex,
+        alt_text=f"サマリ {period.label}",
+    )
+
+
+async def _cmd_networth(
+    args: list[str], event: LineTextEvent, link, deps: HandlerDeps
+) -> None:
+    """`/networth [YYYY-MM-DD]` — 純資産。"""
+    try:
+        as_of, label = parse_date_arg(args[0] if args else None)
+    except ValueError as e:
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token, text=f"使い方エラー: {e}"
+        )
+        return
+
+    nw = await compute_networth(deps.session, link.household_id, as_of=as_of)
+    text_fallback = (
+        f"💰 純資産 ({label} 時点)\n"
+        f"総資産 {int(nw.current.total_assets):,} / "
+        f"総負債 {int(nw.current.total_liabilities):,}\n"
+        f"純資産 {int(nw.current.net_worth):,}"
+    )
+    flex = networth_bubble(
+        as_of_label=label,
+        total_assets=nw.current.total_assets,
+        total_liabilities=nw.current.total_liabilities,
+        net_worth=nw.current.net_worth,
+        by_kind_assets=nw.by_kind_assets,
+        by_kind_liabilities=nw.by_kind_liabilities,
+    )
+    await _reply_flex_or_text(
+        deps,
+        reply_token=event.reply_token,
+        text=text_fallback,
+        flex_contents=flex,
+        alt_text=f"純資産 {label}",
+    )
+
+
+async def _cmd_anomalies(
+    args: list[str], event: LineTextEvent, link, deps: HandlerDeps
+) -> None:
+    """`/anomalies [YYYY-MM]` — 3σ 異常検知。"""
+    try:
+        target_month, label = parse_month_arg(args[0] if args else None)
+    except ValueError as e:
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token, text=f"使い方エラー: {e}"
+        )
+        return
+
+    history_months = 6
+    anomalies = await detect_anomalies(
+        deps.session,
+        link.household_id,
+        target_month=target_month,
+        history_months=history_months,
+    )
+    rows = [(a.canonical_category, a.expense, a.mean, a.z_score) for a in anomalies]
+    if not anomalies:
+        text_fallback = (
+            f"⚠️ 異常検知 ({label})\n"
+            f"過去 {history_months} ヶ月平均から 3σ 超のカテゴリはありません。"
+        )
+    else:
+        head = "\n".join(
+            f"・{a.canonical_category}: {int(a.expense):,} 円 (z={a.z_score:.1f}σ)"
+            for a in anomalies[:5]
+        )
+        text_fallback = f"⚠️ 異常検知 ({label})\n{head}"
+
+    flex = anomalies_bubble(
+        target_month_label=label,
+        anomalies=rows,
+        history_months=history_months,
+    )
+    await _reply_flex_or_text(
+        deps,
+        reply_token=event.reply_token,
+        text=text_fallback,
+        flex_contents=flex,
+        alt_text=f"異常検知 {label}",
     )
 
 
