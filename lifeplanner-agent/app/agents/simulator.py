@@ -4,18 +4,31 @@
 - 純資産推移 (前年末 + 年次ネット)
 - 投資リターンは定率で加味
 
+時間粒度: **年単位**。`LifeEvent.start_year` で発生年を指定するが、
+購入月や育休開始月などのプロレート (月割り) は未実装。30 年合計には影響
+しないが、購入年・最終年の単年 CF は数十万円ズレうる (例: 2028/7 購入の
+住宅ローンも 2028 年に 12 ヶ月分計上される)。月単位プロレートは PR 1.5
+or PR 4 (LINE イベント設定 UI) で追加予定。
+
 Phase 2 スコープ:
   - 世帯は単一稼得者 + 複数イベントリスト入力
   - Monte Carlo は未実装 (Phase 4)
   - 退職後の年金収入は未実装 (Phase 4)
+
+PR 1 で追加:
+  - `expense_baseline_by_category` でカテゴリ別生活費を渡せる
+  - `YearRow.expense_breakdown` でカテゴリ別年額を出力 (合計 = living_expense)
+  - `YearRow.event_breakdown` でイベント明細 (label / event_type / amount) を出力
+  - 既存の `base_annual_expense` 単一値も後方互換で受ける
+    (= "other" カテゴリ 1 つに集約される)
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
-from agents.event_catalog.types import CashFlowDelta
+from agents.event_catalog.types import CashFlowDelta, EventCategory
 from agents.tax_jp import (
     TaxTable,
     calc_income_tax,
@@ -36,9 +49,20 @@ class HouseholdProfile:
     # 配偶者の給与年収 (0 なら単身世帯扱い)
     spouse_salary: Decimal = _ZERO
     # 年間の基本生活費 (食住光熱医療通信等、手取から差し引く)
+    # `expense_baseline_by_category` が指定されていればそちらを優先。
     base_annual_expense: Decimal = Decimal(3_600_000)
+    # カテゴリ別生活費の年額 (canonical_category -> 円)。
+    # PR 1 で追加: 取り込んだ transactions から生成されるベースライン。
+    # None なら `base_annual_expense` を {"other": ...} の単一カテゴリ扱い。
+    expense_baseline_by_category: dict[str, Decimal] | None = None
     # 現在の流動資産合計 (預金 + 投資、プロジェクション開始時点)
     initial_net_worth: Decimal = _ZERO
+
+    def resolved_baseline(self) -> dict[str, Decimal]:
+        """カテゴリ別 baseline を必ず dict で返す (None なら base_annual_expense を変換)。"""
+        if self.expense_baseline_by_category:
+            return dict(self.expense_baseline_by_category)
+        return {"other": self.base_annual_expense}
 
 
 @dataclass(frozen=True)
@@ -58,6 +82,20 @@ class SimulationAssumptions:
 
 
 @dataclass(frozen=True)
+class EventLine:
+    """1 イベントが 1 年に発生させる差分の 1 行 (UI 表示用)。
+
+    `YearRow.event_breakdown` に並ぶ。amount は CashFlowDelta と同符号
+    (正=収入/給付、負=支出)。
+    """
+
+    event_type: str       # "E01" / "E02" / "E04" 等
+    category: str         # EventCategory.value (income / one_time / recurring / child_benefit)
+    label: str            # "出産一時費用" / "児童手当 (3歳)" / "住宅ローン" 等
+    amount: Decimal
+
+
+@dataclass(frozen=True)
 class YearRow:
     """1 年分のプロジェクション結果。"""
 
@@ -67,11 +105,13 @@ class YearRow:
     income_tax: Decimal
     resident_tax: Decimal
     take_home: Decimal
-    living_expense: Decimal
-    event_net: Decimal  # イベント差分 (収入 - 支出)
-    annual_net: Decimal  # 年次ネット(take_home - living_expense + event_net)
-    investment_gain: Decimal
-    net_worth_end: Decimal  # 年末純資産
+    living_expense: Decimal              # 合計 (= sum(expense_breakdown.values()))
+    expense_breakdown: dict[str, Decimal] = field(default_factory=dict)
+    event_net: Decimal = _ZERO           # イベント差分 (収入 - 支出)
+    event_breakdown: list[EventLine] = field(default_factory=list)
+    annual_net: Decimal = _ZERO          # 年次ネット (take_home - living_expense + event_net)
+    investment_gain: Decimal = _ZERO
+    net_worth_end: Decimal = _ZERO  # 年末純資産
 
 
 @dataclass(frozen=True)
@@ -86,18 +126,46 @@ class SimulationResult:
     total_event_net: Decimal
 
     def to_dict(self) -> dict:
-        """API / JSON 化用。Decimal を str に寄せる。"""
+        """API / JSON 化用。Decimal を str に寄せる。
+
+        PR 1 で `expense_breakdown` (dict) と `event_breakdown` (list[EventLine])
+        を平準化する。
+        """
         return {
-            "rows": [
-                {k: str(v) if isinstance(v, Decimal) else v for k, v in row.__dict__.items()}
-                for row in self.rows
-            ],
+            "rows": [_year_row_to_dict(row) for row in self.rows],
             "total_net_worth_end": str(self.total_net_worth_end),
             "total_take_home": str(self.total_take_home),
             "total_tax_paid": str(self.total_tax_paid),
             "total_social_insurance": str(self.total_social_insurance),
             "total_event_net": str(self.total_event_net),
         }
+
+
+def _year_row_to_dict(row: YearRow) -> dict:
+    """YearRow → JSON 可能な dict (Decimal を str に変換)。"""
+    return {
+        "year": row.year,
+        "gross_income": str(row.gross_income),
+        "social_insurance": str(row.social_insurance),
+        "income_tax": str(row.income_tax),
+        "resident_tax": str(row.resident_tax),
+        "take_home": str(row.take_home),
+        "living_expense": str(row.living_expense),
+        "expense_breakdown": {k: str(v) for k, v in row.expense_breakdown.items()},
+        "event_net": str(row.event_net),
+        "event_breakdown": [
+            {
+                "event_type": line.event_type,
+                "category": line.category,
+                "label": line.label,
+                "amount": str(line.amount),
+            }
+            for line in row.event_breakdown
+        ],
+        "annual_net": str(row.annual_net),
+        "investment_gain": str(row.investment_gain),
+        "net_worth_end": str(row.net_worth_end),
+    }
 
 
 def _apply_rate(base: Decimal, rate: Decimal, years: int) -> Decimal:
@@ -113,10 +181,30 @@ def _apply_rate(base: Decimal, rate: Decimal, years: int) -> Decimal:
 
 
 def _events_by_year(deltas: list[CashFlowDelta]) -> dict[int, Decimal]:
-    """CashFlowDelta を年度キーの合計に畳む。"""
+    """CashFlowDelta を年度キーの合計に畳む (合計値のみ、明細は別関数)。"""
     acc: dict[int, Decimal] = {}
     for d in deltas:
         acc[d.year] = acc.get(d.year, _ZERO) + d.amount
+    return acc
+
+
+def _events_breakdown_by_year(deltas: list[CashFlowDelta]) -> dict[int, list[EventLine]]:
+    """CashFlowDelta を年度キーの明細リストに畳む (UI 用)。
+
+    catalog 関数は CashFlowDelta(event_type="") で生成し、scenario_runner が
+    `dataclasses.replace` で event_type を設定する想定。空のままなら "?" を表示。
+    """
+    acc: dict[int, list[EventLine]] = {}
+    for d in deltas:
+        line = EventLine(
+            event_type=d.event_type or "?",
+            category=d.category.value
+            if isinstance(d.category, EventCategory)
+            else str(d.category),
+            label=d.label,
+            amount=d.amount,
+        )
+        acc.setdefault(d.year, []).append(line)
     return acc
 
 
@@ -162,9 +250,12 @@ def run_projection(
     """
     events = events or []
     events_map = _events_by_year(events)
+    events_breakdown_map = _events_breakdown_by_year(events)
 
     tax_year = assumptions.tax_year or assumptions.start_year
     table = load_tax_table(tax_year)
+
+    baseline_by_category = profile.resolved_baseline()
 
     rows: list[YearRow] = []
     net_worth = profile.initial_net_worth
@@ -186,11 +277,16 @@ def run_projection(
         # 3. 手取り
         take_home = gross - si_total - inc_tax - res_tax
 
-        # 4. 生活費
-        living = _apply_rate(profile.base_annual_expense, assumptions.inflation_rate, i)
+        # 4. 生活費 (カテゴリ別に inflation 適用 → 合計)
+        expense_breakdown = {
+            cat: _apply_rate(amount, assumptions.inflation_rate, i)
+            for cat, amount in baseline_by_category.items()
+        }
+        living = sum(expense_breakdown.values(), _ZERO)
 
-        # 5. イベント差分
+        # 5. イベント差分 (合計 + 明細)
         event_net = events_map.get(year, _ZERO)
+        event_lines = events_breakdown_map.get(year, [])
 
         # 6. 年次ネット
         annual_net = take_home - living + event_net
@@ -210,7 +306,9 @@ def run_projection(
                 resident_tax=res_tax,
                 take_home=take_home,
                 living_expense=living,
+                expense_breakdown=expense_breakdown,
                 event_net=event_net,
+                event_breakdown=event_lines,
                 annual_net=annual_net,
                 investment_gain=investment_gain,
                 net_worth_end=net_worth,
