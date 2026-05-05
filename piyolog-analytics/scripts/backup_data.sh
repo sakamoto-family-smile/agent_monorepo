@@ -2,8 +2,10 @@
 # Cloud SQL (Postgres) を GCS にバックアップ。
 #
 # - `make backup` から呼ばれる (`make tf-destroy` 前に手動実行する想定)
-# - 対象: piyolog database 内の全テーブル
-#   (piyolog_events / import_batches / sessions / conversations / conversation_messages)
+# - 対象: piyolog database 内の全テーブル (DDL + DML を `gcloud sql export sql`
+#   で `--table` 指定なしに dump するので、将来追加されるテーブルも自動的に含まれる)
+#   現状: piyolog_events / import_batches / sessions / conversations /
+#         conversation_messages / children / alembic_version
 #
 # 出力先:
 #   gs://<PROJECT>-piyolog-backups/cloudsql/<TS>/dump.sql  (SQL dump)
