@@ -206,6 +206,7 @@ Money Forward ME の家計データを起点に、家族単位で30〜50年の�
 | MCP | 可能な限り `security-platform` の MCP Proxy (`http://localhost:8080`) 経由 |
 | シークレット | `.env` は gitignore。`.env.example` にキー一覧のみ記載 |
 | セキュリティ | 新規エージェント追加時は `security-platform/config/inventory.yaml` と `scan.yaml` に登録 |
+| 機能設計ドキュメント | 中規模以上の機能追加・アーキテクチャ変更は [`docs/PROPOSALS/`](./docs/PROPOSALS/) に提案 doc (KEP ベース) を作成。詳細: [`docs/PROPOSALS/README.md`](./docs/PROPOSALS/README.md) |
 
 ---
 
