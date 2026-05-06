@@ -175,6 +175,9 @@ curl -X POST http://127.0.0.1:8001/api/chat \
 | `/scenarios` | シナリオ一覧 |
 | `/summarize <id>` | 単一シナリオの LLM 要約 |
 | `/compare <id1> <id2> [...]` | シナリオ比較 (最大5件) |
+| `/summary [今月\|先月\|今年\|YYYY-MM YYYY-MM]` | 月次サマリ (Phase 4 / PR 2) |
+| `/networth [YYYY-MM-DD]` | 純資産 + 種別別内訳 (Phase 4 / PR 2) |
+| `/anomalies [YYYY-MM]` | 3σ 異常検知 (Phase 4 / PR 2) |
 | CSV ファイル送信 | 世帯に取り込み (MF ME CSV, 5MB まで) |
 
 ### 0.8 LIFF セットアップ (Phase 3b.2)
@@ -193,7 +196,7 @@ curl -X POST http://127.0.0.1:8001/api/chat \
 
 ### 0.9 Flex Message / Rich menu
 
-- **Flex Message**: `/scenarios` は Carousel、`/summarize` と `/compare` は Bubble で返す。
+- **Flex Message**: `/scenarios` は Carousel、`/summarize` と `/compare` / `/summary` / `/networth` / `/anomalies` は Bubble で返す。
   SDK 未対応クライアントや Flex 構築失敗時は自動で plain text にフォールバックする。
 - **Rich menu 登録** (1 回のセットアップ):
   ```bash
@@ -202,8 +205,16 @@ curl -X POST http://127.0.0.1:8001/api/chat \
   # 本番登録 (LINE_CHANNEL_ACCESS_TOKEN / LIFF_ID を env に設定した上で)
   uv run python scripts/setup_rich_menu.py
   ```
-  ボタン構成: `[シナリオ一覧] [ヘルプ] [連携]` の 3 ボタン。
+  ボタン構成 (PR 2 で 6 ボタンに拡張、2500x1686):
+  ```
+  ┌─────────────────────────────────────────┐
+  │ 📊 サマリ   💰 純資産   ⚠️ 異常検知   │
+  ├─────────────────────────────────────────┤
+  │ 📋 シナリオ  💬 連携    ❓ ヘルプ      │
+  └─────────────────────────────────────────┘
+  ```
   「連携」は `LIFF_ID` が設定されていれば LIFF URL、未設定時は `/help` コマンドにフォールバック。
+  カラー絵文字は Apple Color Emoji / Noto Color Emoji を自動検出。
 
 ### Phase 3b 未対応 (Phase 4 予定)
 
