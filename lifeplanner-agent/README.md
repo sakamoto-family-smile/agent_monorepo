@@ -175,6 +175,9 @@ curl -X POST http://127.0.0.1:8001/api/chat \
 | `/scenarios` | シナリオ一覧 |
 | `/summarize <id>` | 単一シナリオの LLM 要約 |
 | `/compare <id1> <id2> [...]` | シナリオ比較 (最大5件) |
+| `/summary [今月\|先月\|今年\|YYYY-MM YYYY-MM]` | 月次サマリ (Phase 4 / PR 2) |
+| `/networth [YYYY-MM-DD]` | 純資産 + 種別別内訳 (Phase 4 / PR 2) |
+| `/anomalies [YYYY-MM]` | 3σ 異常検知 (Phase 4 / PR 2) |
 | CSV ファイル送信 | 世帯に取り込み (MF ME CSV, 5MB まで) |
 
 ### 0.8 LIFF セットアップ (Phase 3b.2)
@@ -193,7 +196,7 @@ curl -X POST http://127.0.0.1:8001/api/chat \
 
 ### 0.9 Flex Message / Rich menu
 
-- **Flex Message**: `/scenarios` は Carousel、`/summarize` と `/compare` は Bubble で返す。
+- **Flex Message**: `/scenarios` は Carousel、`/summarize` と `/compare` / `/summary` / `/networth` / `/anomalies` は Bubble で返す。
   SDK 未対応クライアントや Flex 構築失敗時は自動で plain text にフォールバックする。
 - **Rich menu 登録** (1 回のセットアップ):
   ```bash
@@ -202,8 +205,16 @@ curl -X POST http://127.0.0.1:8001/api/chat \
   # 本番登録 (LINE_CHANNEL_ACCESS_TOKEN / LIFF_ID を env に設定した上で)
   uv run python scripts/setup_rich_menu.py
   ```
-  ボタン構成: `[シナリオ一覧] [ヘルプ] [連携]` の 3 ボタン。
+  ボタン構成 (PR 2 で 6 ボタンに拡張、2500x1686):
+  ```
+  ┌─────────────────────────────────────────┐
+  │ 📊 サマリ   💰 純資産   ⚠️ 異常検知   │
+  ├─────────────────────────────────────────┤
+  │ 📋 シナリオ  💬 連携    ❓ ヘルプ      │
+  └─────────────────────────────────────────┘
+  ```
   「連携」は `LIFF_ID` が設定されていれば LIFF URL、未設定時は `/help` コマンドにフォールバック。
+  カラー絵文字は Apple Color Emoji / Noto Color Emoji を自動検出。
 
 ### Phase 3b 未対応 (Phase 4 予定)
 
@@ -543,12 +554,21 @@ Vertex 利用時:
   - **Phase 3b.2 実装済**: LIFF (LINE Login) 認証 (`/liff/link.html` + `/api/line/liff-login`)、Flex Message (carousel / bubble + text フォールバック)、Rich menu 登録スクリプト (`scripts/setup_rich_menu.py`)
   - 未対応: push 通知・リマインダー (Phase 4 予定)
 
-### Phase 4: 高度シミュレーション
-- F4 残りのイベント（E03/E05-E12）
+### Phase 4: 高度シミュレーション + LINE 操作の拡充
+**進行中**: PR 単位の詳細計画は [`docs/LINE_ROADMAP.md`](docs/LINE_ROADMAP.md) を参照。
+
+- ✅ **PR 1 (#103) — バックエンド粒度向上**: `YearRow` にカテゴリ別 `expense_breakdown` + イベント `event_breakdown` を追加。取り込み済 transactions からカテゴリ別生活費 baseline を自動生成。`scripts/seed_events.py` で JSON 一括投入。
+- ✅ **PR 2 (#104) — LINE 分析コマンド**: `/summary [今月|先月|今年|YYYY-MM YYYY-MM]` / `/networth [YYYY-MM-DD]` / `/anomalies [YYYY-MM]` を Flex Message で返答。リッチメニューを 6 ボタン (3x2 グリッド、2500x1686) に拡張。
+- ⏳ **PR 3 — LINE CF 表示**: `/cashflow <id>` で 30 年キャッシュフローを年表 + 画像チャートで表示。
+- ⏳ **PR 4 — LINE イベント設定 UI**: LIFF / Quick Reply で E01/E02/E04 を追加・編集。`start_month` (月単位プロレート) を同時投入予定 (旧 PR 1.5)。
+- ⏳ **PR 5 — 残イベント実装** (E03/E07/E08/E11/E10/E09/E12): 子の進学 (E07) / 退職・年金 (E08) を最優先。E05 結婚はスキップ。
+- ⏳ **PR 0 — GCP インフラ整備**: Terraform + Cloud Run + Cloud SQL + Secret Manager + IAM。`piyolog-analytics` / `driving-license-bot` のものをポート。本番デプロイの前提。
+
+その他 Phase 4 全体の残:
 - F5 Monte Carlo / 感度分析
-- F7 税制フル対応（年版管理）
+- F7 税制フル対応（年版管理、譲渡所得・iDeCo/NISA）
 - F11 家族共有 + 権限
-- F12 通知・リマインダー
+- F12 通知・リマインダー (LINE push)
 - 既存 `stock-analysis-agent` 連携（運用リターン予測を取り込む）
 
 ### Phase 5: 運用品質向上
@@ -556,6 +576,7 @@ Vertex 利用時:
 - 監査ログ・変更履歴
 - E2E テスト自動化
 - パフォーマンス最適化
+- Web UI (Next.js ダッシュボード、F10)
 
 ---
 
