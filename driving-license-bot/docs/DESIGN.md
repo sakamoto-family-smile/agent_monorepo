@@ -1,14 +1,52 @@
 # 車の免許学科テスト LINE Bot 設計書
 
-> LINE Bot で簡易的に学科テスト（仮免・本免）を実施できるサービスの設計書。
-> 問題は LLM（Claude on Vertex AI）により自動生成し、GCP 上で運用する。
->
-> **本サービスは個人利用向けの学習支援ツールであり、学科試験合格を保証するものではない。**
+| | |
+|---|---|
+| **Version** | 2.0 |
+| **最終更新** | 2026-05-08 |
+| **Status** | Active (Phase 2 進行中) |
+| **Owner** | @kurama554101 |
+| **README** | [`../README.md`](../README.md) |
 
-- **作成日**: 2026-04-27
+## 変更履歴
+
+| 日付 | Version | 変更内容 |
+|---|---|---|
+| 2026-04-27 | 1.0 | 初版 (Phase 0 設計確定) |
+| 2026-05-08 | 2.0 | `docs/SYSTEM_DESIGN_TEMPLATE.md` 準拠に寄せ。ヘッダ + Executive Summary を追加、§16 NFR / §17 設計判断ログ / §18 関連ドキュメント / §19 用語集 を末尾に新設 (既存 §0〜§15 は anchor 互換のため番号維持) |
+
+---
+
+## Executive Summary
+
+LINE Bot で簡易的に学科テスト（仮免・本免）を実施できるサービス。
+問題は LLM（Claude on Vertex AI）により自動生成し、根拠条文・教則ページを必ず添付する。
+GCP 上で運用 (Cloud Run + Firestore + BigQuery + Cloud Tasks)。
+
+> **本サービスは個人運営の学習支援ツールであり、学科試験合格を保証するものではない。**
+> 公認教習所が提供するものではなく、最終的な学習・確認は公式情報源（道路交通法・交通の方法に関する教則）でお願いします。
+
 - **対象フェーズ**: Phase 0〜5
 - **想定ユーザー**: 個人（仮免・本免取得を目指す学習者）
 - **収益モデル**: 無料
+- **コスト目安**: 月額 ¥3,000 程度（GCP + Vertex AI、詳細は §12 / §16.4）
+
+---
+
+## 目的・スコープ
+
+### 目的
+
+- 仮免・本免の学科試験対策を、LINE 上の手軽なテストで支援する
+- 法令改正に追従しつつ、根拠条文・教則ページを必ず添付して **学習者が自分で公式情報を確認できる** UX を提供する
+- 個人運営でも品質を保つため、LLM の自動生成 + 自動 QA + 月次法令追従を組み合わせる
+
+### Non-Goals
+
+- 学科試験合格の保証 (固定免責文言で明示)
+- 教習所代替・運転技能指導 (学科のみ、実技は対象外)
+- 商用 SaaS 化 (個人運営、無料)
+- 米国・他国の運転免許 (日本専用)
 
 ---
 
@@ -1026,3 +1064,146 @@ Model Armor と MCP Proxy は**重複ではなく相補関係**。MCP Proxy は�
 | **1** | LINE Bot 最小実装で `business_event` を発行開始<br> MCP は未実装のため Proxy 連携は preparation のみ |
 | **2** | MCP 群を実装した時点で MCP Proxy passive mode 経由にする<br> Langfuse 連携 ON、Vertex AI Model Armor を Claude 呼び出しに差し込む |
 | **3〜5** | mart の追加、Red Team シナリオ追加、active mode への昇格 |
+
+---
+
+## 16. 非機能要件 (NFR)
+
+`docs/SYSTEM_DESIGN_TEMPLATE.md` 準拠で 7 観点を整理。詳細値は既存の各節を参照。
+
+### 16.1 性能
+
+| 項目 | 目標 | 関連節 |
+|---|---|---|
+| LINE webhook 応答 | < 3 秒 (LINE 制約)、即時 200 OK + Cloud Tasks 非同期化で達成 | §6 データフロー |
+| 問題プールヒット時の出題 | < 5 秒 | §6.1 |
+| 同期生成フォールバック | < 30 秒 (例外パス) | §6.1 |
+| 月次法令追従パイプライン | 1 時間以内 (1 ヶ月分) | §7 |
+
+### 16.2 可用性
+
+- 個人運営のため **99% 程度で十分**、計画停止 OK
+- Cloud Run リージョン: `asia-northeast1` (Tokyo、Vertex AI Claude も同リージョン)
+- `line-bot-service` のみ `min-instances=1` (LINE webhook の 3 秒制約に応答するため)、他は 0
+
+### 16.3 セキュリティ
+
+3 段ガード構成 (§15.3 Model Armor 役割分担より):
+
+| 層 | 守るもの | 実装 |
+|---|---|---|
+| **入口** (LINE Webhook) | HMAC-SHA256 署名検証 / スパム検知 | line-bot-service |
+| **MCP 経路** | rate limit / DLP / tool pinning / injection | security-platform/MCP Proxy |
+| **LLM 経路** | プロンプトインジェクション / PII 漏洩 | Vertex AI Model Armor |
+
+- secret 管理: Secret Manager + Workload Identity Federation (詳細は §4.3)
+- security-platform 連携: `inventory.yaml` / `scan.yaml` に登録済 (§15.2)
+- CI: gitleaks + bandit が PR gate (§15.2.6)
+
+### 16.4 コスト
+
+| 項目 | 上限目標 | 実値 (Phase 0 試算) |
+|---|---|---|
+| **Anthropic API (Vertex 経由) 月額** | $10〜30 (¥1,500〜4,500) | 月次バッチ生成中心 |
+| **LINE Push Message** | 800 通/月 (無料枠 1,000 通の 80%) | リマインドは週 1・オプトイン |
+| Cloud Run (line-bot-service) min-instance | 1 | LINE 3 秒応答のため |
+| Cloud Run (その他) min-instance | 0 | cold start 許容 |
+| BigQuery クエリ | 月 10 GB スキャン以下 | analytics-platform 共用 |
+| Firestore 読み取り | 1 日 50,000 read 以下 | セッション・出題履歴 |
+| Cloud SQL Postgres + pgvector | db-f1-micro | 重複検査用ベクトル DB |
+
+詳細は §12 コスト試算・運用上限。
+
+### 16.5 プライバシー / データ保持
+
+- 基本方針: **匿名化 + 最小限のデータ保持** (§8.4)
+- LINE userId は `internal_uid` (sha256 hash) に変換して保存、raw は流さない
+- 保持期間:
+  - 出題履歴 / 採点結果: 永続 (ユーザー削除要求まで)
+  - LLM 会話 raw: 30 日 (デバッグ用)
+  - 法令スナップショット (GCS): 過去 12 ヶ月分
+- ユーザー削除コマンド (Phase 1 から実装): Firestore + BigQuery の internal_uid 紐付けを物理削除
+- 第三者への提供: Anthropic (Vertex 経由)・GCP のみ、利用規約で明示 (§0.4)
+
+### 16.6 キャパシティ
+
+- 想定ユーザー: 個人運営、~10 人 (家族・友人)
+- Firestore: セッション + ユーザーごと per-question state、~1 GB / 100 ユーザー
+- BigQuery: agent_events + question_attempts、月 100 MB 程度
+- 問題プール: ~5,000 問 想定 (仮免 / 本免 各 ~2,500、難易度・カテゴリ別に分散)
+
+### 16.7 保守性 / テスト性
+
+- 問題品質保証: Fact Checker + Quality Reviewer + cross-check (Gemini 2nd opinion) + 人間レビュー (Phase 1 全件、Phase 2+ 抜き取り)
+- カバレッジ目標: **80%+** (各 agent の純関数・スキーマ検証は 90%+)
+- lint: `ruff check` を CI で実行
+- observability: analytics-platform → JSONL → BigQuery、Langfuse trace は Phase 2 から有効化
+- 法令改正への耐性: `law_article_refs` で問題 → 条文の対応を持ち、月次パイプラインで自動 `needs_review` フラグ付け (§7)
+
+---
+
+## 17. 設計判断ログ (ADR-lite)
+
+主要な設計判断を 1 行 = 1 判断で記録。詳細根拠 (代替案・トレードオフ) は別 doc または PROPOSALS にリンク。
+
+| 日付 | 判断 | 理由 | 詳細 |
+|---|---|---|---|
+| 2026-04-27 | LLM プロバイダは **Vertex AI 経由 Claude** (Anthropic 直呼ばず) | GCP IAM / VPC 統合 + Tokyo リージョン低レイテンシ + Model Armor 適用可 | §4.2 / [INFRA_DECISIONS.md](INFRA_DECISIONS.md) |
+| 2026-04-27 | Vertex AI リージョンは **`asia-northeast1` (Tokyo)** | LINE 利用者 = 日本居住者、レイテンシ + データ主権 | §14.2 |
+| 2026-04-27 | 重複検査用ベクトル DB は **Cloud SQL Postgres + pgvector** (db-f1-micro) | Vertex AI Vector Search よりコスト 1/10、規模に対し十分 | §14.2 / [INFRA_DECISIONS.md](INFRA_DECISIONS.md) |
+| 2026-04-27 | エンベディングモデルは Vertex AI **`text-embedding-004`** (768 次元) | 多言語対応、Vertex 内で完結 | §14.2 |
+| 2026-04-27 | 問題スキーマに **`sources` (1 件以上必須)** + `law_article_refs` を NOT NULL | 全問題に根拠表示の運用ポリシー (§0.3) を schema レベルで強制 | §5 |
+| 2026-04-27 | LINE webhook は **即時 200 OK + Cloud Tasks 非同期化** | LINE 3 秒制約に対し、出題・採点を全て async 化 | §6 |
+| 2026-04-27 | Phase 0.5 で **レビュー Web UI** (Cloud Run + IAP) | 1 人運用での問題 QA を効率化、GUI で承認 / 差戻 | §10 |
+| 2026-04-27 | 出題プール **事前生成中心**、同期生成は例外パス | コスト + レイテンシ + 品質安定性 | §6.1 |
+| 2026-04-27 | 法令改正追従は **月次 Cloud Workflows** で自動化 | e-Gov diff → `needs_review` フラグ → 運営者通知の閉ループ | §7 |
+| 2026-04-27 | **internal_uid (sha256 hash) で LINE userId を匿名化** | PII 配慮、analytics-platform / BigQuery に raw を流さない | §8.1 / §8.4 |
+| 2026-04-27 | **仮免・本免モード切替** + 模擬試験モード (50 問 30 分 / 95 問 50 分) | 公式試験形式に合わせる | §9 |
+| 2026-04-27 | Spaced Repetition は **Phase 6 で本実装** (Phase 1〜5 は出題優先度の暗黙最適化のみ) | MVP のスコープを絞る、復習モード自体は Phase 1 から提供 | §9.4 |
+| 2026-04-27 | **analytics-platform / security-platform 共通基盤** を再利用 (独立基盤を持たない) | メンテナンスコスト削減、複数エージェント横断の観測性・セキュリティ統制 | §15 |
+| 2026-04-27 | 標識画像は **自前 SVG 化を基本** + 政府オープンデータ優先、第三者教材イラストは使用しない | 著作権リスクの完全排除 | §2.3 |
+
+---
+
+## 18. 関連ドキュメント
+
+このプロジェクトのドキュメントは目的別に分割されている:
+
+| ドキュメント | 内容 | 種別 |
+|---|---|---|
+| [`README.md`](../README.md) | Quickstart + ドキュメント目次 | README |
+| [`DESIGN.md`](DESIGN.md) (本ファイル) | 設計書全体 | per-system design |
+| [`INFRASTRUCTURE.md`](INFRASTRUCTURE.md) | GCP インフラ構成と各コンポーネントの役割 | 設計 |
+| [`INFRA_DECISIONS.md`](INFRA_DECISIONS.md) | GCP インフラに関する個別決定メモ (Vertex リージョン / pgvector 等) | ADR-lite |
+| [`SETUP.md`](SETUP.md) | ローカル / 本番環境のセットアップ手順 | 運用 |
+| [`DEPLOY.md`](DEPLOY.md) | Phase 1 最小デプロイ手順 (Terraform + 一発削除可) | 運用 |
+| [`BACKUP_RESTORE.md`](BACKUP_RESTORE.md) | バックアップ / リストア手順 | 運用 |
+| [`DATA_SOURCES.md`](DATA_SOURCES.md) | 法令・教則・標識データの調達方針 | データ |
+| [`VERTEX_ENABLEMENT.md`](VERTEX_ENABLEMENT.md) | Vertex AI Claude / Gemini の有効化手順 | 運用 |
+| [`INTEGRATIONS.md`](INTEGRATIONS.md) | analytics-platform / security-platform 連携方針 | 統合 |
+| [`PHASE2_PLAN.md`](PHASE2_PLAN.md) | Phase 2 の PR 分割計画 (Sub 2-A/B/C) | Roadmap |
+| [`POLICIES/TERMS_OF_SERVICE.md`](POLICIES/TERMS_OF_SERVICE.md) | 利用規約 (初版) | ポリシー |
+| [`POLICIES/PRIVACY_POLICY.md`](POLICIES/PRIVACY_POLICY.md) | プライバシーポリシー (初版) | ポリシー |
+| [`../terraform/README.md`](../terraform/README.md) | Terraform 構成の詳細 | 運用 |
+| [`../../docs/PROPOSALS/`](../../docs/PROPOSALS/) | モノレポ共通の機能個別 ADR | per-feature |
+
+---
+
+## 19. 用語集
+
+| 用語 | 意味 |
+|---|---|
+| 仮免 / 本免 | 仮運転免許 (教習所内) / 本免許 (公道)。試験範囲・問題数が異なる |
+| 模擬試験 | 公式試験形式 (仮免 50 問 30 分 / 本免 95 問 50 分) で本番想定の出題 |
+| 復習モード | 過去誤答 / 苦手分野を優先出題するモード (Phase 6+ で Spaced Repetition 本実装) |
+| internal_uid | LINE userId を sha256 hash 化した内部 ID。PII 配慮で raw userId を流さない |
+| `applicable_goals` | 1 問の対象範囲。`["provisional"]` (仮免のみ) / `["full"]` (本免のみ) / `["provisional", "full"]` (両方) |
+| `law_article_refs` | 問題 → 条文の対応 (`law_id` + `article` + `paragraph`)。法令改正時の影響特定に使う |
+| `sources` | 問題の根拠情報 (e-Gov 法令検索 URL / 教則 PDF page など)。1 件以上必須 |
+| Question Generator | LLM (Claude on Vertex) で問題を生成する Agent (§3.1.1) |
+| Fact Checker | 生成問題の根拠条文・実在性を検証する Agent (§3.1.2) |
+| Quality Reviewer | 生成問題の品質 (難易度・読みやすさ) を評価する Agent (§3.1.2) |
+| review-admin-ui | 運営者向けレビュー Web UI (Cloud Run + IAP、§10) |
+| MCP Proxy | security-platform が提供する MCP gateway。rate limit / DLP / injection 検知 |
+| Model Armor | Vertex AI のプロンプト / レスポンスガード機能 (§15.3) |
+| `question-bank` | 生成済み問題のマスター。Firestore (出題用) + BigQuery (履歴・分析) で複製 |
