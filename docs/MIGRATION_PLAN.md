@@ -33,7 +33,7 @@
 |---|---|---|---|---|
 | 1 | **lifeplanner-agent** | README 895 行 (Quickstart + 機能要件 + Phase + アーキ全部入り) | README から機能要件 / Phase / アーキを `docs/DESIGN.md` に分離。README は Quickstart 中心に圧縮 | ✅ PR #108 |
 | 2 | **piyolog-analytics** | `docs/design.md` 既存 | 新テンプレ準拠の `docs/DESIGN.md` に置換 (旧 design.md 削除)。NFR 7 節 + ADR-lite + 用語集追記 | ✅ PR #110 |
-| 3 | **driving-license-bot** | `docs/DESIGN.md` 既存 (体系的) | 新テンプレに合わせて節構成を寄せる。既存 11 doc は維持 | ⏳ |
+| 3 | **driving-license-bot** | `docs/DESIGN.md` 既存 (体系的、1028 行) | ヘッダ + 変更履歴 + Executive Summary + 目的・スコープ追加、§16 NFR / §17 ADR-lite / §18 関連 docs / §19 用語集 を末尾新設 (§0〜§15 は anchor 互換のため番号維持)。既存 11 docs は維持 | ✅ PR #111 |
 
 ### Stage 3: 残エージェント + Operations + README 統一
 
@@ -96,7 +96,7 @@ per-feature proposal doc (`docs/PROPOSALS/NNNN-*.md`) は **forward-going が原
 |---|---|---|---|
 | lifeplanner-agent | [x] PR #108 | [x] PR #108 | [ ] |
 | piyolog-analytics | [x] PR #110 | [x] PR #110 | [ ] |
-| driving-license-bot | [ ] | [ ] | [ ] |
+| driving-license-bot | [x] PR #111 | [x] PR #111 | [ ] |
 | analytics-platform | [ ] | [ ] | [ ] |
 | stock-analysis-agent | [ ] | [ ] | [ ] |
 | tech-news-agent | [ ] | [ ] | [ ] |

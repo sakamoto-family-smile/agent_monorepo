@@ -12,18 +12,25 @@
 
 ## ドキュメント
 
-| ドキュメント | 内容 |
-|---|---|
-| [docs/DESIGN.md](docs/DESIGN.md) | 設計書（全体像・データフロー・スキーマ・フェーズ） |
-| [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | GCP インフラ構成と各コンポーネントの役割 |
-| [docs/SETUP.md](docs/SETUP.md) | ローカル / 本番環境のセットアップ手順 |
-| **[docs/DEPLOY.md](docs/DEPLOY.md)** | **Phase 1 最小デプロイ手順（Terraform + 一発削除可）** |
-| [terraform/README.md](terraform/README.md) | Terraform 構成の詳細 |
-| [docs/POLICIES/TERMS_OF_SERVICE.md](docs/POLICIES/TERMS_OF_SERVICE.md) | 利用規約（初版） |
-| [docs/POLICIES/PRIVACY_POLICY.md](docs/POLICIES/PRIVACY_POLICY.md) | プライバシーポリシー（初版） |
-| [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) | 法令・教則・標識データの調達方針 |
-| [docs/INFRA_DECISIONS.md](docs/INFRA_DECISIONS.md) | GCP インフラに関する決定メモ |
-| [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | analytics-platform / security-platform 連携方針 |
+設計書は `docs/SYSTEM_DESIGN_TEMPLATE.md` 準拠で、§16 NFR / §17 設計判断ログ /
+§18 関連ドキュメント / §19 用語集 を末尾に整備済。
+
+| ドキュメント | 内容 | 種別 |
+|---|---|---|
+| [docs/DESIGN.md](docs/DESIGN.md) | 設計書（全体像・データフロー・スキーマ・フェーズ・NFR・ADR-lite・用語集） | per-system design |
+| [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | GCP インフラ構成と各コンポーネントの役割 | 設計 |
+| [docs/INFRA_DECISIONS.md](docs/INFRA_DECISIONS.md) | GCP インフラに関する個別決定メモ (Vertex リージョン / pgvector 等) | ADR-lite |
+| [docs/SETUP.md](docs/SETUP.md) | ローカル / 本番環境のセットアップ手順 | 運用 |
+| **[docs/DEPLOY.md](docs/DEPLOY.md)** | **Phase 1 最小デプロイ手順（Terraform + 一発削除可）** | 運用 |
+| [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md) | バックアップ / リストア手順 | 運用 |
+| [docs/VERTEX_ENABLEMENT.md](docs/VERTEX_ENABLEMENT.md) | Vertex AI Claude / Gemini の有効化手順 | 運用 |
+| [terraform/README.md](terraform/README.md) | Terraform 構成の詳細 | 運用 |
+| [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) | 法令・教則・標識データの調達方針 | データ |
+| [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | analytics-platform / security-platform 連携方針 | 統合 |
+| [docs/PHASE2_PLAN.md](docs/PHASE2_PLAN.md) | Phase 2 の PR 分割計画 | Roadmap |
+| [docs/POLICIES/TERMS_OF_SERVICE.md](docs/POLICIES/TERMS_OF_SERVICE.md) | 利用規約（初版） | ポリシー |
+| [docs/POLICIES/PRIVACY_POLICY.md](docs/POLICIES/PRIVACY_POLICY.md) | プライバシーポリシー（初版） | ポリシー |
+| [../docs/PROPOSALS/](../docs/PROPOSALS/) | モノレポ共通の機能個別 ADR | per-feature |
 
 ## アーキテクチャの概要
 
