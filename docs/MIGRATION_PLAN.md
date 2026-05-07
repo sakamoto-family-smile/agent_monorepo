@@ -64,6 +64,17 @@
 進行は **1 PR ずつ merge → 次** の順。各 PR で得た学び (テンプレの足りない節 / ノイズ) は
 テンプレ doc にフィードバック反映。
 
+## Per-feature proposal doc の運用方針
+
+per-feature proposal doc (`docs/PROPOSALS/NNNN-*.md`) は **forward-going が原則**。
+過去 PR の backfill は限定的に行う:
+
+- **forward-going**: 「✅ 推奨」「✅ 必須」規模の新規 PR は Draft → 設計レビュー → 実装の流れ。詳細ルールは [`docs/PROPOSALS/README.md`](PROPOSALS/README.md) の「運用ルール」節
+- **backfill 対象 (2 件)**:
+  - PR #100 piyolog 子情報 DB + 設定 UI (Stage 2 piyolog 移行後)
+  - PR #104 lifeplanner LINE 分析コマンド (Stage 2 完了後)
+- **その他過去 PR は backfill 不要** (commit log + PR description で追える範囲)
+
 ## 既存ドキュメントの扱い (沈没コスト回避)
 
 | 既存 doc | 移行後の扱い |
