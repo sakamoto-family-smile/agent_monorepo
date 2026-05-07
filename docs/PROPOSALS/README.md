@@ -1,0 +1,133 @@
+# Proposals (機能提案ドキュメント)
+
+このディレクトリには、モノレポ内の各エージェント (driving-license-bot,
+piyolog-analytics, lifeplanner-agent, etc.) に対する機能提案 / 設計判断を、
+**KEP (Kubernetes Enhancement Proposal) ベースの軽量フォーマット** で記録する。
+
+## 目的
+
+- 「なぜ作ったか」「どう設計したか」「他にどんな案があったか」を後から追える
+- PR を分割するときの設計ベースライン (1 つの提案 → 複数 PR)
+- ADR (Architecture Decision Record) を兼ねる: `Alternatives` + `Implementation History`
+  セクションで意思決定を記録
+- 将来の品質管理 / 再設計時のリファレンス
+
+## 書くタイミング
+
+| 規模 | 書く？ |
+|---|---|
+| バグ修正、typo、軽微なリファクタ | ❌ 不要 (commit message + PR description で十分) |
+| 1 PR で完結する小機能 (例: 新コマンド 1 個追加) | △ 任意 (LINE_ROADMAP.md 等の per-system roadmap で代替可) |
+| 複数 PR にまたがる中規模機能 (例: PR 1 / PR 2 のような連番) | ✅ 推奨 |
+| アーキテクチャに影響する変更 (DB スキーマ大改修、認証方式変更等) | ✅ 必須 |
+| 新エージェント立ち上げ | ✅ 必須 (per-system design を兼ねる) |
+
+## 命名規則
+
+```
+docs/PROPOSALS/NNNN-short-kebab-title.md
+```
+
+- `NNNN`: 4 桁ゼロ埋めの連番 (`0001`, `0002`, ...)
+  - 採番は merge 順 (PR 作成時に既存最大値 + 1 を取る)
+  - 衝突した場合はリベース時に再採番
+- `short-kebab-title`: 短い英語タイトル (3-5 単語、kebab-case)
+  - 例: `0001-line-cashflow-display.md`
+  - 日本語タイトルは proposal 本文 (`# PROPOSAL-NNNN: ...`) で書く
+
+## 採番台帳
+
+| Number | Title | Target | Status |
+|---|---|---|---|
+| [0001](0001-lifeplanner-cashflow-breakdown.md) | キャッシュフロー粒度向上 | lifeplanner-agent | Implemented |
+
+新しい提案を作るたびに上記表に 1 行追加する (forget-me-not)。
+
+## ステータス遷移
+
+```
+Draft → In Review → Approved → Implementing → Implemented
+                              ↓
+                          Rejected / Deprecated
+```
+
+| ステータス | 意味 |
+|---|---|
+| **Draft** | 執筆中。レビュー前 |
+| **In Review** | PR を出してレビュー待ち |
+| **Approved** | レビュー OK、実装着手前 |
+| **Implementing** | 実装中 (PR 着手済) |
+| **Implemented** | 実装完了 (関連 PR がすべて merged) |
+| **Rejected** | 不採用 (理由を `Drawbacks` セクションに残す) |
+| **Deprecated** | 古くなって無効。後継提案へのリンクを残す |
+
+## 書き方ガイド
+
+1. `TEMPLATE.md` をコピー → `NNNN-your-title.md` にリネーム
+2. **必須セクション**は全部埋める (空の節は削除しない、N/A と書く)
+3. **推奨セクション**は該当する場合のみ埋める。空なら削除して構わない
+4. PR 開いて design レビューを受ける
+5. Approved になったら実装 PR で `Implementing` → `Implemented` に更新
+6. 実装 PR で発覚した設計変更は提案 doc を更新 (sticky doc 方針)
+
+## 必須 / 推奨 / 不要 の判断基準
+
+KEP 全項目を、本モノレポ (個人 / 家族向け、Cloud Run + Cloud SQL のシンプル
+構成) の規模に合わせて以下で分類済:
+
+### [必須] 必須セクション
+
+- **Title / Summary / Motivation / Goals / Non-Goals** — どんな提案でも基本
+- **Proposal / Design Details** — 設計内容
+- **Risks and Mitigations** — データ消失・PII 漏洩・LLM 暴走など個人用途でも事故ると痛い
+- **Test Plan** (pytest unit / integration) — 最低限の品質ゲート
+- **Alternatives** — 設計判断の根拠 (ADR を兼ねる)
+- **Implementation History** — PR 番号 + 日付の更新履歴
+
+### [推奨] 推奨セクション (該当する場合のみ書く)
+
+- **User Stories** — 家族メンバー視点のユースケース 1-2 個
+- **Notes/Constraints/Caveats** — 既知の制約 (例: 「年単位粒度」)
+- **Migration / Rollback** — alembic migration の方針、env 削除手順
+- **Feature Enablement** — env / config で ON/OFF できるか
+- **Monitoring (簡易)** — どのログ / Cloud Logging クエリで動作確認できるか
+- **Troubleshooting (簡易)** — よくある詰まりどころ
+- **Dependencies** — LINE / Vertex AI / 他エージェント連携の依存先
+- **Non-Functional Requirements (機能個別)** — 性能 / コスト / プライバシー / キャパシティ。システム全体 NFR (月額予算等) は per-system design template (将来作成) に書く
+- **Drawbacks** — 不採用の主張があるとき
+
+### [不要] 不要セクション (Kubernetes 特有 / 個人プロジェクト規模で過剰)
+
+- **Release Signoff Checklist** — Kubernetes リリースサイクル特有
+- **Graduation Criteria (Alpha/Beta/GA)** — feature gate のグラデーションは過剰
+- **Version Skew Strategy** — 単一プロセス + 単一クラスタには不要
+- **Scalability の細かい質問** (API call 数、cloud provider 呼出回数等) — 規模に対し overkill
+- **PRR の細かい SLI/SLO 数値目標** — 「動けば良し」レベルで十分
+- **Infrastructure Needed** — SIG / プロジェクトリソース要求の話で個人にはない
+
+詳細は `TEMPLATE.md` のコメントを参照。
+
+## 既存ドキュメントとの関係
+
+| 既存 doc | 関係 |
+|---|---|
+| 各エージェントの `README.md` | システム全体の使い方。本テンプレとは別軸 (将来 README テンプレも作る予定 → §「将来計画」参照) |
+| `piyolog-analytics/docs/design.md` | per-system 設計書。本テンプレとは粒度が違う (per-feature ではなく per-system) |
+| `piyolog-analytics/docs/SETTINGS.md` / `BACKUP_RESTORE.md` | 機能個別の運用ガイド。本テンプレで書き直すか / そのまま運用ガイドとして残すかは段階的に判断 |
+| `lifeplanner-agent/docs/LINE_ROADMAP.md` | 複数 PR を束ねる roadmap。本テンプレの "Implementation History" + 一覧表 で代替可 |
+
+**移行方針**:
+- 既存 doc は **そのまま残す** (沈没コストを払わない)
+- 新規 / 大きめの再設計時に本テンプレを使う
+- 余裕があれば既存 doc を **段階的にテンプレ準拠に書き換える** (優先度低)
+
+## 将来計画
+
+- [ ] **Per-system design template** (`docs/SYSTEM_DESIGN_TEMPLATE.md`):
+  - 1 エージェント全体の機能要件 / 非機能要件 / アーキテクチャ図 を書く
+  - 既存 `piyolog-analytics/docs/design.md` をベースに項目抽出
+- [ ] **README template** (`docs/README_TEMPLATE.md`):
+  - 各エージェントの README フォーマット統一
+  - Quickstart / API / env / セットアップ手順 / 運用 の構成を共通化
+- [ ] **ADR (個別意思決定)**: 上記 per-feature proposal が大きくなりすぎる場合、ADR
+  を別ディレクトリ (`docs/ADR/`) に切り出すかを検討
