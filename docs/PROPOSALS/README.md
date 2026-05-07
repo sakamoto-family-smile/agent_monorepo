@@ -22,6 +22,31 @@ piyolog-analytics, lifeplanner-agent, etc.) に対する機能提案 / 設計判
 | アーキテクチャに影響する変更 (DB スキーマ大改修、認証方式変更等) | ✅ 必須 |
 | 新エージェント立ち上げ | ✅ 必須 (per-system design を兼ねる) |
 
+## 運用ルール (forward-going)
+
+「✅ 推奨」「✅ 必須」に該当する PR を出す前に、以下のフローを踏む:
+
+1. **Draft 作成**: `TEMPLATE.md` をコピーして `NNNN-short-title.md` を作成、必須セクションを埋める。Status は `Draft`
+2. **採番**: 採番台帳 (本ファイルの表) の最大値 + 1 を取り、ファイル名と本文の `# PROPOSAL-NNNN:` に反映。台帳に 1 行追加
+3. **設計レビュー PR**: 提案 doc 単体で PR を作るのが理想 (Stage 1 のテンプレで実証済)。実装 PR を急ぐ場合は実装 PR と一括でも OK、その場合は PR description の冒頭に「設計: docs/PROPOSALS/NNNN-...md 参照」のリンクを必ず入れる
+4. **Approved → Implementing**: レビュー OK 後、実装 PR を切る (ID は実装 PR の本文に記載)
+5. **Implemented**: 全関連 PR がマージされたら Status を `Implemented` に更新し、`Implementation History` に PR 番号を追記
+
+> **強制度**: 必須項目はレビュー時の指摘対象とする (上記ガイドの「✅ 必須」)。
+> 推奨項目は判断委ねるが、後で「なぜそうした？」となりそうなら書いておく方が安全。
+
+## Backfill (限定)
+
+過去の重要 PR で proposal doc が未作成のものは、必要に応じて後追いで作成する
+(沈没コスト回避のため、新規分を優先)。
+
+| 番号 | タイトル | 対象 PR | 優先度 | 状態 |
+|---|---|---|---|---|
+| (予定) | piyolog 子情報 DB + 設定 UI | [#100](https://github.com/sakamoto-family-smile/agent_monorepo/pull/100) | 中 | Stage 2 (#109 piyolog 移行) 後に検討 |
+| (予定) | lifeplanner LINE 分析コマンド | [#104](https://github.com/sakamoto-family-smile/agent_monorepo/pull/104) | 中 | Stage 2 完了後に検討 |
+
+それ以外の過去 PR は backfill 不要 (commit log + PR description で十分追える)。
+
 ## 命名規則
 
 ```
