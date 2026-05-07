@@ -205,6 +205,37 @@ env / config で機能を ON/OFF できるか。
 
 - ...
 
+### [推奨] 5.4 Non-Functional Requirements
+
+<!--
+この機能特有の NFR を書く。システム全体の NFR (月額予算 / 全体可用性 等)
+は per-system design template (docs/SYSTEM_DESIGN_TEMPLATE.md, 将来作成)
+の方に書く。該当しない項目は削除して構わない。
+
+凡例:
+- 性能: 応答時間 / throughput / 計算量
+- コスト: LLM 呼出回数 / cloud 課金 / ストレージ
+- プライバシー: PII 扱い / データ保持期間
+- キャパシティ: 同時接続 / DB レコード / JSON サイズ
+- セキュリティ: auth / authz / secret / rate limit (Risks と重複時はそちらに集約)
+-->
+
+#### 性能 (Performance)
+- 応答時間目標: <!-- 例: LINE webhook 3 秒以内、画像生成 5 秒以内 -->
+- スループット: <!-- 例: 1 家族あたり 1 日 N 回想定 -->
+- 計算量: <!-- 例: O(years × categories) = 600 ループ程度 -->
+
+#### コスト (Cost)
+- LLM 呼出: <!-- 例: 1 conversation あたり Vertex AI ¥X 以下 (モデル × tokens) -->
+- ストレージ / 計算: <!-- 例: Cloud SQL 追加 X GB、Cloud Run minInstances 据え置き -->
+
+#### プライバシー / データ保持
+- PII 扱い: <!-- 例: raw text は DB のみ、analytics は sha256 hash で emit -->
+- 保持期間: <!-- 例: conversation 履歴 90 日、ログ 30 日 -->
+
+#### キャパシティ
+- <!-- 例: 同時 10 ユーザーまで / DB レコード 10 万件 / JSON カラム 5KB/scenario -->
+
 ---
 
 ## [推奨] 6. Drawbacks

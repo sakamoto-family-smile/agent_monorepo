@@ -179,6 +179,33 @@ DB スキーマ変更なし。`SimulationResultRow.metrics` は JSON カラム�
 - 既存の `services/category_mapper.py` (canonical カテゴリ変換) に依存
 - 新規の外部依存なし (DB / Python 標準ライブラリのみ)
 
+### 5.4 Non-Functional Requirements
+
+#### 性能
+- `compute_expense_baseline` は `transactions` 表の indexed カラム
+  (`household_id`, `date`) を使った GROUP BY 1 発、集計件数は
+  「12 ヶ月 × ~21 canonical カテゴリ」程度 → 想定 < 50ms
+- `run_projection` の breakdown 計算は O(years × categories) で
+  30 × 21 ≈ 630 ループ → < 10ms
+
+#### コスト
+- 追加の外部 API 呼び出しなし (LLM / cloud provider 課金影響ゼロ)
+- DB ストレージ: `simulation_results.metrics` JSON が ~1KB → ~5KB に増加
+  (30 行 × scenario 数。1 家族で問題ない規模)
+
+#### プライバシー
+- `expense_breakdown` / `event_breakdown` には category 名・amount のみ。
+  生 transaction (店名・raw text 等) は含まず
+- analytics-platform への emit (`scenario_simulated` イベント) にも
+  raw transaction は送信されない (集計値のみ)
+
+#### キャパシティ
+- 30 年 × 21 カテゴリ × N イベントで JSON カラムが膨らむ可能性。
+  1 シナリオあたり ~5KB 想定 (`simulation_results` の Postgres JSON 上限は
+  256MB なので余裕)
+- `seed_events.py` で 100 イベント以上の一括投入は未検証だが、
+  N=10 程度を想定
+
 ---
 
 ## 6. Drawbacks

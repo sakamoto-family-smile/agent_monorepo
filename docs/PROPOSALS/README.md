@@ -93,6 +93,7 @@ KEP 全項目を、本モノレポ (個人 / 家族向け、Cloud Run + Cloud SQ
 - **Monitoring (簡易)** — どのログ / Cloud Logging クエリで動作確認できるか
 - **Troubleshooting (簡易)** — よくある詰まりどころ
 - **Dependencies** — LINE / Vertex AI / 他エージェント連携の依存先
+- **Non-Functional Requirements (機能個別)** — 性能 / コスト / プライバシー / キャパシティ。システム全体 NFR (月額予算等) は per-system design template (将来作成) に書く
 - **Drawbacks** — 不採用の主張があるとき
 
 ### [不要] 不要セクション (Kubernetes 特有 / 個人プロジェクト規模で過剰)
