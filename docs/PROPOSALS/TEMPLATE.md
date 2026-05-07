@@ -3,8 +3,8 @@
 必須セクションを埋めてください。
 
 凡例:
-  🟢 = 必須 (空にしない、書くことがなければ "N/A" と理由を記載)
-  🟡 = 推奨 (該当する場合のみ書く、不要なら節ごと削除可)
+  [必須] 空にしない (書くことがなければ "N/A" と理由を記載)
+  [推奨] 該当する場合のみ書く (不要なら節ごと削除可)
   HTML コメント (`<!-- ... -->`) は提出時に削除して OK
 
 書き方の指針 / 採番ルール / ステータス遷移は `README.md` 参照。
@@ -25,20 +25,20 @@
 
 ---
 
-## 🟢 1. Summary
+## [必須] 1. Summary
 
 <!--
 1-2 段落で「何を作るか / なぜ作るか」。
 release notes やロードマップでそのまま引用される想定で書く。
 -->
 
-## 🟢 2. Motivation
+## [必須] 2. Motivation
 
 <!--
 背景・解決したい課題。「現状どう困っているか」「放置するとどうなるか」を書く。
 -->
 
-### 🟢 2.1 Goals
+### [必須] 2.1 Goals
 
 <!--
 達成したいこと (測れる粒度で 3-5 個)。
@@ -48,7 +48,7 @@ release notes やロードマップでそのまま引用される想定で書く
 - [ ] ...
 - [ ] ...
 
-### 🟢 2.2 Non-Goals
+### [必須] 2.2 Non-Goals
 
 <!--
 意図的にスコープ外とすること。あとから「これも欲しい」と言われた時の
@@ -61,13 +61,13 @@ release notes やロードマップでそのまま引用される想定で書く
 
 ---
 
-## 🟢 3. Proposal
+## [必須] 3. Proposal
 
 <!--
 何を作るかの本文。User Stories でユースケースを 1-2 個示すと伝わりやすい。
 -->
 
-### 🟡 3.1 User Stories
+### [推奨] 3.1 User Stories
 
 <!--
 家族メンバー視点のシナリオ。LINE Bot のような UX 重視機能では特に有用。
@@ -80,7 +80,7 @@ release notes やロードマップでそのまま引用される想定で書く
 #### 3.1.2 ストーリー 2
 > ...
 
-### 🟡 3.2 Notes / Constraints / Caveats
+### [推奨] 3.2 Notes / Constraints / Caveats
 
 <!--
 設計時の前提・既知の制約をここに集約する。
@@ -90,7 +90,7 @@ release notes やロードマップでそのまま引用される想定で書く
 
 - ...
 
-### 🟢 3.3 Risks and Mitigations
+### [必須] 3.3 Risks and Mitigations
 
 <!--
 セキュリティ / データ消失 / PII / LLM 暴走 / コスト超過 など、想定リスクを列挙。
@@ -104,7 +104,7 @@ release notes やロードマップでそのまま引用される想定で書く
 
 ---
 
-## 🟢 4. Design Details
+## [必須] 4. Design Details
 
 <!--
 具体的な技術仕様: API / DB / I/O / 関数シグネチャ / シーケンス図 等。
@@ -127,7 +127,7 @@ release notes やロードマップでそのまま引用される想定で書く
 
 <!-- どこに何を追加 / 変更するか -->
 
-### 🟢 4.5 Test Plan
+### [必須] 4.5 Test Plan
 
 <!--
 テスト方針。pytest の unit / integration を最低限カバー。
@@ -140,7 +140,7 @@ release notes やロードマップでそのまま引用される想定で書く
 - **Integration**: ...
 - **Manual / E2E**: ...
 
-### 🟡 4.6 Migration / Rollback
+### [推奨] 4.6 Migration / Rollback
 
 <!--
 DB スキーマ変更がある場合に必須。
@@ -154,7 +154,7 @@ DB スキーマ変更がある場合に必須。
 - **Rollback**: ...
 - **既存ユーザー影響**: ...
 
-### 🟡 4.7 Feature Enablement
+### [推奨] 4.7 Feature Enablement
 
 <!--
 env / config で機能を ON/OFF できるか。
@@ -166,7 +166,7 @@ env / config で機能を ON/OFF できるか。
 
 ---
 
-## 🟡 5. Operational Concerns
+## [推奨] 5. Operational Concerns
 
 <!--
 運用に関する観点。本番デプロイ後にトラブったときの参考に。
@@ -207,7 +207,7 @@ env / config で機能を ON/OFF できるか。
 
 ---
 
-## 🟡 6. Drawbacks
+## [推奨] 6. Drawbacks
 
 <!--
 この提案を採用しないほうが良い理由 (もしあれば)。
@@ -218,7 +218,7 @@ env / config で機能を ON/OFF できるか。
 
 - ...
 
-## 🟢 7. Alternatives
+## [必須] 7. Alternatives
 
 <!--
 代替案と却下理由。1-3 案。
@@ -235,7 +235,7 @@ ADR としての意思決定根拠を残す重要パート。
 
 ---
 
-## 🟢 8. Implementation History
+## [必須] 8. Implementation History
 
 <!--
 PR / 設計変更の履歴。merged 後に追記する。

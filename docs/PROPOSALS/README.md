@@ -75,7 +75,7 @@ Draft → In Review → Approved → Implementing → Implemented
 KEP 全項目を、本モノレポ (個人 / 家族向け、Cloud Run + Cloud SQL のシンプル
 構成) の規模に合わせて以下で分類済:
 
-### 🟢 必須
+### [必須] 必須セクション
 
 - **Title / Summary / Motivation / Goals / Non-Goals** — どんな提案でも基本
 - **Proposal / Design Details** — 設計内容
@@ -84,7 +84,7 @@ KEP 全項目を、本モノレポ (個人 / 家族向け、Cloud Run + Cloud SQ
 - **Alternatives** — 設計判断の根拠 (ADR を兼ねる)
 - **Implementation History** — PR 番号 + 日付の更新履歴
 
-### 🟡 推奨 (該当する場合のみ書く)
+### [推奨] 推奨セクション (該当する場合のみ書く)
 
 - **User Stories** — 家族メンバー視点のユースケース 1-2 個
 - **Notes/Constraints/Caveats** — 既知の制約 (例: 「年単位粒度」)
@@ -95,7 +95,7 @@ KEP 全項目を、本モノレポ (個人 / 家族向け、Cloud Run + Cloud SQ
 - **Dependencies** — LINE / Vertex AI / 他エージェント連携の依存先
 - **Drawbacks** — 不採用の主張があるとき
 
-### 🔴 不要 (Kubernetes 特有 / 個人プロジェクト規模で過剰)
+### [不要] 不要セクション (Kubernetes 特有 / 個人プロジェクト規模で過剰)
 
 - **Release Signoff Checklist** — Kubernetes リリースサイクル特有
 - **Graduation Criteria (Alpha/Beta/GA)** — feature gate のグラデーションは過剰
