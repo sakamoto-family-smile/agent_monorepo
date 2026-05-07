@@ -21,19 +21,19 @@
 ### Stage 1: テンプレ整備 ✅ (本 PR)
 
 - [x] PR #106: per-feature proposal template (`docs/PROPOSALS/TEMPLATE.md`)
-- [ ] 本 PR: per-system design template (`docs/SYSTEM_DESIGN_TEMPLATE.md`)
-- [ ] 本 PR: README template (`docs/README_TEMPLATE.md`)
-- [ ] 本 PR: ドキュメントテンプレ index (`docs/README.md`)
+- [x] PR #107: per-system design template (`docs/SYSTEM_DESIGN_TEMPLATE.md`)
+- [x] PR #107: README template (`docs/README_TEMPLATE.md`)
+- [x] PR #107: ドキュメントテンプレ index (`docs/README.md`)
 
 ### Stage 2: 主要 3 エージェント移行
 
 優先順位は doc 規模 (大きいほど効果大) と運用優先度で決定:
 
-| 順 | エージェント | 既存 doc | 移行内容 |
-|---|---|---|---|
-| 1 | **lifeplanner-agent** | README 570 行 (Quickstart + 機能要件 + Phase + アーキ全部入り) | README から機能要件 / Phase / アーキを `docs/DESIGN.md` に分離。README は Quickstart 中心に圧縮 |
-| 2 | **piyolog-analytics** | `docs/design.md` 既存 | 新テンプレ準拠に再整形。NFR 節 / 設計判断ログ を追記 |
-| 3 | **driving-license-bot** | `docs/DESIGN.md` 既存 (体系的) | 新テンプレに合わせて節構成を寄せる。既存 11 doc は維持 |
+| 順 | エージェント | 既存 doc | 移行内容 | 状態 |
+|---|---|---|---|---|
+| 1 | **lifeplanner-agent** | README 895 行 (Quickstart + 機能要件 + Phase + アーキ全部入り) | README から機能要件 / Phase / アーキを `docs/DESIGN.md` に分離。README は Quickstart 中心に圧縮 | ✅ PR #108 |
+| 2 | **piyolog-analytics** | `docs/design.md` 既存 | 新テンプレ準拠に再整形。NFR 節 / 設計判断ログ を追記 | ⏳ |
+| 3 | **driving-license-bot** | `docs/DESIGN.md` 既存 (体系的) | 新テンプレに合わせて節構成を寄せる。既存 11 doc は維持 | ⏳ |
 
 ### Stage 3: 残エージェント + Operations + README 統一
 
@@ -83,7 +83,7 @@
 
 | エージェント | DESIGN.md | README リフレッシュ | OPERATIONS 寄せ |
 |---|---|---|---|
-| lifeplanner-agent | [ ] | [ ] | [ ] |
+| lifeplanner-agent | [x] PR #108 | [x] PR #108 | [ ] |
 | piyolog-analytics | [ ] | [ ] | [ ] |
 | driving-license-bot | [ ] | [ ] | [ ] |
 | analytics-platform | [ ] | [ ] | [ ] |
