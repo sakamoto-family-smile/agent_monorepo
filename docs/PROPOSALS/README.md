@@ -65,6 +65,7 @@ docs/PROPOSALS/NNNN-short-kebab-title.md
 | Number | Title | Target | Status |
 |---|---|---|---|
 | [0001](0001-lifeplanner-cashflow-breakdown.md) | キャッシュフロー粒度向上 | lifeplanner-agent | Implemented |
+| [0002](0002-deepteam-redteam-replacement.md) | red team を Promptfoo から DeepTeam に置き換え | security-platform | Draft |
 
 新しい提案を作るたびに上記表に 1 行追加する (forget-me-not)。
 
