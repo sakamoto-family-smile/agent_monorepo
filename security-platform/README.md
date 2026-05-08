@@ -1,150 +1,149 @@
-# Agent Security Platform
+# security-platform
 
-Security monitoring platform for AI agent systems — tracks vulnerabilities in MCP servers, skills, and dependencies.
+monorepo 内の AI エージェント (Claude Agent SDK / MCP / FastAPI 等) を対象に、
+**サプライチェーン脆弱性監視 + MCP プロキシ防御 + 通知 + 監査** を一元提供する
+セキュリティプラットフォーム。各エージェントは inventory に 1 行追加するだけで
+OWASP ASI / OWASP LLM Top 10 のカバレッジを得られる。
 
-## Overview
+> **Status**: Phase 1-3 完了 (collector / analyzer / notifier / MCP proxy / dashboard) / Phase 4 部分実装 (CI gating: gitleaks + bandit、pip-audit + snyk は計画中)
 
-This platform provides:
-
-- **Vulnerability collection** from NVD, GitHub Advisory, OSV, and VulnerableMCP
-- **Inventory matching** against your registered MCP servers and packages
-- **Notifications** via Slack, LINE Messaging API (Bot), and email
-- **MCP Proxy** with rate limiting, tool pinning (rug-pull detection), and DLP
-- **Web dashboard** at `http://localhost:8000`
-- **Red team testing** via Promptfoo
-
-## Prerequisites
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-- Node.js 18+ (for MCP scan scripts and red team)
-
-## Quick Start
-
-```bash
-cd security-platform
-
-# 1. Install dependencies
-uv sync
-
-# 2. Configure environment
-cp config/.env.example config/.env
-# Edit config/.env — set one of the following for LLM analysis:
-#   Claude:    ANTHROPIC_API_KEY
-#   Gemini:    VERTEX_AI_PROJECT + VERTEX_AI_LOCATION (uses Application Default Credentials)
-#              Run: gcloud auth application-default login
-
-# 3. Initialize the database
-uv run python -m src.db.migrations
-
-# 4. Start the dashboard
-uv run uvicorn src.dashboard.app:app --host 0.0.0.0 --port 8000
-
-# Open http://localhost:8000
-```
-
-## Running Components
-
-### Dashboard (Port 8000)
-```bash
-uv run uvicorn src.dashboard.app:app --reload
-```
-
-### MCP Security Proxy (Port 8080)
-```bash
-uv run uvicorn src.proxy.server:app --port 8080
-# Set MCP_TARGET_URL env var to point at your real MCP server
-```
-
-### Vulnerability Collector (run once)
-```bash
-uv run python -m src.collector.main
-```
-
-### Analyzer (process collected vulns + notify)
-```bash
-uv run python -m src.analyzer.main
-```
-
-### Daily Digest
-```bash
-uv run python -m src.notifier.digest
-```
-
-### Automated Cron Setup
-```bash
-./scripts/setup-cron.sh
-```
-
-### MCP Config Scan (requires uvx)
-```bash
-./scripts/scan-mcp.sh
-```
-
-### Red Team Testing (requires Node.js + ANTHROPIC_API_KEY)
-```bash
-./scripts/redteam.sh
-```
-
-## Configuration
-
-### `config/inventory.yaml`
-Register all MCP servers, skills, and packages you use. The analyzer uses this to flag vulnerabilities that affect your specific stack.
-
-### `config/scan.yaml`
-Controls NVD keywords, DLP patterns, rate limiter thresholds, and scan targets.
-
-### `config/notification.yaml`
-Enable/disable notification channels and configure severity thresholds.
-
-### `config/.env`
-API keys and secrets. Copy from `.env.example`. Never commit this file.
-
-### LINE notifications
-
-本プラットフォームの LINE 通知は **LINE Messaging API (Bot channel)** を使う。LINE Notify は 2025/03/31 にサービス終了済のため、旧 `LINE_NOTIFY_TOKEN` 設定は無視される (起動時に deprecation 警告)。
-
-**セットアップ手順**:
-
-1. [LINE Developers Console](https://developers.line.biz/console/) で新規 Provider + Messaging API channel を作成
-2. 以下の値を `config/.env` にセット:
-   - `LINE_CHANNEL_SECRET` — Channel basic settings → Channel secret
-   - `LINE_CHANNEL_ACCESS_TOKEN` — Messaging API 設定 → Channel access token (long-lived)
-   - `LINE_USER_IDS` — Bot を友だち追加した LINE ユーザの userId を CSV で列挙 (例: `Uxxxx,Uyyyy`)
-3. `config/notification.yaml` の `channels.line.enabled` を `true` に
-4. 動作確認:
-   ```bash
-   uv run python -c "import asyncio; from src.notifier.line import send_message; asyncio.run(send_message('security-platform test notification'))"
-   ```
-
-通知は Push Message で送られる (Free tier は月間通数制限あり)。将来 tech-news-agent Phase 3 で Flex Message 対応の共通 `line-publisher/` モジュールへ移行予定。
-
-## Applying Security Layers to an Agent System
-
-This section explains how to apply each security layer to any agent system inside this monorepo.
-
-### Overview of layers
-
-| Layer | What it does | Required? |
-|-------|-------------|-----------|
-| 1. Inventory registration | Declare your MCP servers and packages for CVE monitoring | Yes |
-| 2. Scan target registration | Include your agent system in automated scans | Yes |
-| 3. MCP Proxy | Intercept all MCP tool calls for rate limiting, DLP, tool pinning, and injection detection | Recommended |
-| 4. Notifications | Receive alerts when vulnerabilities or violations are detected | Optional |
+設計詳細 (機能要件 / 非機能要件 / アーキテクチャ / データモデル / Roadmap / ADR-lite / 用語集) は
+[`docs/DESIGN.md`](docs/DESIGN.md) を参照。本 README は「動かす / 適用する」観点に絞る。
 
 ---
 
-### Step 1 — Register your inventory
+## 0. Quickstart
 
-Edit `config/inventory.yaml` and add your agent system's MCP servers and packages.
+### 0.1 前提
+
+| ツール | バージョン | 備考 |
+|---|---|---|
+| Python | 3.12+ | `pyproject.toml` で指定 |
+| uv | 最新 | パッケージ管理 (推奨)、pip でも可 |
+| Node.js | 18+ | MCP scan / Red team script に必要 |
+| gcloud CLI | 最新 | Vertex AI Gemini を使う場合のみ |
+
+### 0.2 セットアップ
+
+```bash
+cd agent_monorepo/security-platform
+
+# 1. 依存インストール + .env 雛形 + DB 初期化を一括
+make setup
+
+# 個別にやる場合:
+make install     # uv sync
+make env         # cp config/.env.example → config/.env
+make auth        # gcloud auth application-default login (Vertex 利用時)
+make db-init     # SQLite 初期化
+```
+
+`config/.env` で LLM 分析用の認証情報を設定:
+
+```env
+# Claude を使う場合
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Vertex AI Gemini を使う場合 (上記の代替)
+VERTEX_AI_PROJECT=your-gcp-project
+VERTEX_AI_LOCATION=us-central1
+```
+
+### 0.3 起動
+
+```bash
+make dashboard         # Web Dashboard → http://localhost:8000
+make proxy             # MCP Proxy (MCP_TARGET_URL=http://localhost:3000 を指定)
+```
+
+### 0.4 単発実行
+
+```bash
+make collector         # NVD / GHSA / OSV / VulnerableMCP から CVE 取得
+make analyzer          # inventory 照合 + LLM 分析 + 通知
+make digest            # daily digest (severity 別件数サマリ)
+
+make scan-mcp          # .mcp.json スキャン (uvx 必要)
+make scan-skills       # skills/ ディレクトリのスキャン
+make redteam           # Promptfoo Red team test (Node.js + ANTHROPIC_API_KEY)
+
+make cron              # 定期実行を crontab に登録
+```
+
+### 0.5 テスト・静的解析
+
+```bash
+make test              # pytest
+```
+
+---
+
+## 1. 主要コマンド・コンポーネント
+
+| コマンド | 動作 | 詳細 |
+|---|---|---|
+| `make dashboard` | FastAPI Dashboard (port 8000) | `src/dashboard/app.py` |
+| `make proxy` | MCP プロキシ (port 8080) | `src/proxy/server.py` |
+| `make collector` | CVE 取得 (NVD/GHSA/OSV/VulnerableMCP) | `src/collector/main.py` |
+| `make analyzer` | inventory 照合 + LLM 分析 + 通知 | `src/analyzer/main.py` |
+| `make digest` | 日次 digest を Slack/LINE/Email へ | `src/notifier/digest.py` |
+| `make scan-mcp` | `.mcp.json` を Snyk Agent Scan で検査 | `scripts/scan-mcp.sh` |
+| `make scan-skills` | `skills/` ディレクトリを検査 | `scripts/scan-skills.sh` |
+| `make redteam` | Promptfoo で Red team テスト | `scripts/redteam.sh` |
+| `make cron` | 定期実行を `crontab -e` に追記 | `scripts/setup-cron.sh` |
+
+各コンポーネントの責務 / モジュール分割 / データフローは
+[`docs/DESIGN.md`](docs/DESIGN.md) §5 (アーキテクチャ) を参照。
+
+---
+
+## 2. 環境変数
+
+主要なものだけ。詳細は `config/.env.example` 参照。
+
+| 変数 | 既定 | 用途 |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | — | Claude を LLM 分析に使う場合 |
+| `VERTEX_AI_PROJECT` | — | Vertex Gemini を使う場合 (ADC + project) |
+| `VERTEX_AI_LOCATION` | `us-central1` | Vertex Gemini の region |
+| `NVD_API_KEY` | — | NVD rate limit 緩和 (任意) |
+| `GITHUB_TOKEN` | — | GitHub Advisory rate limit 緩和 (任意) |
+| `SLACK_WEBHOOK_URL` | — | Slack 通知 |
+| `LINE_CHANNEL_SECRET` | — | LINE Messaging API (Bot) |
+| `LINE_CHANNEL_ACCESS_TOKEN` | — | LINE Messaging API (Bot) |
+| `LINE_USER_IDS` | — | 通知先 userId の CSV |
+| `MCP_TARGET_URL` | `http://localhost:3000` | proxy 経由の実 MCP server URL |
+
+**LINE 通知について**: 旧 LINE Notify は 2025-03-31 でサービス終了済。本プラットフォームは
+**LINE Messaging API (Bot channel)** を使う。`LINE_NOTIFY_TOKEN` 設定があっても無視される
+(起動時に deprecation 警告)。詳細は [`docs/DESIGN.md`](docs/DESIGN.md) §5.3 を参照。
+
+---
+
+## 3. エージェントへのセキュリティレイヤ適用
+
+monorepo 内の任意のエージェントに対して 4 つのレイヤを段階的に適用できる。
+
+| レイヤ | 内容 | 必須度 |
+|---|---|---|
+| 1. Inventory 登録 | `config/inventory.yaml` に MCP server / 依存パッケージを宣言 | 必須 |
+| 2. Scan 対象登録 | `config/scan.yaml` の `targets` に追加 | 必須 |
+| 3. MCP Proxy | tool 呼出を proxy 経由にして DLP / Rate / Pinning を適用 | 推奨 |
+| 4. 通知 | severity しきい値で Slack/LINE/Email 通知を有効化 | 任意 |
+
+**最小構成 (監視のみ)**: Step 1 + 2 + 4 (collector + analyzer + 通知のみ)。Step 3 はスキップ可。
+
+### 3.1 Step 1 — Inventory 登録
+
+`config/inventory.yaml` に対象エージェントの MCP server / npm / pip パッケージを追加:
 
 ```yaml
 mcp_servers:
   - name: "@modelcontextprotocol/server-your-server"
     version: "latest"
     source: "npm"
-    config_path: "your-agent-system/.mcp.json"  # path from monorepo root
-    server_key: "your-server-key"               # key name inside .mcp.json
+    config_path: "your-agent-system/.mcp.json"   # monorepo ルートからの相対パス
+    server_key: "your-server-key"                # .mcp.json 内のキー名
     tags: ["your", "tags"]
 
 npm_packages:
@@ -153,60 +152,36 @@ npm_packages:
     ecosystem: "npm"
 ```
 
-The analyzer uses this inventory to match fetched CVEs against your specific stack and generate targeted alerts.
+analyzer が CVE をこの inventory と照合し、影響するエージェントだけに通知する。
 
----
+### 3.2 Step 2 — Scan 対象登録
 
-### Step 2 — Register as a scan target
-
-Edit `config/scan.yaml` and add your agent system to the `targets` section:
+`config/scan.yaml` の `targets` に追加:
 
 ```yaml
 targets:
   mcp_configs:
     - "your-agent-system/.mcp.json"
-
   skills_directories:
-    - "your-agent-system/skills/"   # omit if no skills directory
-
+    - "your-agent-system/skills/"        # 無ければ省略
   source_directories:
     - "your-agent-system/src/"
 ```
 
-This ensures the automated MCP config scan (`scripts/scan-mcp.sh`) and Gitleaks secret scan cover your agent system.
+`scripts/scan-mcp.sh` (Snyk Agent Scan) と Gitleaks がこの paths を対象にする。
 
----
+### 3.3 Step 3 — MCP Proxy 適用
 
-### Step 3 — Apply the MCP Proxy
-
-The proxy sits between your agent and its MCP servers. It enforces rate limiting, DLP, tool pinning, and injection detection on every tool call.
-
-**3-1. Start the proxy**
+agent ↔ MCP server の間に proxy を挿入し、Rate Limit / DLP / Tool Pinning / Injection 検知 / Allowed destination filter を適用する。
 
 ```bash
+# 1. proxy を起動
 cd security-platform
-MCP_TARGET_URL=http://localhost:<your-mcp-port> \
-  uv run uvicorn src.proxy.server:app --port 8080
+MCP_TARGET_URL=http://localhost:<your-mcp-port> make proxy
 ```
 
-**3-2. Point your agent at the proxy**
-
-In your agent system's `.mcp.json`, change each MCP server entry to use the proxy URL instead of the original server URL.
-
-Before:
 ```json
-{
-  "mcpServers": {
-    "your-server": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-your-server"]
-    }
-  }
-}
-```
-
-After (HTTP transport via proxy):
-```json
+// 2. agent の .mcp.json を proxy 経由に変更
 {
   "mcpServers": {
     "your-server": {
@@ -217,149 +192,101 @@ After (HTTP transport via proxy):
 }
 ```
 
-**3-3. Choose proxy mode**
-
-Edit `config/scan.yaml` — `gateway.mode`:
-
-| Mode | Behaviour | When to use |
-|------|-----------|-------------|
-| `passive` | Logs violations, does not block traffic | First 1–2 weeks while calibrating rules |
-| `active` | Blocks violations and alerts immediately | After calibration |
-
 ```yaml
+# 3. config/scan.yaml で proxy mode を選択
 gateway:
-  mode: passive   # change to "active" when ready
-```
-
-**3-4. Tune allowed destinations (active mode)**
-
-Add the hostnames your MCP servers connect to under `gateway.allowed_destinations` in `config/scan.yaml`:
-
-```yaml
-gateway:
+  mode: passive          # 1〜2 週間 passive で calibration → "active" に切替
   allowed_destinations:
     - "localhost"
     - "api.your-mcp-provider.com"
 ```
 
-Requests to unlisted destinations are blocked in active mode, logged in passive mode.
+| Mode | 動作 | 推奨タイミング |
+|---|---|---|
+| `passive` | 違反を log のみ、トラフィックは通す | 導入直後 (false positive を観察) |
+| `active` | 違反をブロック + 即時 alert | calibration 完了後 |
 
----
+各防御層の詳細 (Tool Pinning / DLP / Rate Limiter / Injection) は
+[`docs/DESIGN.md`](docs/DESIGN.md) §5.2 を参照。
 
-### Step 4 — Run the collector and analyzer
+### 3.4 Step 4 — 通知設定
 
-Fetch the latest CVEs and match them against your registered inventory:
+`config/notification.yaml` で channel ごとの enable / severity しきい値を設定:
+
+```yaml
+channels:
+  slack:
+    enabled: true
+    severity_threshold: HIGH    # CRITICAL/HIGH/MEDIUM/LOW
+  line:
+    enabled: true
+    severity_threshold: CRITICAL
+  email:
+    enabled: false
+```
+
+### 3.5 動作確認
 
 ```bash
-cd security-platform
-
-# Fetch CVEs from NVD, GitHub Advisory, OSV, VulnerableMCP
-uv run python -m src.collector.main
-
-# Match against inventory, score, and send notifications
-uv run python -m src.analyzer.main
+make collector && make analyzer
+make dashboard               # http://localhost:8000 で確認
 ```
 
-For ongoing monitoring, set up a cron job:
-
-```bash
-./scripts/setup-cron.sh
-```
+Dashboard で以下が見えること:
+- inventory に対象エージェントの MCP server が表示
+- audit_logs に proxy 経由の tool 呼出が記録 (Step 3 適用時)
+- 脆弱性リストに CVE matching 結果
 
 ---
 
-### Step 5 — Verify in the dashboard
+## 4. CI Security Scan
 
-Open `http://localhost:8000` after starting the dashboard:
+`.github/workflows/pr-security.yml` が PR 単位で `pr-tests.yml` と並列に実行される:
 
-```bash
-uv run uvicorn src.dashboard.app:app --port 8000
-```
+| Scanner | 対象 | merge ブロック条件 |
+|---|---|---|
+| **gitleaks** | PR の commit 範囲 | secret 検出 (allowlist は `.gitleaks.toml`) |
+| **bandit** | 変更された `.py` (tests/ 除く) | medium+ severity & medium+ confidence |
 
-Check that:
-- Your agent system's MCP servers appear in the inventory view
-- Tool call logs show traffic passing through the proxy
-- Any CVE matches appear in the vulnerability list
+両スキャナは SARIF を artifact として 7 日保管。
+
+### 未統合 (Phase 4 計画)
+
+| 項目 | 状態 | メモ |
+|---|---|---|
+| pip-audit / uv export CVE scan | ⏳ | `pyproject.toml` / `uv.lock` 変更時に依存 CVE をスキャン。無料・auth 不要 |
+| snyk-agent-scan | ⏳ | MCP / Skill 専用。`SNYK_TOKEN` secret が必要 |
+| `.gitleaks.toml` allowlist 調整 | ⏳ | 初回運用時に false positive を narrow `paths` で抑制 |
+| Bandit severity ratchet (low まで) | ⏳ | medium+ をクリアしてから low に下げる |
+| `scripts/scan-skills.sh` REPO_ROOT 修正 | ⏳ | `../../..` → `../..` (`scan-mcp.sh` と同様) |
+
+設計判断 / これらの順序付けは [`docs/DESIGN.md`](docs/DESIGN.md) §7 (ADR-lite) を参照。
 
 ---
 
-### Minimal setup (monitoring only, no proxy)
+## 5. OWASP カバレッジ
 
-If you only want CVE monitoring without the proxy layer, Steps 1, 2, and 4 are sufficient. Skip Step 3.
+| カテゴリ | コントロール |
+|---|---|
+| ASI01 Prompt Injection | Red team / proxy injection.py |
+| ASI02 Excessive Permissions | Rate Limiter / DLP |
+| ASI03 Broken Access Control | RBAC red team |
+| ASI04 Supply Chain | NVD / GHSA / OSV / VulnerableMCP collector |
+| ASI05 Session Hijacking | Tool Pinning (rug-pull 検知) |
+| ASI06 Sensitive Data Exposure | proxy/dlp.py (全 tool パラメータ) |
+| ASI07 Misinformation | Red team |
+| ASI08 Overly Permissive Plugins | scan-mcp.sh (Snyk Agent Scan) |
+| ASI09 Training Data Poisoning | 間接 injection テスト |
+| ASI10 Model Theft / DoS | Rate Limit + Circuit Breaker |
 
 ---
 
-## Architecture
+## 6. 関連ドキュメント
 
-```
-security-platform/
-├── src/
-│   ├── collector/      # Fetch CVEs from NVD, GitHub Advisory, OSV, VulnerableMCP
-│   ├── analyzer/       # Match to inventory, score severity, run LLM analysis
-│   ├── notifier/       # Slack / LINE / Email notifications and digests
-│   ├── proxy/          # MCP proxy with rate limiting, DLP, tool pinning
-│   ├── dashboard/      # FastAPI web dashboard
-│   └── db/             # SQLAlchemy models and migrations
-├── config/             # YAML configuration files
-├── scripts/            # Shell scripts for scans and cron
-├── logs/               # JSONL logs (gitignored except .gitkeep)
-└── data/               # SQLite database (gitignored except .gitkeep)
-```
-
-## Security Controls
-
-| Control | Location | Description |
-|---------|----------|-------------|
-| Tool Pinning | `proxy/tool_pinning.py` | Hash-based integrity check, detects rug pull attacks |
-| DLP | `proxy/dlp.py` | Scans tool parameters for API keys, credentials, PII |
-| Rate Limiting | `proxy/rate_limiter.py` | Per-tool sliding window + circuit breaker |
-| Audit Log | `proxy/server.py` | All tool calls logged to SQLite and JSONL |
-
-## Coverage — OWASP ASI / OWASP LLM Top 10
-
-| Category | Control |
-|----------|---------|
-| ASI01 Prompt Injection | Red team tests, indirect injection detection |
-| ASI02 Excessive Permissions | Proxy rate limiting, DLP |
-| ASI03 Broken Access Control | RBAC red team tests |
-| ASI04 Supply Chain | OSV/NVD/GitHub Advisory monitoring |
-| ASI05 Session Hijacking | Tool pinning (rug pull detection) |
-| ASI06 Sensitive Data Exposure | DLP engine on all tool parameters |
-| ASI07 Misinformation | Red team tests |
-| ASI08 Overly Permissive Plugins | Snyk Agent Scan on .mcp.json |
-| ASI09 Training Data Poisoning | Indirect injection tests |
-| ASI10 Model Theft / DoS | Rate limiting, circuit breaker |
-
-## CI Security Scan (pull-request-time)
-
-Pull requests are gated by `.github/workflows/pr-security.yml`, which runs on
-every PR against `main` in parallel with `pr-tests.yml`:
-
-| Scanner | Scope | Blocks merge on |
-|---------|-------|-----------------|
-| **gitleaks** | Commit range of the PR | Any leaked secret (allowlist in `.gitleaks.toml`) |
-| **bandit** | Changed `.py` files outside `tests/` | Medium+ severity & medium+ confidence findings |
-
-Both scanners upload SARIF reports as workflow artifacts (retention 7 days).
-
-### Remaining items (not yet in CI)
-
-The following scans exist as local scripts / config but are **not** yet wired
-into the PR workflow. Tracked here so they are not forgotten:
-
-- [ ] **pip-audit / uv export + audit** — dependency CVE scan on `pyproject.toml`
-      / `uv.lock` changes across each agent. Free, no external auth required.
-- [ ] **snyk-agent-scan** — MCP / Skill specific risk scan. Requires a Snyk
-      account and `SNYK_TOKEN` secret. Locally runnable today via
-      `scripts/scan-mcp.sh` and `scripts/scan-skills.sh`; CI integration is
-      deferred until a token is provisioned.
-- [ ] **`.gitleaks.toml` allowlist calibration** — the current allowlist is a
-      best-guess starting point. First production run may surface false
-      positives that need additional entries (prefer narrow `paths` entries
-      over broad `regexes` ones).
-- [ ] **Bandit severity ratchet** — the workflow currently filters out
-      `low` severity. Once the backlog is cleared, tighten to `--severity-level
-      low` to catch weaker findings.
-- [ ] **`scripts/scan-skills.sh` REPO_ROOT fix** — the script still resolves
-      `REPO_ROOT` with `../../..` (leftover from a deeper directory layout)
-      and should be corrected to `../..` as was done for `scan-mcp.sh`.
+- [`docs/DESIGN.md`](docs/DESIGN.md) — システム全体設計 (機能要件 F1-F28 / NFR / アーキ / Roadmap / ADR-lite 15 件 / 用語集)
+- [`config/inventory.yaml`](config/inventory.yaml) — 監視対象 MCP server / npm / pip パッケージ
+- [`config/scan.yaml`](config/scan.yaml) — scan target / NVD keywords / proxy gateway 設定
+- [`config/notification.yaml`](config/notification.yaml) — 通知 channel / severity しきい値
+- [`scripts/`](scripts/) — scan-mcp / scan-skills / setup-cron / redteam
+- [`../docs/PROPOSALS/`](../docs/PROPOSALS/) — モノレポ共通の per-feature proposal / ADR
+- [`../docs/MIGRATION_PLAN.md`](../docs/MIGRATION_PLAN.md) — ドキュメント refactoring 全体計画
