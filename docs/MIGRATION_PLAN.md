@@ -40,10 +40,11 @@
 | 順 | 内容 | 状態 |
 |---|---|---|
 | 4 | analytics-platform: README 948 行から DESIGN.md (543 行) を抽出 + README をテンプレ準拠にスリム化 (約 290 行) | ✅ PR #112 |
-| 5 | stock-analysis-agent / tech-news-agent / hotcook-agent: 各 README から DESIGN.md を抽出 (規模中) | ⏳ |
-| 6 | security-platform / llm-client / kanie-lab-agent: 各 README から DESIGN.md を抽出 (規模小) | ⏳ |
-| 7 | `docs/OPERATIONS_TEMPLATE.md` 作成 + 既存 ops doc (DEPLOY / SETUP / BACKUP_RESTORE) を寄せる | ⏳ |
-| 8 | 全エージェント README を `README_TEMPLATE.md` のフォーマットに合わせる | ⏳ |
+| 5 | security-platform: README 365 行 + README.ja.md 312 行 → DESIGN.md 抽出 + README 統一 (Japanese) | ✅ PR #113 |
+| 6 | stock-analysis-agent / tech-news-agent / hotcook-agent: 各 README から DESIGN.md を抽出 (規模中) | ⏳ |
+| 7 | llm-client / kanie-lab-agent: 各 README から DESIGN.md を抽出 (規模小) | ⏳ |
+| 8 | `docs/OPERATIONS_TEMPLATE.md` 作成 + 既存 ops doc (DEPLOY / SETUP / BACKUP_RESTORE) を寄せる | ⏳ |
+| 9 | 全エージェント README を `README_TEMPLATE.md` のフォーマットに合わせる | ⏳ |
 
 ## PR 単位
 
@@ -102,5 +103,5 @@ per-feature proposal doc (`docs/PROPOSALS/NNNN-*.md`) は **forward-going が原
 | tech-news-agent | [ ] | [ ] | [ ] |
 | hotcook-agent | [ ] | [ ] | [ ] |
 | kanie-lab-agent | [ ] | [ ] | [ ] |
-| security-platform | [ ] | [ ] | [ ] |
+| security-platform | [x] PR #113 | [x] PR #113 | [ ] |
 | llm-client | [ ] | [ ] | [ ] |
