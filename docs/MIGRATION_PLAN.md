@@ -37,13 +37,13 @@
 
 ### Stage 3: 残エージェント + Operations + README 統一
 
-| 順 | 内容 |
-|---|---|
-| 4 | analytics-platform: README 950 行から DESIGN.md を抽出 (規模最大、最後に回す) |
-| 5 | stock-analysis-agent / tech-news-agent / hotcook-agent: 各 README から DESIGN.md を抽出 (規模中) |
-| 6 | security-platform / llm-client / kanie-lab-agent: 各 README から DESIGN.md を抽出 (規模小) |
-| 7 | `docs/OPERATIONS_TEMPLATE.md` 作成 + 既存 ops doc (DEPLOY / SETUP / BACKUP_RESTORE) を寄せる |
-| 8 | 全エージェント README を `README_TEMPLATE.md` のフォーマットに合わせる |
+| 順 | 内容 | 状態 |
+|---|---|---|
+| 4 | analytics-platform: README 948 行から DESIGN.md (543 行) を抽出 + README をテンプレ準拠にスリム化 (約 290 行) | ✅ PR #112 |
+| 5 | stock-analysis-agent / tech-news-agent / hotcook-agent: 各 README から DESIGN.md を抽出 (規模中) | ⏳ |
+| 6 | security-platform / llm-client / kanie-lab-agent: 各 README から DESIGN.md を抽出 (規模小) | ⏳ |
+| 7 | `docs/OPERATIONS_TEMPLATE.md` 作成 + 既存 ops doc (DEPLOY / SETUP / BACKUP_RESTORE) を寄せる | ⏳ |
+| 8 | 全エージェント README を `README_TEMPLATE.md` のフォーマットに合わせる | ⏳ |
 
 ## PR 単位
 
@@ -97,7 +97,7 @@ per-feature proposal doc (`docs/PROPOSALS/NNNN-*.md`) は **forward-going が原
 | lifeplanner-agent | [x] PR #108 | [x] PR #108 | [ ] |
 | piyolog-analytics | [x] PR #110 | [x] PR #110 | [ ] |
 | driving-license-bot | [x] PR #111 | [x] PR #111 | [ ] |
-| analytics-platform | [ ] | [ ] | [ ] |
+| analytics-platform | [x] PR #112 | [x] PR #112 | [ ] |
 | stock-analysis-agent | [ ] | [ ] | [ ] |
 | tech-news-agent | [ ] | [ ] | [ ] |
 | hotcook-agent | [ ] | [ ] | [ ] |
