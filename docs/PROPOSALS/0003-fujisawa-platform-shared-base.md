@@ -124,71 +124,86 @@
 
 ### 4.1 アーキテクチャ概略
 
+`fujisawa-platform` は **Python ライブラリ (path dep)** であり独立した Cloud Run service を
+**持たない**。消費者エージェント (LINE bot / 保活) は in-process で import し、
+ライブラリ内の関数経由で Cloud SQL に **直接** asyncpg 接続する。
+データの**書き込み**は別途 Cloud Run Jobs (バッチ ETL) が一手に担い、
+消費者エージェントは **読み取り専用**。
+
+詳細なアクセス経路 / ETL の責任分離は §4.5 を参照。
+
 ```
-                ┌──────────────────────────────────────────────────────┐
-                │  Consumer Agents                                       │
-                │  ┌──────────────────┐    ┌──────────────────────┐   │
-                │  │ fujisawa-info-bot│    │ fujisawa-hokatsu-... │   │
-                │  │ (Cloud Run、独立)│    │ (Cloud Run、独立)    │   │
-                │  └────────┬─────────┘    └─────────┬────────────┘   │
-                └───────────┼────────────────────────┼─────────────────┘
-                            │ path dep                │ path dep
-                            ▼                         ▼
-                ┌──────────────────────────────────────────────────────┐
-                │  fujisawa-platform/  (Python library, path dep)        │
-                │                                                       │
-                │  ┌──────────────────────────────────────────────────┐│
-                │  │ crawler/                                         ││
-                │  │   - polite_fetcher.py (UA / interval / IfMS)     ││
-                │  │   - sitemap_loader.py (sitemap.xml + 1,100+ URL) ││
-                │  │   - rss_poller.py (緊急情報 RSS、5 分間隔)       ││
-                │  │   - wayback.py (CDX + web archive 経由 backfill) ││
-                │  └──────────────────────────────────────────────────┘│
-                │  ┌──────────────────────────────────────────────────┐│
-                │  │ pdf_pipeline/                                    ││
-                │  │   - docling_wrapper.py                           ││
-                │  │   - hash_diff.py (SHA-256 比較で差分検知)        ││
-                │  │   - freshness.py (as_of / source_url 自動付与)   ││
-                │  └──────────────────────────────────────────────────┘│
-                │  ┌──────────────────────────────────────────────────┐│
-                │  │ knowledge_base/                                  ││
-                │  │   - pgvector_store.py (Cloud SQL Postgres)       ││
-                │  │   - embedding.py (Vertex text-embedding-004)     ││
-                │  │   - search.py (cosine top-k + metadata filter)   ││
-                │  └──────────────────────────────────────────────────┘│
-                │  ┌──────────────────────────────────────────────────┐│
-                │  │ models/                                          ││
-                │  │   - facility.py (認可 / 認可外 / 藤沢型)         ││
-                │  │   - vacancy_snapshot.py                          ││
-                │  │   - admission_result.py                          ││
-                │  │   - common.py (FreshnessMetadata 等)             ││
-                │  └──────────────────────────────────────────────────┘│
-                │  ┌──────────────────────────────────────────────────┐│
-                │  │ resolver/                                        ││
-                │  │   - facility_resolver.py (rapidfuzz + alias)     ││
-                │  └──────────────────────────────────────────────────┘│
-                │  ┌──────────────────────────────────────────────────┐│
-                │  │ skills/  (動的注入される SKILL.md 群)            ││
-                │  │   - citation_format.md                           ││
-                │  │   - freshness_disclaimer.md                      ││
-                │  │   - yasashii_nihongo.md (tsutaeru.cloud 誘導)    ││
-                │  │   - escalate_to_municipal.md                     ││
-                │  │   - line_output_format.md                        ││
-                │  └──────────────────────────────────────────────────┘│
-                └──────────────────────────────────────────────────────┘
-                            │                         │
-                            ▼                         ▼
-                ┌──────────────────────────────────────────────────────┐
-                │  Shared GCP Infrastructure                             │
-                │   - Cloud SQL (driving-license-bot と instance 共有)  │
-                │     ├─ DB: question_bank_db (driving-license-bot)    │
-                │     ├─ DB: fujisawa_kb_db (本基盤、新規)              │
-                │     └─ DB: hokatsu_db (保活、新規)                    │
-                │   - Vertex AI text-embedding-004                       │
-                │   - GCS: fujisawa-raw / fujisawa-pdf-archive (新規)   │
-                │   - analytics-platform (path dep、observability)       │
-                │   - security-platform (inventory.yaml に登録)          │
-                └──────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Read-Only Path (アプリケーション)                                         │
+│                                                                          │
+│  ┌──────────────────┐                ┌──────────────────────┐          │
+│  │ fujisawa-info-bot│                │ fujisawa-hokatsu-... │          │
+│  │ (Cloud Run、独立)│                │ (Cloud Run、独立)    │          │
+│  └────────┬─────────┘                └─────────┬────────────┘          │
+│           │ from fujisawa_platform import ...   │                        │
+│           │ (path dep、in-process)               │                        │
+│           ▼                                     ▼                        │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ fujisawa-platform/  (Python library)                              │  │
+│  │                                                                   │  │
+│  │  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐             │  │
+│  │  │ crawler/     │ │ pdf_pipeline/│ │ knowledge_   │             │  │
+│  │  │ (polite_     │ │ (docling /   │ │ base/        │             │  │
+│  │  │  fetcher /   │ │  hash_diff / │ │ (pgvector_   │             │  │
+│  │  │  sitemap /   │ │  freshness)  │ │  store /     │             │  │
+│  │  │  rss /       │ │              │ │  embedding / │             │  │
+│  │  │  wayback)    │ │              │ │  search)     │             │  │
+│  │  └──────────────┘ └──────────────┘ └──────┬───────┘             │  │
+│  │                                            │                       │  │
+│  │  ┌──────────────┐ ┌──────────────┐         │                       │  │
+│  │  │ resolver/    │ │ models/      │         │                       │  │
+│  │  │ (facility_   │ │ (Pydantic    │         │                       │  │
+│  │  │  resolver)   │ │  schema)     │         │                       │  │
+│  │  └──────────────┘ └──────────────┘         │                       │  │
+│  │                                            │                       │  │
+│  │  ┌─────────────────────────────────────────┘                       │  │
+│  │  │ asyncpg pool (per-app)                                          │  │
+│  │  ▼                                                                  │  │
+│  │  skills/  (SKILL.md 群、consumer から動的注入)                    │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│           │                                                              │
+└───────────┼──────────────────────────────────────────────────────────────┘
+            │ SELECT (読み取り専用)
+            ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Cloud SQL Postgres (driving-license-bot と instance 共有、DB 分離)       │
+│   - DB: question_bank_db   (driving-license-bot)                         │
+│   - DB: fujisawa_kb_db     (本基盤、新規)                                │
+│   - DB: hokatsu_db         (保活、新規)                                   │
+│                                                                          │
+│   pgvector / facilities / pages / pdf_documents /                        │
+│   vacancy_snapshots / application_snapshots /                            │
+│   admission_results / competition_stats                                  │
+└──────────────────────────────────────────────────────────────────────────┘
+            ▲
+            │ INSERT/UPSERT (書き込みは ETL のみ)
+            │
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Write Path (バッチ ETL、§4.5 参照)                                        │
+│                                                                          │
+│  Cloud Scheduler ──▶ Cloud Run Jobs (fujisawa-platform/etl/ 配下)        │
+│   - weekly_crawl_etl       (週次、sitemap.xml の 1,100+ URL)             │
+│   - monthly_vacancy_etl    (月次 22 日、空き / 申込状況 PDF)             │
+│   - monthly_stats_compute  (月次 23 日、competition_stats 集計)          │
+│   - half_yearly_facility_etl (半年次、施設一覧 HTML)                     │
+│   - yearly_navi_etl        (年次、申込ナビ PDF 47 ページ)                │
+│   - biyearly_admission_etl (年 2 回、4月入所結果 PDF)                    │
+│   - wayback_backfill       (一度きり、令和 4-6 年データ)                 │
+│                                                                          │
+│   各 Job は fujisawa_platform.crawler / pdf_pipeline / knowledge_base    │
+│   を呼び出して fetch → 構造化 → embedding → DB UPSERT                    │
+└──────────────────────────────────────────────────────────────────────────┘
+
+その他 共有 GCP 資源:
+   - Vertex AI text-embedding-004
+   - GCS: fujisawa-raw / fujisawa-pdf-archive (PDF 一次保存 + Wayback バックアップ)
+   - analytics-platform (path dep、observability)
+   - security-platform (inventory.yaml に登録、proxy 経由でクロール)
 ```
 
 ### 4.2 データモデル
@@ -302,17 +317,26 @@ fujisawa-platform/
 │   │   └── admission_result.py
 │   ├── resolver/
 │   │   └── facility_resolver.py           # rapidfuzz + alias + LLM fallback
-│   └── skills/                            # SKILL.md 群、consumer から動的注入
-│       ├── citation_format.md
-│       ├── freshness_disclaimer.md
-│       ├── yasashii_nihongo.md
-│       ├── escalate_to_municipal.md
-│       └── line_output_format.md
+│   ├── skills/                            # SKILL.md 群、consumer から動的注入
+│   │   ├── citation_format.md
+│   │   ├── freshness_disclaimer.md
+│   │   ├── yasashii_nihongo.md
+│   │   ├── escalate_to_municipal.md
+│   │   └── line_output_format.md
+│   └── etl/                               # Cloud Run Jobs entry points (§4.5)
+│       ├── weekly_crawl.py                # sitemap.xml 全クロール
+│       ├── monthly_vacancy.py             # 空き状況 + 申込状況 PDF
+│       ├── monthly_stats_compute.py       # competition_stats 集計
+│       ├── half_yearly_facility.py        # 認可・認可外施設一覧 HTML
+│       ├── yearly_navi.py                 # 申込ナビ PDF
+│       ├── biyearly_admission.py          # 4 月入所結果 PDF
+│       └── wayback_backfill.py            # 令和 4-6 年データ (一度きり)
 ├── tests/
 │   ├── crawler/
 │   ├── pdf_pipeline/
 │   ├── knowledge_base/
 │   ├── resolver/
+│   ├── etl/                               # 各 Job の dry-run + idempotency テスト
 │   └── fixtures/
 │       ├── sample_facility_list.html      # 認可・認可外の HTML サンプル
 │       ├── sample_navi_extract.txt        # 申込ナビ PDF P19-20 抽出済テキスト
@@ -320,7 +344,91 @@ fujisawa-platform/
 └── Makefile
 ```
 
-### 4.5 Test Plan
+### 4.5 アクセス経路と ETL 投入タイミング
+
+#### 4.5.1 アクセス経路: path dep ライブラリ → Cloud SQL 直接接続
+
+両エージェントは `fujisawa-platform` を **Python ライブラリ (path dep)** として import し、
+ライブラリ内の関数経由で Cloud SQL に **直接 asyncpg 接続** する。HTTP / REST / MCP の
+hop は介在しない。
+
+```python
+# 消費者エージェント (info-bot / 保活) のコード例
+from fujisawa_platform.knowledge_base import search
+from fujisawa_platform.resolver import resolve_facility
+
+# in-process 呼出 → asyncpg pool 経由で Cloud SQL に直撃
+results = await search(query="鵠沼地区のゴミの日", top_k=5)
+facility = await resolve_facility("藤沢保育園")
+```
+
+```toml
+# 消費者側の pyproject.toml
+[project]
+dependencies = ["fujisawa-platform"]
+
+[tool.uv.sources]
+fujisawa-platform = { path = "../fujisawa-platform" }
+```
+
+#### 4.5.2 なぜ DB 直接 (path dep) か (案 C で API 化を却下した理由)
+
+| 観点 | DB 直接 (採用) | API 化 (§7 案 C で却下) |
+|---|---|---|
+| latency | in-process + asyncpg = 数 ms | Cloud Run hop で 50-200ms |
+| コールドスタート | 各 Cloud Run のみ (1 段) | プラットフォーム側でも発生 (2 段) |
+| 可動部品 | Cloud SQL + 2 Cloud Run | Cloud SQL + 3 Cloud Run + IAM |
+| schema 変更 | path dep の version 上げで全消費者に伝搬、テストで検出 | 後方互換 API バージョニング必須 |
+| Phase 5+ 外部公開時 | 後付けで API を被せる余地あり | — |
+
+#### 4.5.3 読み取り / 書き込みの責任分離
+
+- **消費者エージェント (info-bot / 保活)**: **読み取り専用** (`SELECT` のみ)、書き込みは禁止
+- **書き込みは ETL Cloud Run Jobs のみ** (`fujisawa_platform/etl/` 配下、Cloud Scheduler でトリガ)
+- IAM 上も DB ロールを分離: `consumer_role` (SELECT のみ) / `etl_role` (INSERT / UPSERT / DELETE)
+
+#### 4.5.4 ETL 投入タイミング (Cloud Run Jobs)
+
+`fujisawa_platform/etl/` 配下に **6 種類の定期 Job + 1 種類の一度きり Job** を配置。
+すべて Cloud Scheduler でトリガし、深夜帯 (03:00 JST) に集中させて藤沢市 HP の負荷を避ける。
+
+| Job 名 | 頻度 / トリガ | 取得対象 | 書き込み先テーブル | 主な利用先 |
+|---|---|---|---|---|
+| `weekly_crawl_etl` | 毎週日曜 03:00 JST | `sitemap.xml` の 1,100+ URL を polite crawl (1 URL/3s ≈ 1 時間) | `pages` (HTML 本文 + embedding) | LINE bot (0004) RAG |
+| `monthly_vacancy_etl` | 毎月 22 日 03:00 JST | 空き状況 / 申込状況 PDF (Docling 構造化) | `vacancy_snapshots`, `application_snapshots` | 保活 (0005) VacancyAgent |
+| `monthly_stats_compute` | 毎月 23 日 03:00 JST | 過去 3 年分のスナップショット集計 (外部 fetch なし) | `competition_stats` | 保活 StrategyAgent |
+| `half_yearly_facility_etl` | 4 月・10 月 1 日 03:00 JST | 認可・認可外施設一覧 HTML (`pandas.read_html` + BeautifulSoup でリンク URL 抽出) | `facilities` (160 件) | 保活 SearchAgent |
+| `yearly_navi_etl` | 4 月・10 月 1 日 03:00 JST | 申込ナビ PDF (47 ページ、14 MB) を Docling で構造化 + 解説文章 chunk 化 | `pdf_documents` (Q&A RAG)、`rules/reiwa{N}/*.yaml` は別経路で手動更新 | 保活 QAAgent + Score-Calc DSL |
+| `biyearly_admission_etl` | 2 月・3 月の指定日 | 4 月入所結果 PDF (1 次・2 次) | `admission_results` | 保活 StrategyAgent (履歴) |
+| `wayback_backfill` | **一度きり (Phase 0)** | Wayback CDX → 令和 4-6 年の年次入所結果 PDF + `r4-4nyuusyonaiteisisuu.pdf` | `admission_results` (令和 4-6 年) + `competition_stats.historical_minimum_index_2022` | 保活 Plan MCP のハイブリッドモデル |
+
+**例外: 緊急情報 RSS は LINE bot (0004) 専用**
+
+緊急情報 RSS の 5 分間隔 poll は `fujisawa-info-bot/batch/poll_rss.py` 側に実装する
+(共通 DB に格納する必然性が薄い、保活では使わない、5 分間隔の job が他消費者にも見えると
+混乱する、という理由)。LINE bot 独自の Firestore (`emergency_seen/{guid}`) で重複検知。
+
+#### 4.5.5 投入時の整合性 (consumer が partial state を読まないように)
+
+ETL の実行中に消費者エージェントが SELECT すると中間状態を読む可能性がある。対策:
+
+- **`vacancy_snapshots` / `admission_results`**: `(year_month / year, round)` で行を分離し、
+  既存月分が確定してから次月分を UPSERT。`WHERE year_month = '2026-01'` の一貫性は
+  partial insert 中でも保たれる
+- **`pages`** (週次フルクロール): `version` カラムを追加し、ETL は新 version で `INSERT`、
+  完了後に view の `WHERE version = $latest` を切り替える blue-green 方式 (Phase 6 で実装、
+  それまでは「古い行が混在」を許容)
+- **`facilities`** (半年次、頻度低): 全削除 → 全 INSERT を 1 トランザクションで。
+  消費者側は SELECT 失敗 → tenacity retry で吸収
+
+#### 4.5.6 ETL 失敗時の handling
+
+- 各 Job は `etl_runs/{job_name}/{date}` に取得 URL の SHA-256 を記録、前回と同じなら処理スキップ
+- 期待スキーマと違う場合 (列名変更 / 件数の急減 / null 率上昇) は Slack/LINE 通知
+- 旧データは温存 (失敗中も応答可能、ただし `freshness.as_of` の経過日数で UI に「N 日前のデータ」と注記)
+- 5 連敗で fail-fast、再開は手動
+
+### 4.6 Test Plan
 
 - **Unit**:
   - `polite_fetcher`: User-Agent / interval / If-Modified-Since の挙動 (mock サーバ)
@@ -337,19 +445,22 @@ fujisawa-platform/
   - [ ] Wayback から `r4-4nyuusyonaiteisisuu.pdf` 取得 → Docling 抽出 → 120+ 施設の指数表が parse できる
   - [ ] consumer 側 (LINE bot 開発者の立場) で `from fujisawa_platform import knowledge_base` が動作
 
-### 4.6 Migration / Rollback
+### 4.7 Migration / Rollback
 
 - **Migration**: 新規モジュールのため migration なし。Cloud SQL に新 DB (`fujisawa_kb_db`) を作るだけ
 - **Rollback**: 各 consumer から `fujisawa_platform` の import を外せば独立稼働に戻せる (既存 driving-license-bot は無影響)
 - **既存ユーザー影響**: なし (新規)
 
-### 4.7 Feature Enablement
+### 4.8 Feature Enablement
 
 env なし。consumer 側で `from fujisawa_platform import ...` するだけで利用可能。
 
 ただし観測有効化のため:
 - `FUJISAWA_PLATFORM_ANALYTICS_ENABLED=true` で analytics-platform への計装を ON
 - 既定: ON
+
+各 ETL Job も env で無効化可能:
+- `FUJISAWA_ETL_<JOB_NAME>_ENABLED=false` で Cloud Scheduler のトリガをスキップ (Phase 0 で個別 Job を段階的に有効化するため)
 
 ---
 
@@ -464,3 +575,4 @@ env なし。consumer 側で `from fujisawa_platform import ...` するだけで
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-05-09 | Draft | 初稿 (本 PR) |
+| 2026-05-09 | Draft 改訂 | レビュー回答を反映: §4.1 アーキ図に Read-Only Path / Write Path の分離を明記、§4.5 を新設 (アクセス経路と ETL 投入タイミングを詳細化)、§4.4 に `etl/` ディレクトリ追加、§4.8 に ETL 個別有効化 env を追加 |
