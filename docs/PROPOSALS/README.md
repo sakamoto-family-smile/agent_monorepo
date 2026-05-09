@@ -66,6 +66,9 @@ docs/PROPOSALS/NNNN-short-kebab-title.md
 |---|---|---|---|
 | [0001](0001-lifeplanner-cashflow-breakdown.md) | キャッシュフロー粒度向上 | lifeplanner-agent | Implemented |
 | [0002](0002-deepteam-redteam-replacement.md) | red team を Promptfoo から DeepTeam に置き換え | security-platform | Draft |
+| [0003](0003-fujisawa-platform-shared-base.md) | 藤沢市データ共通基盤 fujisawa-platform | cross-agent (新規) | Draft |
+| [0004](0004-fujisawa-info-bot.md) | 藤沢市情報 LINE Bot | fujisawa-info-bot (新規) | Draft |
+| [0005](0005-fujisawa-hokatsu-agent.md) | 藤沢市保活エージェント | fujisawa-hokatsu-agent (新規) | Draft |
 
 新しい提案を作るたびに上記表に 1 行追加する (forget-me-not)。
 
