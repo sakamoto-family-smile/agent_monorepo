@@ -580,13 +580,21 @@ HOKATSU_HISTORICAL_DATA_ENABLED=true   # 令和 4 年バックフィル使用
 - 月次 ETL: 22 日 03:00 開始、5 時間以内完了
 
 #### コスト (100 ユーザー想定)
-- Cloud Run (api / agent-core / 6 MCP): 月 ¥10,000-15,000
+- Cloud Run (api / agent-core / 6 MCP、**全部 min=0**): 月 ¥3,000-6,000 (アイドル時 ¥0、リクエスト時のみ課金)
 - Cloud SQL (instance 共有): ¥0 増
 - Vertex Gemini (Pro 30% / Flash 70%): 月 ¥5,000-15,000
 - Vertex Embedding: 月 ¥500
 - Firestore: 無料枠内
 - Cloud Tasks: 無料枠内
-- 合計: **月 ¥20,000-40,000** (100 ユーザー想定)
+- 合計: **月 ¥10,000-25,000** (100 ユーザー想定、min=0 採用)
+
+##### コールドスタート対策 (info-bot 同様)
+
+LINE Webhook の 3 秒制約は Webhook handler 側で吸収:
+- Webhook handler を最小化 (署名検証 + Pub/Sub publish のみ)
+- agent-core / 6 MCP servers は Pub/Sub 経由なのでコールドスタートを吸収可能
+- 戦略立案は元々 10-30 秒かかる → Loading Indicator + Push パターン
+- env (`CLOUD_RUN_MIN_INSTANCES_API` / `_AGENT` / `_MCP`) で必要に応じて min=1 に切替
 
 #### プライバシー / データ保持
 - 世帯収入・診断書情報など PII は Firestore のみ、Claude/Gemini への送信は階層識別子のみ
@@ -653,3 +661,4 @@ HOKATSU_HISTORICAL_DATA_ENABLED=true   # 令和 4 年バックフィル使用
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-05-09 | Draft | 初稿 (本 PR、proposal 0003 / 0004 と一括) |
+| 2026-05-09 | Draft 改訂 | 0004 と同じレビュー反映: Cloud Run min instances を **min=1 → min=0** に変更、合計コスト試算を **¥20,000-40,000 → ¥10,000-25,000** に再見積。コールドスタート対策は Pub/Sub async + Loading Indicator パターンで吸収可能 |

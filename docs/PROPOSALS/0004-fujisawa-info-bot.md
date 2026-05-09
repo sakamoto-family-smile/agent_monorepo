@@ -105,6 +105,7 @@
 | クロール時の鯖負荷 (city.fujisawa.kanagawa.jp 側) | Medium | `fujisawa-platform/crawler` の polite mode (1 URL/3 秒) を厳守、深夜帯バッチ |
 | LLM コストの暴騰 | Medium | Gemini Flash を default、Pro は Supervisor のみ、prompt cache 活用、月次予算 alarm |
 | LINE 3 秒タイムアウト | Medium | Webhook 即 200 → Pub/Sub 経由で非同期処理、Loading Indicator + Push パターン |
+| **コールドスタートで Webhook が 3 秒超える** | Medium | min=0 のため初回呼出で 1-3 秒遅延あり。Webhook handler を最小化 (重い import を避け署名検証 + Pub/Sub publish のみ)、Cloud Run の Startup CPU Boost を ON、災害時のみ min=1 を env 切替で許可 |
 | 災害時のスパイク (1 万 push を一度に投げる) | Medium | LINE Multicast API で 500 人/呼出、Cloud Tasks で rate limit |
 | 出典なし回答の混入 | High | RAG で取れた `source_url` が空なら「お答えできません、公式 HP をご確認ください」へフォールバック |
 | 利用規約違反の指摘 | Low | UA に連絡先明示、Pre-launch checklist で広報課への一報 |
@@ -322,6 +323,8 @@ env で段階的に機能を有効化:
 | `FUJISAWA_INFO_BOT_EMERGENCY_ENABLED` | false | 緊急情報 push (Phase 4 で有効化) |
 | `FUJISAWA_INFO_BOT_LANGUAGE_DEFAULT` | ja | 既定言語 |
 | `LLM_PROVIDER` | vertex | vertex / anthropic |
+| `CLOUD_RUN_MIN_INSTANCES_API` | 0 | Webhook 用 Cloud Run の min instances (災害時等で 1 に切替可) |
+| `CLOUD_RUN_MIN_INSTANCES_AGENT` | 0 | agent-core 用 Cloud Run の min instances |
 
 ---
 
@@ -369,11 +372,22 @@ env で段階的に機能を有効化:
 #### コスト (月間 1 万メッセージ想定)
 - Gemini 2.0 Flash: 1 メッセージ ≈ ¥0.05 → 月 ¥500
 - Gemini 2.5 Pro (Supervisor、20% 程度): 1 呼出 ≈ ¥0.5 → 月 ¥1,000
-- Cloud Run (api min=1, agent-core): 月 ¥3,000-4,000
+- Cloud Run (api / agent-core、**min=0**): 月 ¥500-1,500 (アイドル時は ¥0、リクエスト時のみ課金)
 - Cloud SQL (instance 共有): ¥0 増
 - Vertex Embedding: 月 ¥10
 - LINE Push (Free 1,000/月、Premium ¥5/通): 緊急情報 1,000 通までは無料、超過分のみ課金
-- 合計: **月 ¥3,000-5,000** (1 万メッセージ想定、緊急情報は別)
+- 合計: **月 ¥2,000-3,500** (1 万メッセージ想定、緊急情報は別)
+
+##### コールドスタート対策 (min=0 採用のため)
+
+Webhook の LINE 3 秒タイムアウトは、Cloud Run のコールドスタート (FastAPI 起動 1-3 秒) と
+ぶつかる可能性がある。以下で吸収:
+
+- **Webhook handler を最小化**: 署名検証 + Pub/Sub publish のみ、heavy import は避ける
+- **Cloud Run の Startup CPU Boost を ON**: コールドスタートを 50-70% 短縮
+- **lazy load**: LangGraph / Anthropic SDK は agent-core 側のみ、webhook handler では import しない
+- **Pub/Sub 投入後は async**: agent-core はコールドスタートしても LINE 側はタイムアウトしない (Push パターン)
+- **ユースケース次第で min=1 に切替**: 災害時に大量 push したい場合のみ env で切替可能
 
 #### プライバシー / データ保持
 - LINE userId は Firestore のみ、ログには sha256 hash で出す
@@ -392,7 +406,7 @@ env で段階的に機能を有効化:
 - **コスト試算 ¥3,000-5,000 は当初仕様 (¥5,000 以下) 上限ギリギリ**: ユーザー増 + 複雑質問増で超過リスク。Pro モデルの利用率を制限する設計が肝
 - **緊急情報誤通知のリスク**: 1 度誤 push すると信頼を失う。dry-run + 重複検知 + 1 週間 staging 必須
 - **多言語対応がリンク誘導のみ**: 「自然な英語で回答」を期待するユーザーは満足しないが、藤沢市公式翻訳が既にあるので自前で書く価値が薄い
-- **LangGraph + Cloud Run でコールドスタート問題**: min=1 必須、月 ¥3,000-4,000 のベース費
+- **コールドスタート受容**: min=0 採用のため初回リクエストは 1-3 秒の遅延あり。Webhook は handler 最小化 + Startup CPU Boost で対処、agent-core は Pub/Sub 経由なので影響なし
 
 これらを踏まえても、藤沢市民の QoL 向上 + `fujisawa-platform` 共通基盤の利用例として価値あり。
 
@@ -438,3 +452,4 @@ env で段階的に機能を有効化:
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-05-09 | Draft | 初稿 (本 PR、proposal 0003 / 0005 と一括) |
+| 2026-05-09 | Draft 改訂 | レビュー反映: Cloud Run min instances を **min=1 → min=0** に変更 (アイドル時コスト削減)。コールドスタート対策 (handler 最小化 / Startup CPU Boost / lazy load / Pub/Sub async) を §3.3 / §5.4 に追記、env で min=1 切替可能に |
