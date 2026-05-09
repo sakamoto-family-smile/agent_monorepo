@@ -61,7 +61,7 @@
 - **PgvectorStore (本番 asyncpg 実装) は Phase 4 に延期**: Cloud SQL への接続ライフサイクルが ETL Cloud Run Jobs と一体のため、Phase 4 で同時に実装。Phase 2 範囲では Protocol + InMemoryStore (Mock) を提供。
 - **Embedding は Protocol + Mock + Vertex の 3 段構成**: driving-license-bot の `app/agent/embedding.py` パターンを踏襲。Vertex は lazy import (`uv sync --extra vertex` で導入)。
 - **Docling は完全 lazy import**: `[pdf]` extra として ML deps を分離。Phase 4 ETL でのみ必要。
-- **rapidfuzz scorer は `fuzz.ratio` (Levenshtein)**: 日本語は token boundaries が無いため、token-set ratio より文字レベル ratio が中黒 / typo に強い。
+- **rapidfuzz scorer は `fuzz.ratio` (Levenshtein)**: 日本語は token boundaries が無いため、token-set ratio より文字レベル ratio が中黒 (なかぐろ「・」、例: 「キディ鵠沼・藤沢」⇔「キディ鵠沼藤沢」) / typo に強い。
 
 ### 3.1 FacilityResolver の挙動
 
@@ -69,7 +69,7 @@
 |---|---|
 | 入力 | `query` (検索文字列) + `entries` (ResolverEntry のリスト) |
 | 解決経路 | 1. canonical / alias 完全一致 (score=1.0) 2. fuzz.ratio で fuzzy match |
-| threshold | default 0.85 (中黒 / 軽微 typo を吸収) |
+| threshold | default 0.85 (中黒「・」の有無 / 軽微 typo を吸収) |
 | `resolve()` | 最高スコアを 1 つ返す。threshold 未満は `NoMatchError` |
 | `resolve_all(top_k)` | score 降順で top-k。同 facility_id は最高スコアのみ |
 | 重複排除 | canonical と alias 両方にヒットしても 1 件にまとめる |
