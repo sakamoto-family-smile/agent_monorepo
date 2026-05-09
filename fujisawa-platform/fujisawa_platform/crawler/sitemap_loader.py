@@ -13,8 +13,10 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any
-from xml.etree import ElementTree as ET
+from xml.etree import ElementTree as ET  # 型のみ参照 (parse は defusedxml)
 
+from defusedxml import ElementTree as DET
+from defusedxml.common import DefusedXmlException
 from pydantic import BaseModel, ConfigDict, HttpUrl, field_validator
 
 _NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
@@ -59,8 +61,10 @@ def parse_sitemap(content: bytes) -> list[SitemapEntry]:
         SitemapParseError: XML が壊れている / `<urlset>` ルートでない / 必須要素が欠落。
     """
     try:
-        root = ET.fromstring(content)
-    except ET.ParseError as err:
+        # defusedxml.ElementTree.fromstring は XXE / billion laughs を防ぐ。
+        # 戻り値は標準 xml.etree の Element 互換なので以降のロジックはそのまま。
+        root = DET.fromstring(content)
+    except (ET.ParseError, DefusedXmlException) as err:
         raise SitemapParseError(f"invalid XML: {err}") from err
 
     if not _localname(root.tag) == "urlset":

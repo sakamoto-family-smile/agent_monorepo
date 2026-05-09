@@ -11,6 +11,8 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     "tenacity>=9.0.0",
     "python-dotenv>=1.0.0",
+    # XML 攻撃 (XXE / billion laughs 等) 対策で stdlib の xml.etree の代替として使う
+    "defusedxml>=0.7.1",
 ]
 
 [project.optional-dependencies]

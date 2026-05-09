@@ -85,6 +85,36 @@ class TestParseSitemapErrors:
         )
         assert parse_sitemap(empty) == []
 
+    def test_blocks_xxe_external_entity_attack(self) -> None:
+        """defusedxml が XXE (外部実体参照) を防ぐ。
+
+        `&xxe;` が展開されると `/etc/passwd` を読まれる古典的攻撃。
+        defusedxml は EntitiesForbidden / DTDForbidden を raise する。
+        """
+        malicious = (
+            b'<?xml version="1.0"?>'
+            b'<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>'
+            b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            b'<url><loc>https://example.com/&xxe;</loc></url></urlset>'
+        )
+        with pytest.raises(SitemapParseError):
+            parse_sitemap(malicious)
+
+    def test_blocks_billion_laughs_attack(self) -> None:
+        """defusedxml が billion laughs (entity expansion DoS) を防ぐ。"""
+        malicious = (
+            b'<?xml version="1.0"?>'
+            b'<!DOCTYPE lolz ['
+            b'<!ENTITY lol "lol">'
+            b'<!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;">'
+            b'<!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;">'
+            b']>'
+            b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            b'<url><loc>&lol3;</loc></url></urlset>'
+        )
+        with pytest.raises(SitemapParseError):
+            parse_sitemap(malicious)
+
 
 class TestSitemapEntry:
     def test_immutable(self) -> None:
