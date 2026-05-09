@@ -4,7 +4,7 @@
 |---|---|
 | **Version** | 0.1 |
 | **最終更新** | 2026-05-09 |
-| **Status** | Active (Phase 1 着手中) |
+| **Status** | Active (Phase 2 実装済 / Phase 3 着手予定) |
 | **Owner** | @kurama554101 |
 | **Type** | 共通基盤ライブラリ (path dep として info-bot / 保活 から参照) |
 | **README** | [`../README.md`](../README.md) |
@@ -14,6 +14,7 @@
 | 日付 | Version | 変更内容 |
 |---|---|---|
 | 2026-05-09 | 0.1 | 初版 (Phase 1: パッケージ雛形 + crawler + skills + DB schema) |
+| 2026-05-09 | 0.2 | Phase 2 実装 (resolver / knowledge_base + Mock backends / pdf_pipeline) |
 
 ---
 
@@ -45,17 +46,80 @@
 
 | Phase | 内容 | 状態 |
 |---|---|---|
-| **Phase 1** | パッケージ雛形 + polite_fetcher + sitemap_loader + skills + DB schema | 🔶 着手中 |
-| Phase 2 | pdf_pipeline (Docling) + knowledge_base (pgvector + Vertex) + resolver (FacilityResolver) | ⏳ 未着手 |
+| **Phase 1** | パッケージ雛形 + polite_fetcher + sitemap_loader + skills + DB schema | ✅ 完了 (PR #116) |
+| **Phase 2** | resolver (FacilityResolver) + knowledge_base (Embedding Protocol + Mock + Vertex / KnowledgeStore Protocol + InMemoryStore) + pdf_pipeline (hash_diff / freshness / docling lazy) | 🔶 実装済 (本 PR) |
 | Phase 3 | crawler/rss_poller + crawler/wayback | ⏳ 未着手 |
-| Phase 4 | etl/ 配下 7 Job (weekly_crawl, monthly_vacancy, ...) + Cloud Run Jobs デプロイ | ⏳ 未着手 |
+| Phase 4 | knowledge_base/pgvector_impl (asyncpg 本番) + etl/ 配下 7 Job + Cloud Run Jobs デプロイ | ⏳ 未着手 |
 | Phase 5 | observability (analytics-platform 計装) + monitoring | ⏳ 未着手 |
 
 ---
 
-## 3. Phase 1 で確定した詳細
+## 3. Phase 2 で確定した詳細
 
-### 3.1 PoliteFetcher の挙動
+### 3.0 設計判断
+
+- **PgvectorStore (本番 asyncpg 実装) は Phase 4 に延期**: Cloud SQL への接続ライフサイクルが ETL Cloud Run Jobs と一体のため、Phase 4 で同時に実装。Phase 2 範囲では Protocol + InMemoryStore (Mock) を提供。
+- **Embedding は Protocol + Mock + Vertex の 3 段構成**: driving-license-bot の `app/agent/embedding.py` パターンを踏襲。Vertex は lazy import (`uv sync --extra vertex` で導入)。
+- **Docling は完全 lazy import**: `[pdf]` extra として ML deps を分離。Phase 4 ETL でのみ必要。
+- **rapidfuzz scorer は `fuzz.ratio` (Levenshtein)**: 日本語は token boundaries が無いため、token-set ratio より文字レベル ratio が中黒 / typo に強い。
+
+### 3.1 FacilityResolver の挙動
+
+| 観点 | 仕様 |
+|---|---|
+| 入力 | `query` (検索文字列) + `entries` (ResolverEntry のリスト) |
+| 解決経路 | 1. canonical / alias 完全一致 (score=1.0) 2. fuzz.ratio で fuzzy match |
+| threshold | default 0.85 (中黒 / 軽微 typo を吸収) |
+| `resolve()` | 最高スコアを 1 つ返す。threshold 未満は `NoMatchError` |
+| `resolve_all(top_k)` | score 降順で top-k。同 facility_id は最高スコアのみ |
+| 重複排除 | canonical と alias 両方にヒットしても 1 件にまとめる |
+
+実装: [`fujisawa_platform/resolver/facility_resolver.py`](../fujisawa_platform/resolver/facility_resolver.py)
+テスト: 13 ケース PASS
+
+### 3.2 EmbeddingClient の Protocol
+
+| 観点 | 仕様 |
+|---|---|
+| Protocol | `dimension` プロパティ + `embed(text) -> list[float]` + `embed_batch(texts)` |
+| MockEmbeddingClient | SHA-256 ハッシュベースで決定的、L2 正規化済 (cosine = 内積) |
+| VertexEmbeddingClient | `text-embedding-004` (768 dim)、認証は Workload Identity、import は lazy |
+| 次元 | default 768 (Vertex `text-embedding-004` に合わせる) |
+
+実装: [`fujisawa_platform/knowledge_base/embedding.py`](../fujisawa_platform/knowledge_base/embedding.py)
+テスト: 10 ケース PASS
+
+### 3.3 KnowledgeStore (pages テーブル抽象)
+
+| 観点 | 仕様 |
+|---|---|
+| Protocol | `upsert_page` / `get_page` / `delete_page` / `search_pages` (全部 async) |
+| InMemoryStore | dict ベース、cosine = 内積で full scan top-k |
+| 検索フィルタ | `category` で絞り込み (将来 region / age_class 等を追加) |
+| dimension 検証 | upsert / search 時に embedding 次元が store の `embedding_dim` と一致するか確認 |
+| 本番 PgvectorStore | Phase 4 で追加 (本 PR は雛形のみ) |
+
+実装: [`fujisawa_platform/knowledge_base/store.py`](../fujisawa_platform/knowledge_base/store.py)
+テスト: 11 ケース PASS
+
+### 3.4 pdf_pipeline の 3 helpers
+
+| Helper | 仕様 |
+|---|---|
+| `compute_hash(bytes) -> str` | SHA-256 hex digest (64 char、小文字) |
+| `has_changed(prev, curr)` | None なら常に True (初回)、それ以外は case-insensitive 比較 |
+| `build_freshness(...)` | FreshnessMetadata を構築。`snapshot_date` 省略時は PDF URL から自動推定 |
+| `parse_pdf_date_from_filename(url)` | YYYYMMDD パターンを正規表現で抽出。1 桁日付など不規則ケースは None |
+| `extract_chunks(pdf_bytes)` | Docling lazy import、章見出しで分割した `PdfChunk` のリストを返す |
+
+実装: [`fujisawa_platform/pdf_pipeline/`](../fujisawa_platform/pdf_pipeline/)
+テスト: 17 ケース PASS (hash 8 + freshness 9、docling は環境依存で skip)
+
+---
+
+## 4. Phase 1 で確定した詳細
+
+### 4.1 PoliteFetcher の挙動
 
 | 観点 | 仕様 |
 |---|---|
@@ -70,7 +134,7 @@
 実装: [`fujisawa_platform/crawler/polite_fetcher.py`](../fujisawa_platform/crawler/polite_fetcher.py)
 テスト: 11 ケース PASS
 
-### 3.2 sitemap.xml の parse 仕様
+### 4.2 sitemap.xml の parse 仕様
 
 | 観点 | 仕様 |
 |---|---|
@@ -84,7 +148,7 @@
 実装: [`fujisawa_platform/crawler/sitemap_loader.py`](../fujisawa_platform/crawler/sitemap_loader.py)
 テスト: 12 ケース PASS
 
-### 3.3 Skill File 5 種
+### 4.3 Skill File 5 種
 
 | Skill | 用途 | LINE Bot / 保活 |
 |---|---|---|
@@ -98,7 +162,7 @@
 loader: `fujisawa_platform.skills.get_skill(name)`
 テスト: 11 ケース PASS (各 skill が 100 char 以上 + ヘッダ規約準拠)
 
-### 3.4 pgvector schema (8 テーブル)
+### 4.4 pgvector schema (8 テーブル)
 
 `fujisawa_kb_db` に作成。proposal 0003 §4.3 + 0005 で言及した全テーブルを網羅:
 
@@ -115,7 +179,7 @@ loader: `fujisawa_platform.db.get_init_schema_sql()`
 
 ---
 
-## 4. NFR (proposal 0003 §3 から要約)
+## 5. NFR (proposal 0003 §3 から要約)
 
 | 観点 | 目標 / 制約 |
 |---|---|
@@ -129,7 +193,7 @@ loader: `fujisawa_platform.db.get_init_schema_sql()`
 
 ---
 
-## 5. 関連ドキュメント
+## 6. 関連ドキュメント
 
 - [`../README.md`](../README.md) — Quickstart / 利用方法
 - proposal 0003-0005 (上記 §1)
@@ -139,7 +203,7 @@ loader: `fujisawa_platform.db.get_init_schema_sql()`
 
 ---
 
-## 6. 用語集
+## 7. 用語集
 
 | 用語 | 意味 |
 |---|---|
