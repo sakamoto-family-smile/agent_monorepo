@@ -1,0 +1,77 @@
+[project]
+name = "fujisawa-platform"
+version = "0.1.0"
+description = "藤沢市 HP / PDF を一次ソースとする共通基盤 (crawler / PDF / KB / Resolver / Skills)"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.4.0",
+    "httpx>=0.27.0",
+    "lxml>=5.0.0",
+    "beautifulsoup4>=4.12.0",
+    "tenacity>=9.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+# pgvector 本体 (Cloud SQL Postgres + 768-dim ベクトル検索)
+pgvector = [
+    "asyncpg>=0.30.0",
+    "pgvector>=0.3.0",
+]
+
+# Vertex AI text-embedding-004 (knowledge_base.embedding)
+vertex = [
+    "google-cloud-aiplatform>=1.60.0",
+]
+
+# PDF 構造化 (申込ナビ / 概要 PDF を Docling で章別分割)
+pdf = [
+    "docling>=1.0.0",
+    "pandas>=2.2.0",
+]
+
+# 表記ゆれ吸収 (FacilityResolver)
+resolver = [
+    "rapidfuzz>=3.0.0",
+]
+
+# Phase 1 (本 PR) で必要なものをまとめた all
+phase1 = [
+    "fujisawa-platform[resolver]",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["fujisawa_platform"]
+
+# SKILL.md / SQL DDL を wheel に含める
+[tool.hatch.build.targets.wheel.force-include]
+"fujisawa_platform/skills" = "fujisawa_platform/skills"
+"fujisawa_platform/db" = "fujisawa_platform/db"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["fujisawa_platform"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+ignore = ["E501"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "anyio[trio]>=4.4.0",
+    "httpx>=0.27.0",
+    "respx>=0.21.0",
+    "ruff>=0.6.0",
+]
