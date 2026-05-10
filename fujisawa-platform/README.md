@@ -4,7 +4,7 @@
 (`fujisawa-info-bot` / `fujisawa-hokatsu-agent`) が path dep で参照し、
 **クロール / PDF 解析 / ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL** を一元提供する。
 
-> **Status**: Phase 2 着手中 (Phase 1 完了 + resolver + knowledge_base + pdf_pipeline)
+> **Status**: Phase 3 実装済 (Phase 1-2 完了 + crawler/rss_poller + crawler/wayback)
 
 設計詳細は [`../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md`](../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md) 参照。
 本 README は「動かす / 取り込む」観点に絞る。
@@ -55,7 +55,14 @@ fujisawa-platform = { path = "../fujisawa-platform" }
 
 ```python
 # 消費者コード例
-from fujisawa_platform.crawler import PoliteFetcher, PoliteFetcherConfig, parse_sitemap
+from fujisawa_platform.crawler import (
+    PoliteFetcher,
+    PoliteFetcherConfig,
+    WaybackClient,
+    WaybackConfig,
+    parse_feed,
+    parse_sitemap,
+)
 from fujisawa_platform.models import FreshnessMetadata
 from fujisawa_platform.skills import get_skill
 from fujisawa_platform.resolver import FacilityResolver, ResolverEntry
@@ -108,6 +115,25 @@ if has_changed(previous_hash, new_hash):
 # (5) Skill File を LLM プロンプトに動的注入
 citation_rules = get_skill("citation_format")
 freshness_rules = get_skill("freshness_disclaimer")
+
+# (6) 緊急情報 RSS の parse (5 分 poll 自体は consumer 側で実装)
+rss_bytes = b"<?xml version='1.0'?><rss version='2.0'><channel>...</channel></rss>"
+entries = parse_feed(rss_bytes)
+for e in entries:
+    if e.guid not in seen_guids:
+        ...  # LINE bot に push
+
+# (7) Wayback Machine 経由の過去 PDF バックフィル (Phase 4 の wayback_backfill ETL で利用)
+wb_config = WaybackConfig(user_agent="my-app/0.1 (https://example.com)")
+async with WaybackClient(wb_config) as wb:
+    snaps = await wb.query_cdx(
+        "https://www.city.fujisawa.kanagawa.jp/hoiku/documents/r4-4nyuusyonaiteisisuu.pdf",
+        from_timestamp="20220101000000",
+        mimetype="application/pdf",
+    )
+    for snap in snaps:
+        pdf_bytes = await wb.fetch_archive(snap)
+        ...  # Docling で解析 → admission_results に投入
 ```
 
 ---
@@ -127,12 +153,12 @@ freshness_rules = get_skill("freshness_disclaimer")
 | `fujisawa_platform.pdf_pipeline.hash_diff` | SHA-256 差分検知 (ETL の重複処理回避) | 2 | ✅ 実装済 |
 | `fujisawa_platform.pdf_pipeline.freshness` | `build_freshness()` + `parse_pdf_date_from_filename()` | 2 | ✅ 実装済 |
 | `fujisawa_platform.pdf_pipeline.docling_wrapper` | Docling lazy import + `extract_chunks()` | 2 | ✅ 実装済 |
+| `fujisawa_platform.crawler.rss_poller` | 緊急情報 RSS / Atom feed parser (5 分 poll loop は consumer 側) | 3 | ✅ 実装済 |
+| `fujisawa_platform.crawler.wayback` | Wayback CDX + Web Archive client (Phase 4 backfill 用) | 3 | ✅ 実装済 |
 
-Phase 3 以降に追加予定:
-- `crawler/rss_poller.py` (緊急情報 RSS 5 分間隔 poll)
-- `crawler/wayback.py` (Wayback Machine CDX + 過去 PDF backfill)
-- `knowledge_base/pgvector_impl.py` (asyncpg + pgvector 本番実装、Phase 4 で必要時に追加)
-- `etl/` (Cloud Run Jobs entrypoints、Phase 4)
+Phase 4 以降に追加予定:
+- `knowledge_base/pgvector_impl.py` (asyncpg + pgvector 本番実装)
+- `etl/` (Cloud Run Jobs entrypoints、`wayback_backfill.py` 含む 7 Job)
 
 ---
 
@@ -177,13 +203,13 @@ proposal 0003 §4.5.4 の通り、Cloud Run Jobs として実装予定:
 
 | Job | 頻度 | 状態 |
 |---|---|---|
-| `weekly_crawl_etl` | 週次 | ⏳ Phase 2 |
-| `monthly_vacancy_etl` | 月次 22 日 | ⏳ Phase 2 |
-| `monthly_stats_compute` | 月次 23 日 | ⏳ Phase 2 |
-| `half_yearly_facility_etl` | 半年次 | ⏳ Phase 2 |
-| `yearly_navi_etl` | 年次 | ⏳ Phase 2 |
-| `biyearly_admission_etl` | 年 2 回 | ⏳ Phase 2 |
-| `wayback_backfill` | 一度きり | ⏳ Phase 2 |
+| `weekly_crawl_etl` | 週次 | ⏳ Phase 4 |
+| `monthly_vacancy_etl` | 月次 22 日 | ⏳ Phase 4 |
+| `monthly_stats_compute` | 月次 23 日 | ⏳ Phase 4 |
+| `half_yearly_facility_etl` | 半年次 | ⏳ Phase 4 |
+| `yearly_navi_etl` | 年次 | ⏳ Phase 4 |
+| `biyearly_admission_etl` | 年 2 回 | ⏳ Phase 4 |
+| `wayback_backfill` | 一度きり | ⏳ Phase 4 |
 
 ---
 
