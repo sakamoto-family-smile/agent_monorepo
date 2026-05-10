@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | 0.3 |
+| **Version** | 0.4 |
 | **最終更新** | 2026-05-10 |
-| **Status** | Active (Phase 3 実装済 / Phase 4 着手予定) |
+| **Status** | Active (Phase 4-1 実装済 / Phase 4-2 ETL 着手予定) |
 | **Owner** | @kurama554101 |
 | **Type** | 共通基盤ライブラリ (path dep として info-bot / 保活 から参照) |
 | **README** | [`../README.md`](../README.md) |
@@ -16,6 +16,7 @@
 | 2026-05-09 | 0.1 | 初版 (Phase 1: パッケージ雛形 + crawler + skills + DB schema) |
 | 2026-05-09 | 0.2 | Phase 2 実装 (resolver / knowledge_base + Mock backends / pdf_pipeline) |
 | 2026-05-10 | 0.3 | Phase 3 実装 (crawler/rss_poller + crawler/wayback) |
+| 2026-05-10 | 0.4 | Phase 4-1 実装 (knowledge_base/pgvector_store: asyncpg + pgvector 本番) |
 
 ---
 
@@ -49,15 +50,80 @@
 |---|---|---|
 | **Phase 1** | パッケージ雛形 + polite_fetcher + sitemap_loader + skills + DB schema | ✅ 完了 (PR #116) |
 | **Phase 2** | resolver (FacilityResolver) + knowledge_base (Embedding Protocol + Mock + Vertex / KnowledgeStore Protocol + InMemoryStore) + pdf_pipeline (hash_diff / freshness / docling lazy) | ✅ 完了 (PR #117) |
-| **Phase 3** | crawler/rss_poller + crawler/wayback | 🔶 実装済 (本 PR) |
-| Phase 4 | knowledge_base/pgvector_impl (asyncpg 本番) + etl/ 配下 7 Job (`wayback_backfill` 含む) + Cloud Run Jobs デプロイ | ⏳ 未着手 |
+| **Phase 3** | crawler/rss_poller + crawler/wayback | ✅ 完了 (PR #118) |
+| **Phase 4-1** | knowledge_base/pgvector_store (asyncpg + pgvector 本番) + build_pgvector_pool | 🔶 実装済 (本 PR) |
+| Phase 4-2 | etl/ 配下 7 Job (`weekly_crawl` / `monthly_vacancy` / `monthly_stats_compute` / `half_yearly_facility` / `yearly_navi` / `biyearly_admission` / `wayback_backfill`) + Cloud Run Jobs / Cloud Scheduler デプロイ | ⏳ 未着手 |
 | Phase 5 | observability (analytics-platform 計装) + monitoring | ⏳ 未着手 |
 
 ---
 
-## 3. Phase 3 で確定した詳細
+## 3. Phase 4-1 で確定した詳細
 
 ### 3.0 設計判断
+
+- **PgvectorStore は `asyncpg.Pool` を外部から受け取る**: クラス内で pool を作らず、consumer 側 (ETL Job / agent main) のライフサイクルでクローズする。短命接続を避けて Cloud SQL の同時接続上限を保護。driving-license-bot の `PgvectorQuestionBank` と同パターン。
+- **`pgvector.asyncpg.register_vector` は 1 クエリごとに呼ぶ**: Pool から acquire される接続は再利用されるが、再利用時の register は no-op になる前提で愚直に呼ぶ (driving-license-bot と同方針)。
+- **cosine 距離は `<=>` 演算子、類似度は `1 - (<=>)`**: pgvector 標準。HNSW より ivfflat (`lists=100`) を schema で採用済 (proposal §4.3)。
+- **asyncpg / pgvector は lazy import**: `[pgvector]` extra なしでも fujisawa-platform を import できるようにする (consumer が in-memory のみ使うケースを許容)。
+- **pgvector 単体テストは asyncpg を mock**: 実 Cloud SQL は CI に持たない。proposal §4.6 の通り、接続 smoke は Phase 4-2 ETL デプロイ時に手動。
+
+### 3.1 PgvectorStore の挙動
+
+| 観点 | 仕様 |
+|---|---|
+| 入力 | `pool: asyncpg.Pool` (外部構築) + `embedding_dim` (default 768) |
+| `upsert_page` | `INSERT ... ON CONFLICT (page_id) DO UPDATE`。dimension 不一致は DB を叩く前に ValueError |
+| `get_page` | `SELECT ... WHERE page_id = $1`。numpy.ndarray を `.tolist()` で list 化 |
+| `delete_page` | `DELETE FROM pages WHERE page_id = $1`。`DELETE N` の N で True/False 判定 (parse 失敗は False) |
+| `search_pages` | `1 - (embedding <=> $1) AS score` + `ORDER BY embedding <=> $1`。category フィルタは `WHERE ($2::text IS NULL OR category = $2)` |
+| dimension 検証 | upsert / search 時に query/embedding の次元が `embedding_dim` と一致するか確認 |
+
+実装: [`fujisawa_platform/knowledge_base/pgvector_store.py`](../fujisawa_platform/knowledge_base/pgvector_store.py)
+テスト: 16 ケース PASS (asyncpg mock)
+
+### 3.2 build_pgvector_pool helper
+
+| 観点 | 仕様 |
+|---|---|
+| 引数 | `host` / `port=5432` / `user` / `password` / `database` / `min_size=1` / `max_size=5` |
+| 戻り値 | `asyncpg.Pool` |
+| Cloud SQL Auth Proxy | `host="127.0.0.1"` を渡すだけで対応可能 |
+| ライフサイクル | 呼出側が `await pool.close()` する (本ライブラリは管理しない) |
+
+実装: 同上 (`pgvector_store.py` 末尾)
+
+### 3.3 Phase 4-2 への引き継ぎ
+
+ETL Cloud Run Job からの典型的な利用パターン:
+
+```python
+async def weekly_crawl():
+    pool = await build_pgvector_pool(
+        host=os.environ["DB_HOST"], user=..., password=..., database="fujisawa_kb_db",
+    )
+    try:
+        store = PgvectorStore(pool=pool, embedding_dim=768)
+        embedder = VertexEmbeddingClient(project_id=..., model="text-embedding-004")
+        # sitemap → polite fetch → embedding → upsert
+        for entry in parse_sitemap(sitemap_bytes):
+            html = await fetcher.fetch(str(entry.url))
+            text = clean_html(html.text)
+            await store.upsert_page(PageDocument(
+                page_id=hash_url(str(entry.url)),
+                url=str(entry.url),
+                content=text,
+                embedding=embedder.embed(text),
+                fetched_at=datetime.now(UTC),
+            ))
+    finally:
+        await pool.close()
+```
+
+---
+
+## 4. Phase 3 で確定した詳細
+
+### 4.0 設計判断
 
 - **緊急情報 RSS の 5 分 poll loop は LINE bot 側に置く**: 共通基盤側は `parse_feed(bytes) -> list[RssEntry]` の純粋な parse helper のみ提供する (proposal 0003 §4.5.4 の方針: 「5 分間隔の job が他 consumer にも見えると混乱する」)。LINE bot 側 `fujisawa-info-bot/batch/poll_rss.py` が `seen_guids` セットを Firestore で管理する。
 - **`parse_feed` は RSS 2.0 / Atom 両対応**: 藤沢市 HP がどちらを返すか実機未確認のため、両 schema を 1 関数で吸収。`<rss>` / `<feed>` のルート要素で分岐。
@@ -65,7 +131,7 @@
 - **CDX クエリは statuscode != 200 を捨てる**: Wayback には 404 / 301 のスナップショットも履歴として残るが、PDF 取得は不可能のため `_rows_to_snapshots` で除外。
 - **Wayback バックフィルは Phase 4 で 1 度きり実行**: 本 PR ではクライアント実装のみ。実データ投入は Phase 4 の `etl/wayback_backfill.py` で `admission_results` (令和 4-6 年) + `competition_stats.historical_minimum_index_2022` に流し込む。
 
-### 3.1 緊急情報 RSS parser (`crawler/rss_poller.py`)
+### 4.1 緊急情報 RSS parser (`crawler/rss_poller.py`)
 
 | 観点 | 仕様 |
 |---|---|
@@ -81,7 +147,7 @@
 実装: [`fujisawa_platform/crawler/rss_poller.py`](../fujisawa_platform/crawler/rss_poller.py)
 テスト: 16 ケース PASS
 
-### 3.2 Wayback クライアント (`crawler/wayback.py`)
+### 4.2 Wayback クライアント (`crawler/wayback.py`)
 
 | 観点 | 仕様 |
 |---|---|
@@ -97,9 +163,9 @@
 実装: [`fujisawa_platform/crawler/wayback.py`](../fujisawa_platform/crawler/wayback.py)
 テスト: 19 ケース PASS
 
-### 3.3 Phase 4 への引き継ぎ事項
+### 4.3 Phase 4-2 への引き継ぎ事項
 
-`etl/wayback_backfill.py` (Phase 4 で実装予定) の擬似コード:
+`etl/wayback_backfill.py` (Phase 4-2 で実装予定) の擬似コード:
 
 ```python
 async def backfill():
@@ -122,16 +188,16 @@ async def backfill():
 
 ---
 
-## 4. Phase 2 で確定した詳細
+## 5. Phase 2 で確定した詳細
 
-### 4.0 設計判断
+### 5.0 設計判断
 
 - **PgvectorStore (本番 asyncpg 実装) は Phase 4 に延期**: Cloud SQL への接続ライフサイクルが ETL Cloud Run Jobs と一体のため、Phase 4 で同時に実装。Phase 2 範囲では Protocol + InMemoryStore (Mock) を提供。
 - **Embedding は Protocol + Mock + Vertex の 3 段構成**: driving-license-bot の `app/agent/embedding.py` パターンを踏襲。Vertex は lazy import (`uv sync --extra vertex` で導入)。
 - **Docling は完全 lazy import**: `[pdf]` extra として ML deps を分離。Phase 4 ETL でのみ必要。
 - **rapidfuzz scorer は `fuzz.ratio` (Levenshtein)**: 日本語は token boundaries が無いため、token-set ratio より文字レベル ratio が中黒 (なかぐろ「・」、例: 「キディ鵠沼・藤沢」⇔「キディ鵠沼藤沢」) / typo に強い。
 
-### 4.1 FacilityResolver の挙動
+### 5.1 FacilityResolver の挙動
 
 | 観点 | 仕様 |
 |---|---|
@@ -145,7 +211,7 @@ async def backfill():
 実装: [`fujisawa_platform/resolver/facility_resolver.py`](../fujisawa_platform/resolver/facility_resolver.py)
 テスト: 13 ケース PASS
 
-### 4.2 EmbeddingClient の Protocol
+### 5.2 EmbeddingClient の Protocol
 
 | 観点 | 仕様 |
 |---|---|
@@ -157,7 +223,7 @@ async def backfill():
 実装: [`fujisawa_platform/knowledge_base/embedding.py`](../fujisawa_platform/knowledge_base/embedding.py)
 テスト: 10 ケース PASS
 
-### 4.3 KnowledgeStore (pages テーブル抽象)
+### 5.3 KnowledgeStore (pages テーブル抽象)
 
 | 観点 | 仕様 |
 |---|---|
@@ -170,7 +236,7 @@ async def backfill():
 実装: [`fujisawa_platform/knowledge_base/store.py`](../fujisawa_platform/knowledge_base/store.py)
 テスト: 11 ケース PASS
 
-### 4.4 pdf_pipeline の 3 helpers
+### 5.4 pdf_pipeline の 3 helpers
 
 | Helper | 仕様 |
 |---|---|
@@ -185,9 +251,9 @@ async def backfill():
 
 ---
 
-## 5. Phase 1 で確定した詳細
+## 6. Phase 1 で確定した詳細
 
-### 5.1 PoliteFetcher の挙動
+### 6.1 PoliteFetcher の挙動
 
 | 観点 | 仕様 |
 |---|---|
@@ -202,7 +268,7 @@ async def backfill():
 実装: [`fujisawa_platform/crawler/polite_fetcher.py`](../fujisawa_platform/crawler/polite_fetcher.py)
 テスト: 11 ケース PASS
 
-### 5.2 sitemap.xml の parse 仕様
+### 6.2 sitemap.xml の parse 仕様
 
 | 観点 | 仕様 |
 |---|---|
@@ -216,7 +282,7 @@ async def backfill():
 実装: [`fujisawa_platform/crawler/sitemap_loader.py`](../fujisawa_platform/crawler/sitemap_loader.py)
 テスト: 12 ケース PASS
 
-### 5.3 Skill File 5 種
+### 6.3 Skill File 5 種
 
 | Skill | 用途 | LINE Bot / 保活 |
 |---|---|---|
@@ -230,7 +296,7 @@ async def backfill():
 loader: `fujisawa_platform.skills.get_skill(name)`
 テスト: 11 ケース PASS (各 skill が 100 char 以上 + ヘッダ規約準拠)
 
-### 5.4 pgvector schema (8 テーブル)
+### 6.4 pgvector schema (8 テーブル)
 
 `fujisawa_kb_db` に作成。proposal 0003 §4.3 + 0005 で言及した全テーブルを網羅:
 
@@ -247,7 +313,7 @@ loader: `fujisawa_platform.db.get_init_schema_sql()`
 
 ---
 
-## 6. NFR (proposal 0003 §3 から要約)
+## 7. NFR (proposal 0003 §3 から要約)
 
 | 観点 | 目標 / 制約 |
 |---|---|
@@ -261,7 +327,7 @@ loader: `fujisawa_platform.db.get_init_schema_sql()`
 
 ---
 
-## 7. 関連ドキュメント
+## 8. 関連ドキュメント
 
 - [`../README.md`](../README.md) — Quickstart / 利用方法
 - proposal 0003-0005 (上記 §1)
@@ -271,7 +337,7 @@ loader: `fujisawa_platform.db.get_init_schema_sql()`
 
 ---
 
-## 8. 用語集
+## 9. 用語集
 
 | 用語 | 意味 |
 |---|---|
