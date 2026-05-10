@@ -4,7 +4,7 @@
 (`fujisawa-info-bot` / `fujisawa-hokatsu-agent`) が path dep で参照し、
 **クロール / PDF 解析 / ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL** を一元提供する。
 
-> **Status**: Phase 4-1 実装済 (Phase 1-3 完了 + knowledge_base/pgvector_store)
+> **Status**: Phase 4-2a 実装済 (Phase 1-4-1 完了 + etl 共通フレーム + weekly_crawl_etl)
 
 設計詳細は [`../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md`](../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md) 参照。
 本 README は「動かす / 取り込む」観点に絞る。
@@ -150,6 +150,31 @@ async with WaybackClient(wb_config) as wb:
     for snap in snaps:
         pdf_bytes = await wb.fetch_archive(snap)
         ...  # Docling で解析 → admission_results に投入
+
+# (8) weekly_crawl_etl (Cloud Run Job として配備、毎週日曜 03:00 JST)
+from fujisawa_platform.etl import EtlConfig, run_weekly_crawl
+from fujisawa_platform.etl._repos.etl_runs import EtlRunsRepo
+
+config = EtlConfig()  # FUJISAWA_ETL_* env から自動ロード
+pool = await build_pgvector_pool(
+    host=config.db_host, port=config.db_port,
+    user=config.db_user, password=config.db_password, database=config.db_name,
+)
+try:
+    result = await run_weekly_crawl(
+        sitemap_url=config.sitemap_url,
+        fetcher_config=PoliteFetcherConfig(
+            user_agent=config.user_agent,
+            min_interval_sec=config.min_interval_sec,
+        ),
+        embedder=MockEmbeddingClient(),  # or VertexEmbeddingClient(...)
+        store=PgvectorStore(pool=pool, embedding_dim=config.embedding_dim),
+        runs_repo=EtlRunsRepo(pool=pool),
+        run_id=f"weekly_crawl_etl-{datetime.now(UTC):%Y%m%d-%H%M}",
+    )
+    print(result.status, result.rows_written)  # 'success' 1100
+finally:
+    await pool.close()
 ```
 
 ---
@@ -172,9 +197,20 @@ async with WaybackClient(wb_config) as wb:
 | `fujisawa_platform.crawler.rss_poller` | 緊急情報 RSS / Atom feed parser (5 分 poll loop は consumer 側) | 3 | ✅ 実装済 |
 | `fujisawa_platform.crawler.wayback` | Wayback CDX + Web Archive client (Phase 4 backfill 用) | 3 | ✅ 実装済 |
 | `fujisawa_platform.knowledge_base.pgvector_store` | PgvectorStore (asyncpg + pgvector 本番実装) + `build_pgvector_pool` | 4-1 | ✅ 実装済 |
+| `fujisawa_platform.etl._runner` | `run_etl_job()` 共通実行ラッパー (etl_runs 記録 / fail-fast / skip-unchanged) | 4-2a | ✅ 実装済 |
+| `fujisawa_platform.etl._repos.etl_runs` | `EtlRunsRepo` | 4-2a | ✅ 実装済 |
+| `fujisawa_platform.etl._html` | `extract_main_text` / `extract_title` (BeautifulSoup) | 4-2a | ✅ 実装済 |
+| `fujisawa_platform.etl.config` | `EtlConfig` (env: `FUJISAWA_ETL_*`) | 4-2a | ✅ 実装済 |
+| `fujisawa_platform.etl.weekly_crawl` | `run_weekly_crawl` / `crawl_and_index` (sitemap → pages) | 4-2a | ✅ 実装済 |
 
-Phase 4-2 以降に追加予定:
-- `etl/` (Cloud Run Jobs entrypoints、`wayback_backfill.py` 含む 7 Job)
+Phase 4-2b 以降に追加予定:
+- `etl/half_yearly_facility.py` + `FacilitiesRepo` (HTML 表 → facilities)
+- `etl/biyearly_admission.py` + `AdmissionRepo` (PDF → admission_results)
+- `etl/monthly_vacancy.py` + `VacancyRepo` (PDF → vacancy / application snapshots)
+- `etl/yearly_navi.py` + `PdfDocumentsRepo` (申込ナビ PDF → pdf_documents)
+- `etl/monthly_stats_compute.py` + `CompetitionStatsRepo` (DB 内集計)
+- `etl/wayback_backfill.py` (令和 4-6 年データ、一度きり)
+- terraform: Cloud Run Jobs / Cloud Scheduler / Secret Manager (Phase 4-2h)
 
 ---
 
