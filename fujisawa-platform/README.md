@@ -4,7 +4,7 @@
 (`fujisawa-info-bot` / `fujisawa-hokatsu-agent`) が path dep で参照し、
 **クロール / PDF 解析 / ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL** を一元提供する。
 
-> **Status**: Phase 3 実装済 (Phase 1-2 完了 + crawler/rss_poller + crawler/wayback)
+> **Status**: Phase 4-1 実装済 (Phase 1-3 完了 + knowledge_base/pgvector_store)
 
 設計詳細は [`../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md`](../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md) 参照。
 本 README は「動かす / 取り込む」観点に絞る。
@@ -90,9 +90,25 @@ resolver = FacilityResolver([
 ])
 hit = resolver.resolve("藤沢保育園")  # canonical match → score 1.0
 
-# (3) ベクトル検索 (テストは Mock、本番は Vertex)
+# (3) ベクトル検索 (テストは InMemoryStore、本番は PgvectorStore)
+from fujisawa_platform.knowledge_base import (
+    InMemoryStore,
+    PgvectorStore,
+    build_pgvector_pool,
+)
+
 embedder = MockEmbeddingClient()  # or VertexEmbeddingClient(project_id=...)
-store = InMemoryStore()           # or PgvectorStore(...) (Phase 4 で実装)
+
+# 開発・テスト時
+store = InMemoryStore()
+
+# 本番 (uv sync --extra pgvector で導入)
+pool = await build_pgvector_pool(
+    host="127.0.0.1",  # Cloud SQL Auth Proxy 経由
+    user="etl_user", password="...", database="fujisawa_kb_db",
+)
+store = PgvectorStore(pool=pool, embedding_dim=768)
+
 await store.upsert_page(PageDocument(
     page_id="page-1",
     url="https://www.city.fujisawa.kanagawa.jp/...",
@@ -155,9 +171,9 @@ async with WaybackClient(wb_config) as wb:
 | `fujisawa_platform.pdf_pipeline.docling_wrapper` | Docling lazy import + `extract_chunks()` | 2 | ✅ 実装済 |
 | `fujisawa_platform.crawler.rss_poller` | 緊急情報 RSS / Atom feed parser (5 分 poll loop は consumer 側) | 3 | ✅ 実装済 |
 | `fujisawa_platform.crawler.wayback` | Wayback CDX + Web Archive client (Phase 4 backfill 用) | 3 | ✅ 実装済 |
+| `fujisawa_platform.knowledge_base.pgvector_store` | PgvectorStore (asyncpg + pgvector 本番実装) + `build_pgvector_pool` | 4-1 | ✅ 実装済 |
 
-Phase 4 以降に追加予定:
-- `knowledge_base/pgvector_impl.py` (asyncpg + pgvector 本番実装)
+Phase 4-2 以降に追加予定:
 - `etl/` (Cloud Run Jobs entrypoints、`wayback_backfill.py` 含む 7 Job)
 
 ---
