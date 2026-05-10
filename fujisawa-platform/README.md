@@ -4,7 +4,7 @@
 (`fujisawa-info-bot` / `fujisawa-hokatsu-agent`) が path dep で参照し、
 **クロール / PDF 解析 / ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL** を一元提供する。
 
-> **Status**: Phase 1 着手中 (本パッケージの雛形 + crawler + skills + DB schema)
+> **Status**: Phase 2 着手中 (Phase 1 完了 + resolver + knowledge_base + pdf_pipeline)
 
 設計詳細は [`../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md`](../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md) 参照。
 本 README は「動かす / 取り込む」観点に絞る。
@@ -26,8 +26,11 @@
 ```bash
 cd agent_monorepo/fujisawa-platform
 
-make install          # 基本依存のみ
-make install-phase1   # Phase 1 (resolver extras 含む)
+make install            # 基本依存 (resolver 含む)
+make install-pgvector   # + asyncpg + pgvector (Phase 4 ETL 時)
+make install-vertex     # + google-cloud-aiplatform (本番 embedding)
+make install-pdf        # + docling (PDF 構造化、ETL Job のみ)
+make install-all        # 全 optional 含む
 ```
 
 ### 0.3 テスト・静的解析
@@ -55,8 +58,15 @@ fujisawa-platform = { path = "../fujisawa-platform" }
 from fujisawa_platform.crawler import PoliteFetcher, PoliteFetcherConfig, parse_sitemap
 from fujisawa_platform.models import FreshnessMetadata
 from fujisawa_platform.skills import get_skill
+from fujisawa_platform.resolver import FacilityResolver, ResolverEntry
+from fujisawa_platform.knowledge_base import (
+    InMemoryStore,
+    MockEmbeddingClient,
+    PageDocument,
+)
+from fujisawa_platform.pdf_pipeline import build_freshness, compute_hash, has_changed
 
-# polite な fetch
+# (1) polite な fetch
 config = PoliteFetcherConfig(
     user_agent="my-app/0.1 (https://example.com/contact)",
     min_interval_sec=3.0,
@@ -67,29 +77,62 @@ async with PoliteFetcher(config) as fetcher:
         entries = parse_sitemap(result.text.encode("utf-8"))
         print(f"Found {len(entries)} URLs in sitemap")
 
-# Skill File を LLM プロンプトに動的注入
+# (2) 表記ゆれ吸収
+resolver = FacilityResolver([
+    ResolverEntry(facility_id="fuji-001", canonical_name="藤沢保育園", aliases=[]),
+])
+hit = resolver.resolve("藤沢保育園")  # canonical match → score 1.0
+
+# (3) ベクトル検索 (テストは Mock、本番は Vertex)
+embedder = MockEmbeddingClient()  # or VertexEmbeddingClient(project_id=...)
+store = InMemoryStore()           # or PgvectorStore(...) (Phase 4 で実装)
+await store.upsert_page(PageDocument(
+    page_id="page-1",
+    url="https://www.city.fujisawa.kanagawa.jp/...",
+    content="...",
+    embedding=embedder.embed("..."),
+    fetched_at=datetime.now(UTC),
+))
+hits = await store.search_pages(embedder.embed("query"), top_k=5)
+
+# (4) PDF パイプライン (差分検知 + 鮮度メタ自動付与)
+pdf_bytes = b"..."
+new_hash = compute_hash(pdf_bytes)
+if has_changed(previous_hash, new_hash):
+    freshness = build_freshness(
+        source_url="https://www.city.fujisawa.kanagawa.jp/.../page.html",
+        source_pdf_url="https://www.city.fujisawa.kanagawa.jp/documents/.../20240401.pdf",
+    )
+    # → freshness.snapshot_date は filename から自動推定 (2024-04-01)
+
+# (5) Skill File を LLM プロンプトに動的注入
 citation_rules = get_skill("citation_format")
 freshness_rules = get_skill("freshness_disclaimer")
 ```
 
 ---
 
-## 1. 主要モジュール (Phase 1 範囲)
+## 1. 主要モジュール
 
-| モジュール | 役割 | 状態 |
-|---|---|---|
-| `fujisawa_platform.crawler.polite_fetcher` | UA / interval / If-Modified-Since / 5xx retry を備えた HTTP fetcher | ✅ 実装済 |
-| `fujisawa_platform.crawler.sitemap_loader` | sitemap.xml parser (1,100+ URL 対応) | ✅ 実装済 |
-| `fujisawa_platform.models.common` | `FreshnessMetadata` (鮮度メタデータ) | ✅ 実装済 |
-| `fujisawa_platform.skills` | 共通 Skill File 5 種 + `get_skill()` loader | ✅ 実装済 |
-| `fujisawa_platform.db` | `init_schema.sql` + `get_init_schema_sql()` loader | ✅ 実装済 |
+| モジュール | 役割 | Phase | 状態 |
+|---|---|---|---|
+| `fujisawa_platform.crawler.polite_fetcher` | UA / interval / If-Modified-Since / 5xx retry を備えた HTTP fetcher | 1 | ✅ 実装済 |
+| `fujisawa_platform.crawler.sitemap_loader` | sitemap.xml parser (1,100+ URL、defusedxml 経由) | 1 | ✅ 実装済 |
+| `fujisawa_platform.models.common` | `FreshnessMetadata` (鮮度メタデータ) | 1 | ✅ 実装済 |
+| `fujisawa_platform.skills` | 共通 Skill File 5 種 + `get_skill()` loader | 1 | ✅ 実装済 |
+| `fujisawa_platform.db` | `init_schema.sql` + `get_init_schema_sql()` loader | 1 | ✅ 実装済 |
+| `fujisawa_platform.resolver.facility_resolver` | FacilityResolver (rapidfuzz + alias dict、表記ゆれ吸収) | 2 | ✅ 実装済 |
+| `fujisawa_platform.knowledge_base.embedding` | Embedding Protocol + Mock + Vertex (`text-embedding-004`、768 dim) | 2 | ✅ 実装済 |
+| `fujisawa_platform.knowledge_base.store` | KnowledgeStore Protocol + InMemoryStore (Mock) + PageDocument | 2 | ✅ 実装済 |
+| `fujisawa_platform.pdf_pipeline.hash_diff` | SHA-256 差分検知 (ETL の重複処理回避) | 2 | ✅ 実装済 |
+| `fujisawa_platform.pdf_pipeline.freshness` | `build_freshness()` + `parse_pdf_date_from_filename()` | 2 | ✅ 実装済 |
+| `fujisawa_platform.pdf_pipeline.docling_wrapper` | Docling lazy import + `extract_chunks()` | 2 | ✅ 実装済 |
 
-Phase 2 以降に追加予定 (proposal 0003 §4.4):
-- `pdf_pipeline/` (Docling wrapper + hash 差分検知)
-- `knowledge_base/` (pgvector + Vertex Embedding)
-- `resolver/` (FacilityResolver、表記ゆれ吸収)
-- `crawler/rss_poller.py` / `crawler/wayback.py`
-- `etl/` (Cloud Run Jobs entrypoints)
+Phase 3 以降に追加予定:
+- `crawler/rss_poller.py` (緊急情報 RSS 5 分間隔 poll)
+- `crawler/wayback.py` (Wayback Machine CDX + 過去 PDF backfill)
+- `knowledge_base/pgvector_impl.py` (asyncpg + pgvector 本番実装、Phase 4 で必要時に追加)
+- `etl/` (Cloud Run Jobs entrypoints、Phase 4)
 
 ---
 
