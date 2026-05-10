@@ -94,30 +94,58 @@
 
 ### 3.3 Phase 4-2 への引き継ぎ
 
-ETL Cloud Run Job からの典型的な利用パターン:
+`weekly_crawl_etl` (Phase 4-2 で実装予定) の典型的な処理フロー:
+
+```
+[1] sitemap.xml 取得 (PoliteFetcher)
+    └─ FetchResult.text を bytes に encode して parse_sitemap に渡す
+[2] parse_sitemap → list[SitemapEntry] (~1,100 URL)
+[3] 各 URL を polite fetch (1 URL/3s、 1,100 URL ≈ 1 時間)
+[4] HTML 本文抽出 + Vertex Embedding
+[5] PgvectorStore.upsert_page で Cloud SQL に upsert
+```
+
+完全な擬似コード:
 
 ```python
 async def weekly_crawl():
+    fetcher_config = PoliteFetcherConfig(
+        user_agent="fujisawa-platform-etl/0.1 (https://example.com/contact)",
+        min_interval_sec=3.0,
+    )
     pool = await build_pgvector_pool(
         host=os.environ["DB_HOST"], user=..., password=..., database="fujisawa_kb_db",
     )
     try:
         store = PgvectorStore(pool=pool, embedding_dim=768)
         embedder = VertexEmbeddingClient(project_id=..., model="text-embedding-004")
-        # sitemap → polite fetch → embedding → upsert
-        for entry in parse_sitemap(sitemap_bytes):
-            html = await fetcher.fetch(str(entry.url))
-            text = clean_html(html.text)
-            await store.upsert_page(PageDocument(
-                page_id=hash_url(str(entry.url)),
-                url=str(entry.url),
-                content=text,
-                embedding=embedder.embed(text),
-                fetched_at=datetime.now(UTC),
-            ))
+
+        async with PoliteFetcher(fetcher_config) as fetcher:
+            # [1][2] sitemap.xml を fetch → parse
+            sitemap_url = "https://www.city.fujisawa.kanagawa.jp/sitemap.xml"
+            sitemap_result = await fetcher.fetch(sitemap_url)
+            sitemap_bytes = sitemap_result.text.encode("utf-8")
+            entries = parse_sitemap(sitemap_bytes)  # list[SitemapEntry]
+
+            # [3][4][5] 各 URL を polite fetch → embed → upsert
+            for entry in entries:
+                page_result = await fetcher.fetch(str(entry.url))
+                if isinstance(page_result, NotModified):
+                    continue  # 304 → upsert skip
+                text = clean_html(page_result.text)
+                await store.upsert_page(PageDocument(
+                    page_id=hash_url(str(entry.url)),
+                    url=str(entry.url),
+                    content=text,
+                    embedding=embedder.embed(text),
+                    fetched_at=datetime.now(UTC),
+                    last_modified=page_result.last_modified,
+                ))
     finally:
         await pool.close()
 ```
+
+`sitemap_bytes` は **(1) PoliteFetcher で `https://www.city.fujisawa.kanagawa.jp/sitemap.xml` を取得 → (2) `FetchResult.text` を utf-8 エンコード** で得る。藤沢市 HP の sitemap.xml は約 1,100 URL を含む (proposal 0003 §A3-2 / Phase 1 調査結果)。
 
 ---
 
