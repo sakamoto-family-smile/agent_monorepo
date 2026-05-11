@@ -65,6 +65,18 @@ class EtlConfig(BaseSettings):
         default=2026,
         description="biyearly_admission_etl で処理する年度 (西暦、令和年度+2018)",
     )
+    vacancy_pdf_url: str = Field(
+        default="",
+        description="monthly_vacancy_etl の空き状況 PDF URL",
+    )
+    application_pdf_url: str = Field(
+        default="",
+        description="monthly_vacancy_etl の申込状況 PDF URL",
+    )
+    vacancy_year_month: str = Field(
+        default="",
+        description="monthly_vacancy_etl の対象年月 ('YYYY-MM' 形式)",
+    )
 
     # ── PDF archive (proposal §4.5 line 204) ─────────────────────────
     pdf_archive_backend: str = Field(
