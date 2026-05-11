@@ -77,6 +77,14 @@ class EtlConfig(BaseSettings):
         default="",
         description="monthly_vacancy_etl の対象年月 ('YYYY-MM' 形式)",
     )
+    navi_pdf_url: str = Field(
+        default="",
+        description="yearly_navi_etl の申込ナビ PDF URL",
+    )
+    navi_year: int = Field(
+        default=2026,
+        description="yearly_navi_etl の対象年度 (西暦)",
+    )
 
     # ── PDF archive (proposal §4.5 line 204) ─────────────────────────
     pdf_archive_backend: str = Field(

@@ -4,7 +4,7 @@
 (`fujisawa-info-bot` / `fujisawa-hokatsu-agent`) が path dep で参照し、
 **クロール / PDF 解析 / ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL** を一元提供する。
 
-> **Status**: Phase 4-2d 実装済 (monthly_vacancy_etl: 空き状況 + 申込状況 PDF → snapshots)
+> **Status**: Phase 4-2e 実装済 (yearly_navi_etl: 申込ナビ PDF chunk 化 + embedding)
 
 設計詳細は [`../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md`](../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md) 参照。
 本 README は「動かす / 取り込む」観点に絞る。
@@ -215,6 +215,8 @@ finally:
 | `fujisawa_platform.etl._repos.vacancy` | `VacancyRepo` / `ApplicationRepo` + `VacancySnapshotRecord` / `ApplicationSnapshotRecord` | 4-2d | ✅ 実装済 |
 | `fujisawa_platform.etl.vacancy_parser` | `parse_vacancy_table` / `parse_application_table` | 4-2d | ✅ 実装済 |
 | `fujisawa_platform.etl.monthly_vacancy` | `run_monthly_vacancy` / `crawl_and_upsert_vacancy` (空き + 申込 PDF → snapshots、PdfArchive 統合) | 4-2d | ✅ 実装済 |
+| `fujisawa_platform.etl._repos.pdf_documents` | `PdfDocumentsRepo.replace_for_pdf` + `PdfDocumentRecord` | 4-2e | ✅ 実装済 |
+| `fujisawa_platform.etl.yearly_navi` | `run_yearly_navi` / `crawl_and_index_navi` (申込ナビ PDF → pdf_documents、PdfArchive 統合) | 4-2e | ✅ 実装済 |
 
 Phase 4-2d 以降に追加予定:
 - `etl/monthly_vacancy.py` + `VacancyRepo` (PDF → vacancy / application snapshots)

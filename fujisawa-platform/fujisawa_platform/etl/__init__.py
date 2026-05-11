@@ -5,10 +5,11 @@ Cloud Run Job のエントリポイントから呼ばれる (Phase 4-2h で terr
 
 Phase 4-2 の進行状況:
 - 4-2a: 共通フレーム (`_runner` / `EtlRunsRepo` / `_html`) + `weekly_crawl_etl`
-- 4-2b: `half_yearly_facility_etl` (TBD)
-- 4-2c: `biyearly_admission_etl` (TBD)
-- 4-2d: `monthly_vacancy_etl` (TBD)
-- 4-2e: `yearly_navi_etl` (TBD)
+- 4-2b: `half_yearly_facility_etl`
+- 4-2c: `biyearly_admission_etl`
+- 4-2c-2: `PdfArchive` (GcsArchive / LocalArchive / NullArchive)
+- 4-2d: `monthly_vacancy_etl`
+- 4-2e: `yearly_navi_etl`
 - 4-2f: `monthly_stats_compute` (TBD)
 - 4-2g: `wayback_backfill` (TBD, 一度きり)
 """
@@ -43,6 +44,11 @@ from fujisawa_platform.etl.weekly_crawl import (
     crawl_and_index,
     run_weekly_crawl,
 )
+from fujisawa_platform.etl.yearly_navi import (
+    NaviCrawlOutcome,
+    crawl_and_index_navi,
+    run_yearly_navi,
+)
 
 __all__ = [
     "AdmissionCrawlOutcome",
@@ -53,11 +59,13 @@ __all__ = [
     "GcsArchive",
     "LocalArchive",
     "MonthlyVacancyOutcome",
+    "NaviCrawlOutcome",
     "NullArchive",
     "PdfArchive",
     "build_archive_from_config",
     "build_facility_resolver",
     "crawl_and_index",
+    "crawl_and_index_navi",
     "crawl_and_replace_facilities",
     "crawl_and_upsert_admission",
     "crawl_and_upsert_vacancy",
@@ -66,4 +74,5 @@ __all__ = [
     "run_half_yearly_facility",
     "run_monthly_vacancy",
     "run_weekly_crawl",
+    "run_yearly_navi",
 ]
