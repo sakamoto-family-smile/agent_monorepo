@@ -4,7 +4,7 @@
 (`fujisawa-info-bot` / `fujisawa-hokatsu-agent`) が path dep で参照し、
 **クロール / PDF 解析 / ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL** を一元提供する。
 
-> **Status**: Phase 4-2b 実装済 (Phase 1-4-2a 完了 + half_yearly_facility_etl)
+> **Status**: Phase 4-2c 実装済 (Phase 1-4-2b 完了 + biyearly_admission_etl)
 
 設計詳細は [`../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md`](../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md) 参照。
 本 README は「動かす / 取り込む」観点に絞る。
@@ -206,9 +206,13 @@ finally:
 | `fujisawa_platform.etl._html_table` | `extract_tables_with_links` (BS4 ベース、リンク URL 込み) | 4-2b | ✅ 実装済 |
 | `fujisawa_platform.etl.facility_parser` | `parse_authorized_table` / `parse_unauthorized_table` / `slugify_facility_id` | 4-2b | ✅ 実装済 |
 | `fujisawa_platform.etl.half_yearly_facility` | `run_half_yearly_facility` / `crawl_and_replace_facilities` (HTML → facilities) | 4-2b | ✅ 実装済 |
+| `fujisawa_platform.etl._repos.admission` | `AdmissionRepo.upsert_many` + `AdmissionResultRecord` | 4-2c | ✅ 実装済 |
+| `fujisawa_platform.pdf_pipeline.pdf_table` | `extract_tables` / `PdfTable` (Docling lazy) | 4-2c | ✅ 実装済 |
+| `fujisawa_platform.etl.admission_parser` | `parse_admission_table` + `parse_min_index_notation` | 4-2c | ✅ 実装済 |
+| `fujisawa_platform.etl.facility_resolver_builder` | `build_facility_resolver` (FacilitiesRepo → FacilityResolver) | 4-2c | ✅ 実装済 |
+| `fujisawa_platform.etl.biyearly_admission` | `run_biyearly_admission` / `crawl_and_upsert_admission` (PDF → admission_results) | 4-2c | ✅ 実装済 |
 
-Phase 4-2c 以降に追加予定:
-- `etl/biyearly_admission.py` + `AdmissionRepo` (PDF → admission_results)
+Phase 4-2d 以降に追加予定:
 - `etl/monthly_vacancy.py` + `VacancyRepo` (PDF → vacancy / application snapshots)
 - `etl/yearly_navi.py` + `PdfDocumentsRepo` (申込ナビ PDF → pdf_documents)
 - `etl/monthly_stats_compute.py` + `CompetitionStatsRepo` (DB 内集計)
