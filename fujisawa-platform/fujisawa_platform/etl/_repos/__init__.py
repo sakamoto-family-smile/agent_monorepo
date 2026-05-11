@@ -7,6 +7,10 @@ consumer 側 (LINE bot / 保活) からは直接見えない (etl/__init__ か�
 from fujisawa_platform.etl._repos.admission import AdmissionRepo, AdmissionResultRecord
 from fujisawa_platform.etl._repos.etl_runs import EtlRunRecord, EtlRunsRepo
 from fujisawa_platform.etl._repos.facilities import FacilitiesRepo, FacilityRecord
+from fujisawa_platform.etl._repos.pdf_documents import (
+    PdfDocumentRecord,
+    PdfDocumentsRepo,
+)
 from fujisawa_platform.etl._repos.vacancy import (
     ApplicationRepo,
     ApplicationSnapshotRecord,
@@ -23,6 +27,8 @@ __all__ = [
     "EtlRunsRepo",
     "FacilitiesRepo",
     "FacilityRecord",
+    "PdfDocumentRecord",
+    "PdfDocumentsRepo",
     "VacancyRepo",
     "VacancySnapshotRecord",
 ]
