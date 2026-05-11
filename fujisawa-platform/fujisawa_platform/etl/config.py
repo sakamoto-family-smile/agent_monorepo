@@ -45,6 +45,14 @@ class EtlConfig(BaseSettings):
 
     # ── Job-specific URLs ───────────────────────────────────────────
     sitemap_url: str = Field(description="weekly_crawl_etl が起点とする sitemap.xml URL")
+    authorized_facilities_url: str = Field(
+        default="",
+        description="half_yearly_facility_etl で取得する認可施設一覧 HTML URL",
+    )
+    unauthorized_facilities_url: str = Field(
+        default="",
+        description="half_yearly_facility_etl で取得する認可外施設一覧 HTML URL",
+    )
 
     # ── Job 個別 enable フラグ (Phase 0 で段階導入するため) ──────────
     weekly_crawl_enabled: bool = Field(default=True)
