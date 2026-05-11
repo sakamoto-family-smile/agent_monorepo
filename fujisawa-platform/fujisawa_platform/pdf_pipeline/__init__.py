@@ -17,13 +17,16 @@ from fujisawa_platform.pdf_pipeline.freshness import (
     parse_pdf_date_from_filename,
 )
 from fujisawa_platform.pdf_pipeline.hash_diff import compute_hash, has_changed
+from fujisawa_platform.pdf_pipeline.pdf_table import PdfTable, extract_tables
 
 __all__ = [
     "DoclingNotInstalledError",
     "PdfChunk",
+    "PdfTable",
     "build_freshness",
     "compute_hash",
     "extract_chunks",
+    "extract_tables",
     "has_changed",
     "parse_pdf_date_from_filename",
 ]

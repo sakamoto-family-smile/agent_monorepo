@@ -53,6 +53,18 @@ class EtlConfig(BaseSettings):
         default="",
         description="half_yearly_facility_etl で取得する認可外施設一覧 HTML URL",
     )
+    admission_pdf_url_1st: str = Field(
+        default="",
+        description="biyearly_admission_etl の 1 次入所結果 PDF URL",
+    )
+    admission_pdf_url_2nd: str = Field(
+        default="",
+        description="biyearly_admission_etl の 2 次入所結果 PDF URL",
+    )
+    admission_year: int = Field(
+        default=2026,
+        description="biyearly_admission_etl で処理する年度 (西暦、令和年度+2018)",
+    )
 
     # ── Job 個別 enable フラグ (Phase 0 で段階導入するため) ──────────
     weekly_crawl_enabled: bool = Field(default=True)

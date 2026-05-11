@@ -89,11 +89,32 @@ class FacilitiesRepo:
             return 0
         return int(row["c"])
 
+    async def list_all(self) -> list[FacilityRecord]:
+        """全件を取得 (~160 件想定なのでページングなし)。
 
-def _row_to_record(row: Any) -> FacilityRecord:  # pragma: no cover — 将来の SELECT 用
+        - ETL Job (admission / vacancy) が `FacilityResolver` を組み立てる入力として利用
+        - consumer 側からも将来呼び出される可能性あり (Phase 5+)
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    facility_id, name, facility_type, address, phone,
+                    capacity, nearest_station, walk_minutes, official_url,
+                    aliases, lat, lng, source_url, as_of, schema_version
+                FROM facilities
+                ORDER BY facility_id
+                """
+            )
+        return [_row_to_record(r) for r in rows]
+
+
+def _row_to_record(row: Any) -> FacilityRecord:
     aliases = row["aliases"]
     if isinstance(aliases, str):
-        aliases = json.loads(aliases)
+        aliases = json.loads(aliases) if aliases else []
+    elif aliases is None:
+        aliases = []
     return FacilityRecord(
         facility_id=row["facility_id"],
         name=row["name"],

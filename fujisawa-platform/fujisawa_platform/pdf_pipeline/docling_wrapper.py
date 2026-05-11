@@ -47,8 +47,7 @@ def extract_chunks(pdf_bytes: bytes) -> list[PdfChunk]:
         from docling.document_converter import DocumentConverter
     except ImportError as err:
         raise DoclingNotInstalledError(
-            "extract_chunks requires the `docling` package. "
-            "Install with: `uv sync --extra pdf`"
+            "extract_chunks requires the `docling` package. Install with: `uv sync --extra pdf`"
         ) from err
 
     # Docling は file path を要求するため一時ファイル経由
