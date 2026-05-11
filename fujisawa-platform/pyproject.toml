@@ -37,6 +37,12 @@ pdf = [
     "pandas>=2.2.0",
 ]
 
+# PDF アーカイブ (proposal §4.5: fujisawa-pdf-archive バケット)
+# ETL Cloud Run Job のみ。consumer は LocalArchive / NullArchive で代替可。
+gcs = [
+    "google-cloud-storage>=2.18.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -66,6 +66,21 @@ class EtlConfig(BaseSettings):
         description="biyearly_admission_etl で処理する年度 (西暦、令和年度+2018)",
     )
 
+    # ── PDF archive (proposal §4.5 line 204) ─────────────────────────
+    pdf_archive_backend: str = Field(
+        default="null",
+        description="'gcs' (本番) / 'local' (smoke / dry-run) / 'null' (アーカイブ無効)",
+    )
+    pdf_archive_bucket: str = Field(
+        default="fujisawa-pdf-archive",
+        description="GcsArchive のバケット名 (pdf_archive_backend='gcs' のときのみ参照)",
+    )
+    pdf_archive_local_root: str = Field(
+        # dev / smoke 用の default。本番では FUJISAWA_ETL_PDF_ARCHIVE_LOCAL_ROOT で override する。
+        default="/tmp/fujisawa-pdf-archive",  # nosec B108
+        description="LocalArchive のルートディレクトリ (pdf_archive_backend='local' のときのみ参照)",
+    )
+
     # ── Job 個別 enable フラグ (Phase 0 で段階導入するため) ──────────
     weekly_crawl_enabled: bool = Field(default=True)
     monthly_vacancy_enabled: bool = Field(default=True)

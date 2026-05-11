@@ -21,6 +21,7 @@ from fujisawa_platform.etl.biyearly_admission import (
     crawl_and_upsert_admission,
     run_biyearly_admission,
 )
+from fujisawa_platform.etl.pdf_archive import ArchivePut, LocalArchive
 from fujisawa_platform.pdf_pipeline import PdfTable
 from fujisawa_platform.resolver import FacilityResolver, ResolverEntry
 
@@ -256,3 +257,160 @@ class TestAdmissionCrawlOutcomeModel:
         )
         with pytest.raises(Exception):
             outcome.rows_written = 99  # type: ignore[misc]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# PDF archive 統合 (proposal §4.5 line 204)
+# ─────────────────────────────────────────────────────────────────────
+
+
+class _RecordingArchive:
+    """`archive.put` の呼び出しを記録する fake (テスト検証用)。"""
+
+    def __init__(self) -> None:
+        self.puts: list[dict[str, Any]] = []
+
+    async def put(
+        self,
+        *,
+        path: str,
+        content: bytes,
+        source_url: str,
+        fetched_at: datetime,
+    ) -> ArchivePut:
+        self.puts.append(
+            {
+                "path": path,
+                "content": content,
+                "source_url": source_url,
+                "fetched_at": fetched_at,
+            }
+        )
+        return ArchivePut(backend="fake", path=path)
+
+    async def get(self, path: str) -> bytes:
+        return next(p["content"] for p in self.puts if p["path"] == path)
+
+    async def exists(self, path: str) -> bool:
+        return any(p["path"] == path for p in self.puts)
+
+
+class TestPdfArchiveIntegration:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_put_called_with_pdf_bytes_before_parse(
+        self, fetcher_config: PoliteFetcherConfig
+    ) -> None:
+        """PDF bytes が parse 前に archive へ保存される。"""
+        respx.get(_PDF_URL).mock(return_value=httpx.Response(200, content=b"%PDF-fake"))
+        archive = _RecordingArchive()
+        repo = _RecordingAdmissionRepo()
+
+        async with PoliteFetcher(fetcher_config) as fetcher:
+            outcome = await crawl_and_upsert_admission(
+                pdf_url=_PDF_URL,
+                year=2026,
+                round="1st",
+                fetcher=fetcher,
+                repo=repo,  # type: ignore[arg-type]
+                resolver=_resolver(),
+                archive=archive,  # type: ignore[arg-type]
+                table_extractor=lambda _: [_stub_pdf_table()],
+                now=lambda: datetime(2026, 5, 11, 0, 0, tzinfo=UTC),
+            )
+
+        # archive.put が 1 度呼ばれた
+        assert len(archive.puts) == 1
+        put = archive.puts[0]
+        assert put["source_url"] == _PDF_URL
+        # path は biyearly_admission_etl/2026/1st/... 形式
+        assert put["path"].startswith("biyearly_admission_etl/2026/1st/")
+        assert put["path"].endswith(".pdf")
+
+        # outcome に archive 情報が含まれる
+        assert outcome.archive_backend == "fake"
+        assert outcome.archive_path is not None
+        assert outcome.archive_path.startswith("biyearly_admission_etl/2026/1st/")
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_archive_default_is_null_archive(
+        self, fetcher_config: PoliteFetcherConfig
+    ) -> None:
+        """archive 未指定なら NullArchive で動作する (アーカイブ無効、record は残る)。"""
+        respx.get(_PDF_URL).mock(return_value=httpx.Response(200, content=b"%PDF-fake"))
+        repo = _RecordingAdmissionRepo()
+
+        async with PoliteFetcher(fetcher_config) as fetcher:
+            outcome = await crawl_and_upsert_admission(
+                pdf_url=_PDF_URL,
+                year=2026,
+                round="1st",
+                fetcher=fetcher,
+                repo=repo,  # type: ignore[arg-type]
+                resolver=_resolver(),
+                table_extractor=lambda _: [_stub_pdf_table()],
+            )
+
+        # NullArchive を使った結果が outcome に出る
+        assert outcome.archive_backend == "null"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_archive_works_with_local_archive(
+        self,
+        tmp_path: Any,
+        fetcher_config: PoliteFetcherConfig,
+    ) -> None:
+        """`LocalArchive` を使うと実ファイルとしてバイトが保存される。"""
+        respx.get(_PDF_URL).mock(return_value=httpx.Response(200, content=b"%PDF-fake"))
+        archive = LocalArchive(root=tmp_path)
+        repo = _RecordingAdmissionRepo()
+
+        async with PoliteFetcher(fetcher_config) as fetcher:
+            outcome = await crawl_and_upsert_admission(
+                pdf_url=_PDF_URL,
+                year=2026,
+                round="1st",
+                fetcher=fetcher,
+                repo=repo,  # type: ignore[arg-type]
+                resolver=_resolver(),
+                archive=archive,
+                table_extractor=lambda _: [_stub_pdf_table()],
+            )
+
+        assert outcome.archive_backend == "local"
+        assert outcome.archive_path is not None
+        # ファイル実体を get して確認
+        stored = await archive.get(outcome.archive_path)
+        # latin-1 round-trip 経由なので元と同じバイトで取れる
+        assert stored.startswith(b"%PDF")
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_dry_run_still_archives_pdf(
+        self,
+        tmp_path: Any,
+        fetcher_config: PoliteFetcherConfig,
+    ) -> None:
+        """dry_run=True でも PDF は archive に保存される (出典担保のため)。"""
+        respx.get(_PDF_URL).mock(return_value=httpx.Response(200, content=b"%PDF-fake"))
+        archive = LocalArchive(root=tmp_path)
+        repo = _RecordingAdmissionRepo()
+
+        async with PoliteFetcher(fetcher_config) as fetcher:
+            outcome = await crawl_and_upsert_admission(
+                pdf_url=_PDF_URL,
+                year=2026,
+                round="1st",
+                fetcher=fetcher,
+                repo=repo,  # type: ignore[arg-type]
+                resolver=_resolver(),
+                archive=archive,
+                table_extractor=lambda _: [_stub_pdf_table()],
+                dry_run=True,
+            )
+
+        assert repo.upserts == []  # DB には書かない
+        assert outcome.archive_path is not None
+        assert await archive.exists(outcome.archive_path) is True

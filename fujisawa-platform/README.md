@@ -4,7 +4,7 @@
 (`fujisawa-info-bot` / `fujisawa-hokatsu-agent`) が path dep で参照し、
 **クロール / PDF 解析 / ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL** を一元提供する。
 
-> **Status**: Phase 4-2c 実装済 (Phase 1-4-2b 完了 + biyearly_admission_etl)
+> **Status**: Phase 4-2c-2 実装済 (PDF アーカイブ追加 + biyearly_admission に統合)
 
 設計詳細は [`../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md`](../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md) 参照。
 本 README は「動かす / 取り込む」観点に絞る。
@@ -211,6 +211,7 @@ finally:
 | `fujisawa_platform.etl.admission_parser` | `parse_admission_table` + `parse_min_index_notation` | 4-2c | ✅ 実装済 |
 | `fujisawa_platform.etl.facility_resolver_builder` | `build_facility_resolver` (FacilitiesRepo → FacilityResolver) | 4-2c | ✅ 実装済 |
 | `fujisawa_platform.etl.biyearly_admission` | `run_biyearly_admission` / `crawl_and_upsert_admission` (PDF → admission_results) | 4-2c | ✅ 実装済 |
+| `fujisawa_platform.etl.pdf_archive` | `PdfArchive` Protocol + `GcsArchive` / `LocalArchive` / `NullArchive` + `archive_path` + `build_archive_from_config` | 4-2c-2 | ✅ 実装済 |
 
 Phase 4-2d 以降に追加予定:
 - `etl/monthly_vacancy.py` + `VacancyRepo` (PDF → vacancy / application snapshots)
