@@ -26,6 +26,11 @@ from fujisawa_platform.etl.half_yearly_facility import (
     crawl_and_replace_facilities,
     run_half_yearly_facility,
 )
+from fujisawa_platform.etl.monthly_vacancy import (
+    MonthlyVacancyOutcome,
+    crawl_and_upsert_vacancy,
+    run_monthly_vacancy,
+)
 from fujisawa_platform.etl.pdf_archive import (
     GcsArchive,
     LocalArchive,
@@ -47,6 +52,7 @@ __all__ = [
     "FacilityCrawlOutcome",
     "GcsArchive",
     "LocalArchive",
+    "MonthlyVacancyOutcome",
     "NullArchive",
     "PdfArchive",
     "build_archive_from_config",
@@ -54,8 +60,10 @@ __all__ = [
     "crawl_and_index",
     "crawl_and_replace_facilities",
     "crawl_and_upsert_admission",
+    "crawl_and_upsert_vacancy",
     "run_biyearly_admission",
     "run_etl_job",
     "run_half_yearly_facility",
+    "run_monthly_vacancy",
     "run_weekly_crawl",
 ]
