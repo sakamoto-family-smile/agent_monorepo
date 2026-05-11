@@ -26,6 +26,13 @@ from fujisawa_platform.etl.half_yearly_facility import (
     crawl_and_replace_facilities,
     run_half_yearly_facility,
 )
+from fujisawa_platform.etl.pdf_archive import (
+    GcsArchive,
+    LocalArchive,
+    NullArchive,
+    PdfArchive,
+    build_archive_from_config,
+)
 from fujisawa_platform.etl.weekly_crawl import (
     CrawlOutcome,
     crawl_and_index,
@@ -38,6 +45,11 @@ __all__ = [
     "EtlConfig",
     "EtlRunResult",
     "FacilityCrawlOutcome",
+    "GcsArchive",
+    "LocalArchive",
+    "NullArchive",
+    "PdfArchive",
+    "build_archive_from_config",
     "build_facility_resolver",
     "crawl_and_index",
     "crawl_and_replace_facilities",

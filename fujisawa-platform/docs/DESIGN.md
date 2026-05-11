@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | 0.7 |
+| **Version** | 0.7.1 |
 | **最終更新** | 2026-05-11 |
-| **Status** | Active (Phase 4-2c 実装済 / Phase 4-2d 着手予定) |
+| **Status** | Active (Phase 4-2c-2 実装済 / Phase 4-2d 着手予定) |
 | **Owner** | @kurama554101 |
 | **Type** | 共通基盤ライブラリ (path dep として info-bot / 保活 から参照) |
 | **README** | [`../README.md`](../README.md) |
@@ -20,6 +20,7 @@
 | 2026-05-10 | 0.5 | Phase 4-2a 実装 (etl 共通フレーム + weekly_crawl_etl) |
 | 2026-05-10 | 0.6 | Phase 4-2b 実装 (half_yearly_facility_etl + FacilitiesRepo + facility_parser) |
 | 2026-05-11 | 0.7 | Phase 4-2c 実装 (biyearly_admission_etl + AdmissionRepo + admission_parser + pdf_pipeline.extract_tables) |
+| 2026-05-11 | 0.7.1 | Phase 4-2c-2 補強 (PdfArchive Protocol + GcsArchive / LocalArchive / NullArchive、biyearly_admission に統合) |
 
 ---
 
@@ -57,16 +58,82 @@
 | **Phase 4-1** | knowledge_base/pgvector_store (asyncpg + pgvector 本番) + build_pgvector_pool | ✅ 完了 (PR #119) |
 | **Phase 4-2a** | etl 共通フレーム (`_runner` / `EtlRunsRepo` / `_html` / `config`) + `weekly_crawl_etl` | ✅ 完了 (PR #120) |
 | **Phase 4-2b** | `half_yearly_facility_etl` + `FacilitiesRepo` + `facility_parser` + `_html_table` | ✅ 完了 (PR #121) |
-| **Phase 4-2c** | `biyearly_admission_etl` + `AdmissionRepo` + `admission_parser` + `pdf_pipeline.extract_tables` + `build_facility_resolver` | 🔶 実装済 (本 PR) |
-| Phase 4-2d〜g | `monthly_vacancy` / `yearly_navi` / `monthly_stats_compute` / `wayback_backfill` | ⏳ 未着手 |
+| **Phase 4-2c** | `biyearly_admission_etl` + `AdmissionRepo` + `admission_parser` + `pdf_pipeline.extract_tables` + `build_facility_resolver` | ✅ 完了 (PR #122) |
+| **Phase 4-2c-2** | `PdfArchive` Protocol + `GcsArchive` / `LocalArchive` / `NullArchive` + `biyearly_admission_etl` 統合 (proposal §4.5 line 204 の実装漏れ補強) | 🔶 実装済 (本 PR) |
+| Phase 4-2d〜g | `monthly_vacancy` / `yearly_navi` / `monthly_stats_compute` / `wayback_backfill` (`PdfArchive` を初期実装で噛ませる) | ⏳ 未着手 |
 | Phase 4-2h | terraform: Cloud Run Jobs / Cloud Scheduler / Secret Manager | ⏳ 未着手 |
 | Phase 5 | observability (analytics-platform 計装) + monitoring | ⏳ 未着手 |
 
 ---
 
-## 3. Phase 4-2c で確定した詳細
+## 3. Phase 4-2c-2 で確定した詳細
 
 ### 3.0 設計判断
+
+- **PDF オリジナルバイトの一次保存が抜けていた問題への補強**: Phase 4-2c までは PoliteFetcher で取った PDF を parse 後に破棄していたが、proposal §4.5 line 204 は `fujisawa-raw` / `fujisawa-pdf-archive` への GCS 保存を明記。本 PR で `PdfArchive` Protocol + 3 実装 (`GcsArchive` / `LocalArchive` / `NullArchive`) を追加し、`biyearly_admission_etl` に統合。
+- **Protocol で 3 backend を切り替え可能に**: ETL Job は `archive: PdfArchive` を DI で受け取り、本番は `GcsArchive`、smoke は `LocalArchive`、Phase 0 の段階導入時は `NullArchive` (no-op) に切り替えられる。新規 Job (4-2d / 4-2e / 4-2g) は **デフォルトでこの DI を持つ前提で実装する**。
+- **archive_path() は決定的**: `{job}/{year}/{round}/{sha256[:16]}-{filename}.pdf` 形式。同じ URL は常に同じパスに保存される (再 run で重複アップロード防止)。
+- **path traversal は LocalArchive で拒否**: `../escape.pdf` のような相対パスは `_resolve_inside_root` が `relative_to(root)` で検証し ValueError。
+- **archive は dry_run でも実行**: DB upsert を skip しても **原本保存は出典担保のため必ず行う**。Cloud Run Job デプロイ前の手動 smoke でアーカイブ確認できるメリットもある。
+- **`google-cloud-storage` は `[gcs]` extra**: ETL Cloud Run Job のみ必要なので、consumer (LINE bot / 保活) には噛ませない。
+
+### 3.1 `PdfArchive` Protocol + 3 実装
+
+| 実装 | 用途 | 依存 |
+|---|---|---|
+| `GcsArchive` | 本番 (`fujisawa-pdf-archive` バケット) | `google-cloud-storage` lazy import |
+| `LocalArchive` | dev / smoke / テスト | 標準ライブラリのみ |
+| `NullArchive` | Phase 0 アーカイブ無効化 | なし |
+
+メソッド: `put(path, content, source_url, fetched_at)` / `get(path)` / `exists(path)`
+
+実装: [`fujisawa_platform/etl/pdf_archive.py`](../fujisawa_platform/etl/pdf_archive.py)
+テスト: 24 ケース PASS (PdfArchive 18 + GcsArchive 6)
+
+### 3.2 `archive_path()`
+
+| 観点 | 仕様 |
+|---|---|
+| フォーマット | `{job_name}/{year}/[{round}/]{sha256(url)[:16]}-{sanitized_filename}.pdf` |
+| 決定性 | 同じ URL → 同じパス (再 run で重複アップロード回避) |
+| filename サニタイズ | query string 除去、空白等は `-` に置換、`.pdf` 拡張子強制 |
+
+### 3.3 `biyearly_admission_etl` への統合
+
+| 観点 | 仕様 |
+|---|---|
+| 引数追加 | `archive: PdfArchive \| None = None` (default は `NullArchive`) |
+| 処理順 | fetch → **archive.put** → Docling table 抽出 → parse → upsert (アーカイブが parse より先) |
+| `AdmissionCrawlOutcome` 拡張 | `archive_path` / `archive_backend` を追加 (記録 / 監視用) |
+| dry_run の挙動 | DB upsert は skip するが archive.put は実行 (出典担保) |
+
+### 3.4 `EtlConfig` 拡張
+
+| env | 用途 |
+|---|---|
+| `FUJISAWA_ETL_PDF_ARCHIVE_BACKEND` | `'gcs'` / `'local'` / `'null'` |
+| `FUJISAWA_ETL_PDF_ARCHIVE_BUCKET` | gcs backend のバケット名 (default: `fujisawa-pdf-archive`) |
+| `FUJISAWA_ETL_PDF_ARCHIVE_LOCAL_ROOT` | local backend のルート (default: `/tmp/fujisawa-pdf-archive`、本番は override 必須) |
+
+`build_archive_from_config(backend, bucket, local_root)` factory で `PdfArchive` を組み立て可能。
+
+### 3.5 Phase 4-2 後続 Job への引き継ぎ
+
+monthly_vacancy / yearly_navi / wayback_backfill (4-2d / 4-2e / 4-2g) は **本 PR の `PdfArchive` を最初から DI に組み込む** こと:
+
+```python
+async def run_<job_name>(*, ..., archive: PdfArchive | None = None, ...):
+    _archive = archive or NullArchive()
+    # fetch → _archive.put → parse → upsert
+```
+
+これにより proposal §4.5 line 204 (GCS `fujisawa-raw` / `fujisawa-pdf-archive` への一次保存) の方針が一気通貫で守られる。
+
+---
+
+## 4. Phase 4-2c で確定した詳細
+
+### 4.0 設計判断
 
 - **PDF 表抽出を `pdf_pipeline` に追加 (`extract_tables`)**: 既存の `extract_chunks` (テキスト本文) と並列に、Docling が認識した表構造を `PdfTable` (HtmlTable と同形) で取り出す。lazy import で `[pdf]` extra なしでも import 可能。
 - **`PdfTable` は `HtmlTable` と同形**: `headers: list[str]` / `rows: list[list[str]]` / `page_number: int | None`。後続 ETL Job が同じ parser 形式を流用できる (Phase 4-2d / 4-2g)。
@@ -76,7 +143,7 @@
 - **`table_extractor` は DI 可能**: テストでは Docling を呼ばずに mock 表データを直接注入。実 Docling 統合は Phase 4-2h のデプロイ時に手動 smoke (proposal §4.6)。
 - **PDF バイナリ取得の限界**: 現状 `PoliteFetcher.fetch().text` は str を返すため PDF 取得は latin-1 ラウンドトリップで bytes 化している。実機での PDF パス修正は Phase 4-2h で `fetch_bytes()` 拡張として対応予定。
 
-### 3.1 `AdmissionRepo` (`etl/_repos/admission.py`)
+### 4.1 `AdmissionRepo` (`etl/_repos/admission.py`)
 
 | 観点 | 仕様 |
 |---|---|
@@ -89,7 +156,7 @@
 実装: [`fujisawa_platform/etl/_repos/admission.py`](../fujisawa_platform/etl/_repos/admission.py)
 テスト: 9 ケース PASS
 
-### 3.2 `pdf_pipeline.extract_tables` + `PdfTable`
+### 4.2 `pdf_pipeline.extract_tables` + `PdfTable`
 
 | 観点 | 仕様 |
 |---|---|
@@ -101,7 +168,7 @@
 実装: [`fujisawa_platform/pdf_pipeline/pdf_table.py`](../fujisawa_platform/pdf_pipeline/pdf_table.py)
 テスト: 3 ケース PASS (Docling インストール環境での integration は skip)
 
-### 3.3 `admission_parser` (`etl/admission_parser.py`)
+### 4.3 `admission_parser` (`etl/admission_parser.py`)
 
 | 関数 | 用途 |
 |---|---|
@@ -113,7 +180,7 @@
 実装: [`fujisawa_platform/etl/admission_parser.py`](../fujisawa_platform/etl/admission_parser.py)
 テスト: 18 ケース PASS
 
-### 3.4 `build_facility_resolver` + `FacilitiesRepo.list_all`
+### 4.4 `build_facility_resolver` + `FacilitiesRepo.list_all`
 
 | 観点 | 仕様 |
 |---|---|
@@ -127,7 +194,7 @@
 
 テスト: 5 ケース PASS
 
-### 3.5 `biyearly_admission_etl` (`etl/biyearly_admission.py`)
+### 4.5 `biyearly_admission_etl` (`etl/biyearly_admission.py`)
 
 | 観点 | 仕様 |
 |---|---|
@@ -143,9 +210,9 @@
 
 ---
 
-## 4. Phase 4-2b で確定した詳細
+## 5. Phase 4-2b で確定した詳細
 
-### 4.0 設計判断
+### 5.0 設計判断
 
 - **`facilities` は全削除 → 全 INSERT を 1 トランザクション**: proposal 0003 §4.5.5 の方針。半年に 1 回しか走らず、件数が ~160 と小さいため UPSERT 並列より単純で安全。consumer 側は SELECT 失敗時に tenacity retry で吸収する想定。
 - **facility_id は `<type-slug>-<sha256[:12]>`**: 名前ベースの決定的 ID。半年ごとに replace_all しても同じ施設には同じ ID が返るので、`vacancy_snapshots.facility_id REFERENCES facilities` の FK が壊れない。例: `kouritsu-3a4b5c6d7e8f` (公立保育所 / 藤沢保育園)。
@@ -154,7 +221,7 @@
 - **認可外の facility_type は施設名末尾の括弧から抽出**: 「A 保育園 (藤沢型 A 型)」→ name="A 保育園", facility_type="藤沢型 A 型"。括弧無しは "認可外保育施設" にフォールバック。
 - **アクセス情報の駅 + 徒歩分数は所在地カラムから regex 抽出**: 「藤沢駅北口徒歩 7 分」のような表記を `_WALK_MINUTES` で parse。マッチしないなら `(None, None)` で通常の住所扱い。
 
-### 4.1 `FacilitiesRepo` (`etl/_repos/facilities.py`)
+### 5.1 `FacilitiesRepo` (`etl/_repos/facilities.py`)
 
 | メソッド | 仕様 |
 |---|---|
@@ -165,7 +232,7 @@
 実装: [`fujisawa_platform/etl/_repos/facilities.py`](../fujisawa_platform/etl/_repos/facilities.py)
 テスト: 7 ケース PASS
 
-### 4.2 HTML テーブル抽出 (`etl/_html_table.py`)
+### 5.2 HTML テーブル抽出 (`etl/_html_table.py`)
 
 | 観点 | 仕様 |
 |---|---|
@@ -178,7 +245,7 @@
 実装: [`fujisawa_platform/etl/_html_table.py`](../fujisawa_platform/etl/_html_table.py)
 テスト: 8 ケース PASS
 
-### 4.3 facility_parser (`etl/facility_parser.py`)
+### 5.3 facility_parser (`etl/facility_parser.py`)
 
 | 関数 | 用途 |
 |---|---|
@@ -190,7 +257,7 @@
 実装: [`fujisawa_platform/etl/facility_parser.py`](../fujisawa_platform/etl/facility_parser.py)
 テスト: 17 ケース PASS
 
-### 4.4 `half_yearly_facility_etl` (`etl/half_yearly_facility.py`)
+### 5.4 `half_yearly_facility_etl` (`etl/half_yearly_facility.py`)
 
 | 観点 | 仕様 |
 |---|---|
@@ -206,9 +273,9 @@
 
 ---
 
-## 5. Phase 4-2a で確定した詳細
+## 6. Phase 4-2a で確定した詳細
 
-### 5.0 設計判断
+### 6.0 設計判断
 
 - **ETL 共通フレームを最初に整備**: `etl/_runner.py` (実行ラッパー) / `etl/_repos/etl_runs.py` (`etl_runs` テーブル) / `etl/_html.py` (本文抽出) / `etl/config.py` (env) の 4 つを 4-2a で同梱。これ以降の Job (4-2b〜g) はすべて `run_etl_job()` で包む。
 - **`run_etl_job()` の 3 つの責務** (proposal 0003 §4.5.6):
@@ -219,7 +286,7 @@
 - **dry-run mode**: 各 Job は `dry_run=True` で **DB 書き込み無し / parse は行う** モードを持つ。Cloud Run Job デプロイ前の手動 smoke 用 (proposal 0003 §4.6 Manual / E2E)。
 - **`_StoreLike` Protocol で DI**: `crawl_and_index` は `upsert_page` だけを持つ Protocol を要求するので、`PgvectorStore` (本番) / `InMemoryStore` (smoke) / `_RecordingStore` (テスト) が等しく差し込める。
 
-### 5.1 `run_etl_job` ラッパー (`etl/_runner.py`)
+### 6.1 `run_etl_job` ラッパー (`etl/_runner.py`)
 
 | 観点 | 仕様 |
 |---|---|
@@ -232,7 +299,7 @@
 実装: [`fujisawa_platform/etl/_runner.py`](../fujisawa_platform/etl/_runner.py)
 テスト: 8 ケース PASS
 
-### 5.2 `EtlRunsRepo` (`etl/_repos/etl_runs.py`)
+### 6.2 `EtlRunsRepo` (`etl/_repos/etl_runs.py`)
 
 | メソッド | 仕様 |
 |---|---|
@@ -243,7 +310,7 @@
 実装: [`fujisawa_platform/etl/_repos/etl_runs.py`](../fujisawa_platform/etl/_repos/etl_runs.py)
 テスト: 6 ケース PASS
 
-### 5.3 HTML 本文抽出 (`etl/_html.py`)
+### 6.3 HTML 本文抽出 (`etl/_html.py`)
 
 | 観点 | 仕様 |
 |---|---|
@@ -254,7 +321,7 @@
 実装: [`fujisawa_platform/etl/_html.py`](../fujisawa_platform/etl/_html.py)
 テスト: 12 ケース PASS
 
-### 5.4 `EtlConfig` (`etl/config.py`)
+### 6.4 `EtlConfig` (`etl/config.py`)
 
 | グループ | env 変数 |
 |---|---|
@@ -266,7 +333,7 @@
 実装: [`fujisawa_platform/etl/config.py`](../fujisawa_platform/etl/config.py)
 テスト: 4 ケース PASS
 
-### 5.5 `weekly_crawl_etl` (`etl/weekly_crawl.py`)
+### 6.5 `weekly_crawl_etl` (`etl/weekly_crawl.py`)
 
 | 観点 | 仕様 |
 |---|---|
@@ -281,7 +348,7 @@
 実装: [`fujisawa_platform/etl/weekly_crawl.py`](../fujisawa_platform/etl/weekly_crawl.py)
 テスト: 7 ケース PASS
 
-### 5.6 Phase 4-2 後続 Job への引き継ぎ
+### 6.6 Phase 4-2 後続 Job への引き継ぎ
 
 各 Job は本 PR で整備した `run_etl_job` パターンに沿って実装する:
 
@@ -304,9 +371,9 @@ async def run_<job_name>(*, ..., runs_repo, run_id, ...):
 
 ---
 
-## 6. Phase 4-1 で確定した詳細
+## 7. Phase 4-1 で確定した詳細
 
-### 6.0 設計判断
+### 7.0 設計判断
 
 - **PgvectorStore は `asyncpg.Pool` を外部から受け取る**: クラス内で pool を作らず、consumer 側 (ETL Job / agent main) のライフサイクルでクローズする。短命接続を避けて Cloud SQL の同時接続上限を保護。driving-license-bot の `PgvectorQuestionBank` と同パターン。
 - **`pgvector.asyncpg.register_vector` は 1 クエリごとに呼ぶ**: Pool から acquire される接続は再利用されるが、再利用時の register は no-op になる前提で愚直に呼ぶ (driving-license-bot と同方針)。
@@ -314,7 +381,7 @@ async def run_<job_name>(*, ..., runs_repo, run_id, ...):
 - **asyncpg / pgvector は lazy import**: `[pgvector]` extra なしでも fujisawa-platform を import できるようにする (consumer が in-memory のみ使うケースを許容)。
 - **pgvector 単体テストは asyncpg を mock**: 実 Cloud SQL は CI に持たない。proposal §4.6 の通り、接続 smoke は Phase 4-2 ETL デプロイ時に手動。
 
-### 6.1 PgvectorStore の挙動
+### 7.1 PgvectorStore の挙動
 
 | 観点 | 仕様 |
 |---|---|
@@ -328,7 +395,7 @@ async def run_<job_name>(*, ..., runs_repo, run_id, ...):
 実装: [`fujisawa_platform/knowledge_base/pgvector_store.py`](../fujisawa_platform/knowledge_base/pgvector_store.py)
 テスト: 16 ケース PASS (asyncpg mock)
 
-### 6.2 build_pgvector_pool helper
+### 7.2 build_pgvector_pool helper
 
 | 観点 | 仕様 |
 |---|---|
@@ -339,7 +406,7 @@ async def run_<job_name>(*, ..., runs_repo, run_id, ...):
 
 実装: 同上 (`pgvector_store.py` 末尾)
 
-### 6.3 Phase 4-2 への引き継ぎ
+### 7.3 Phase 4-2 への引き継ぎ
 
 `weekly_crawl_etl` (Phase 4-2 で実装予定) の典型的な処理フロー:
 
@@ -396,9 +463,9 @@ async def weekly_crawl():
 
 ---
 
-## 7. Phase 3 で確定した詳細
+## 8. Phase 3 で確定した詳細
 
-### 7.0 設計判断
+### 8.0 設計判断
 
 - **緊急情報 RSS の 5 分 poll loop は LINE bot 側に置く**: 共通基盤側は `parse_feed(bytes) -> list[RssEntry]` の純粋な parse helper のみ提供する (proposal 0003 §4.5.4 の方針: 「5 分間隔の job が他 consumer にも見えると混乱する」)。LINE bot 側 `fujisawa-info-bot/batch/poll_rss.py` が `seen_guids` セットを Firestore で管理する。
 - **`parse_feed` は RSS 2.0 / Atom 両対応**: 藤沢市 HP がどちらを返すか実機未確認のため、両 schema を 1 関数で吸収。`<rss>` / `<feed>` のルート要素で分岐。
@@ -406,7 +473,7 @@ async def weekly_crawl():
 - **CDX クエリは statuscode != 200 を捨てる**: Wayback には 404 / 301 のスナップショットも履歴として残るが、PDF 取得は不可能のため `_rows_to_snapshots` で除外。
 - **Wayback バックフィルは Phase 4 で 1 度きり実行**: 本 PR ではクライアント実装のみ。実データ投入は Phase 4 の `etl/wayback_backfill.py` で `admission_results` (令和 4-6 年) + `competition_stats.historical_minimum_index_2022` に流し込む。
 
-### 7.1 緊急情報 RSS parser (`crawler/rss_poller.py`)
+### 8.1 緊急情報 RSS parser (`crawler/rss_poller.py`)
 
 | 観点 | 仕様 |
 |---|---|
@@ -422,7 +489,7 @@ async def weekly_crawl():
 実装: [`fujisawa_platform/crawler/rss_poller.py`](../fujisawa_platform/crawler/rss_poller.py)
 テスト: 16 ケース PASS
 
-### 7.2 Wayback クライアント (`crawler/wayback.py`)
+### 8.2 Wayback クライアント (`crawler/wayback.py`)
 
 | 観点 | 仕様 |
 |---|---|
@@ -438,7 +505,7 @@ async def weekly_crawl():
 実装: [`fujisawa_platform/crawler/wayback.py`](../fujisawa_platform/crawler/wayback.py)
 テスト: 19 ケース PASS
 
-### 7.3 Phase 4-2 への引き継ぎ事項
+### 8.3 Phase 4-2 への引き継ぎ事項
 
 `etl/wayback_backfill.py` (Phase 4-2 で実装予定) の擬似コード:
 
@@ -463,16 +530,16 @@ async def backfill():
 
 ---
 
-## 8. Phase 2 で確定した詳細
+## 9. Phase 2 で確定した詳細
 
-### 8.0 設計判断
+### 9.0 設計判断
 
 - **PgvectorStore (本番 asyncpg 実装) は Phase 4 に延期**: Cloud SQL への接続ライフサイクルが ETL Cloud Run Jobs と一体のため、Phase 4 で同時に実装。Phase 2 範囲では Protocol + InMemoryStore (Mock) を提供。
 - **Embedding は Protocol + Mock + Vertex の 3 段構成**: driving-license-bot の `app/agent/embedding.py` パターンを踏襲。Vertex は lazy import (`uv sync --extra vertex` で導入)。
 - **Docling は完全 lazy import**: `[pdf]` extra として ML deps を分離。Phase 4 ETL でのみ必要。
 - **rapidfuzz scorer は `fuzz.ratio` (Levenshtein)**: 日本語は token boundaries が無いため、token-set ratio より文字レベル ratio が中黒 (なかぐろ「・」、例: 「キディ鵠沼・藤沢」⇔「キディ鵠沼藤沢」) / typo に強い。
 
-### 8.1 FacilityResolver の挙動
+### 9.1 FacilityResolver の挙動
 
 | 観点 | 仕様 |
 |---|---|
@@ -486,7 +553,7 @@ async def backfill():
 実装: [`fujisawa_platform/resolver/facility_resolver.py`](../fujisawa_platform/resolver/facility_resolver.py)
 テスト: 13 ケース PASS
 
-### 8.2 EmbeddingClient の Protocol
+### 9.2 EmbeddingClient の Protocol
 
 | 観点 | 仕様 |
 |---|---|
@@ -498,7 +565,7 @@ async def backfill():
 実装: [`fujisawa_platform/knowledge_base/embedding.py`](../fujisawa_platform/knowledge_base/embedding.py)
 テスト: 10 ケース PASS
 
-### 8.3 KnowledgeStore (pages テーブル抽象)
+### 9.3 KnowledgeStore (pages テーブル抽象)
 
 | 観点 | 仕様 |
 |---|---|
@@ -511,7 +578,7 @@ async def backfill():
 実装: [`fujisawa_platform/knowledge_base/store.py`](../fujisawa_platform/knowledge_base/store.py)
 テスト: 11 ケース PASS
 
-### 8.4 pdf_pipeline の 3 helpers
+### 9.4 pdf_pipeline の 3 helpers
 
 | Helper | 仕様 |
 |---|---|
@@ -526,9 +593,9 @@ async def backfill():
 
 ---
 
-## 9. Phase 1 で確定した詳細
+## 10. Phase 1 で確定した詳細
 
-### 9.1 PoliteFetcher の挙動
+### 10.1 PoliteFetcher の挙動
 
 | 観点 | 仕様 |
 |---|---|
@@ -543,7 +610,7 @@ async def backfill():
 実装: [`fujisawa_platform/crawler/polite_fetcher.py`](../fujisawa_platform/crawler/polite_fetcher.py)
 テスト: 11 ケース PASS
 
-### 9.2 sitemap.xml の parse 仕様
+### 10.2 sitemap.xml の parse 仕様
 
 | 観点 | 仕様 |
 |---|---|
@@ -557,7 +624,7 @@ async def backfill():
 実装: [`fujisawa_platform/crawler/sitemap_loader.py`](../fujisawa_platform/crawler/sitemap_loader.py)
 テスト: 12 ケース PASS
 
-### 9.3 Skill File 5 種
+### 10.3 Skill File 5 種
 
 | Skill | 用途 | LINE Bot / 保活 |
 |---|---|---|
@@ -571,7 +638,7 @@ async def backfill():
 loader: `fujisawa_platform.skills.get_skill(name)`
 テスト: 11 ケース PASS (各 skill が 100 char 以上 + ヘッダ規約準拠)
 
-### 9.4 pgvector schema (8 テーブル)
+### 10.4 pgvector schema (8 テーブル)
 
 `fujisawa_kb_db` に作成。proposal 0003 §4.3 + 0005 で言及した全テーブルを網羅:
 
@@ -588,7 +655,7 @@ loader: `fujisawa_platform.db.get_init_schema_sql()`
 
 ---
 
-## 10. NFR (proposal 0003 §3 から要約)
+## 11. NFR (proposal 0003 §3 から要約)
 
 | 観点 | 目標 / 制約 |
 |---|---|
@@ -602,7 +669,7 @@ loader: `fujisawa_platform.db.get_init_schema_sql()`
 
 ---
 
-## 11. 関連ドキュメント
+## 12. 関連ドキュメント
 
 - [`../README.md`](../README.md) — Quickstart / 利用方法
 - proposal 0003-0005 (上記 §1)
@@ -612,7 +679,7 @@ loader: `fujisawa_platform.db.get_init_schema_sql()`
 
 ---
 
-## 12. 用語集
+## 13. 用語集
 
 | 用語 | 意味 |
 |---|---|

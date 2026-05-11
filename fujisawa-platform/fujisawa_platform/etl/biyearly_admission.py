@@ -30,6 +30,7 @@ from fujisawa_platform.crawler import FetchResult, NotModified, PoliteFetcher, P
 from fujisawa_platform.etl._repos.admission import AdmissionResultRecord
 from fujisawa_platform.etl._runner import EtlRunResult, run_etl_job
 from fujisawa_platform.etl.admission_parser import parse_admission_table
+from fujisawa_platform.etl.pdf_archive import NullArchive, PdfArchive, archive_path
 from fujisawa_platform.pdf_pipeline import PdfTable, extract_tables
 from fujisawa_platform.resolver import FacilityResolver
 
@@ -53,6 +54,8 @@ class AdmissionCrawlOutcome(BaseModel):
     rows_written: int = 0
     tables_parsed: int = 0
     pdf_hash: str | None = None
+    archive_path: str | None = None
+    archive_backend: str | None = None
 
 
 async def crawl_and_upsert_admission(
@@ -63,6 +66,7 @@ async def crawl_and_upsert_admission(
     fetcher: PoliteFetcher,
     repo: _AdmissionRepoLike,
     resolver: FacilityResolver,
+    archive: PdfArchive | None = None,
     table_extractor: TableExtractor | None = None,
     now: Callable[[], datetime] | None = None,
     dry_run: bool = False,
@@ -75,16 +79,35 @@ async def crawl_and_upsert_admission(
         fetcher: PoliteFetcher (consumer 側で `async with` 済)。
         repo: `AdmissionRepo` (DI 可能)。
         resolver: 施設名 → facility_id 解決用 (build_facility_resolver で構築)。
+        archive: PDF アーカイブ先 (default は `NullArchive` = 保存しない)。
+            本番は `GcsArchive(bucket_name="fujisawa-pdf-archive")`、smoke は `LocalArchive`。
         table_extractor: 表抽出関数 (default: `pdf_pipeline.extract_tables`)。
             テストでは mock を注入可能。
         now: 任意。as_of の差し替え (テスト用)。
-        dry_run: True なら parse は行うが repo.upsert_many を呼ばない。
+        dry_run: True なら parse / archive 共に行うが repo.upsert_many は呼ばない。
     """
     _now = now or _utcnow
     _extract = table_extractor or extract_tables
+    _archive: PdfArchive = archive or NullArchive()
     as_of = _now()
 
     pdf_bytes, pdf_hash = await _fetch_pdf(fetcher, pdf_url)
+
+    # PDF オリジナルバイトをアーカイブに保存 (proposal §4.5 line 204)。
+    # URL 切れ後の遡及検証 / 出典担保のため、parse 前に必ず保存する。
+    archive_destination = archive_path(
+        job_name="biyearly_admission_etl",
+        url=pdf_url,
+        year=year,
+        round=round,
+    )
+    archive_result = await _archive.put(
+        path=archive_destination,
+        content=pdf_bytes,
+        source_url=pdf_url,
+        fetched_at=as_of,
+    )
+
     tables = _extract(pdf_bytes)
 
     records: list[AdmissionResultRecord] = []
@@ -107,6 +130,8 @@ async def crawl_and_upsert_admission(
         rows_written=len(records),
         tables_parsed=len(tables),
         pdf_hash=pdf_hash,
+        archive_path=archive_result.path,
+        archive_backend=archive_result.backend,
     )
 
 
@@ -120,6 +145,7 @@ async def run_biyearly_admission(
     runs_repo: EtlRunsRepo,
     resolver: FacilityResolver,
     run_id: str,
+    archive: PdfArchive | None = None,
     table_extractor: TableExtractor | None = None,
     now: Callable[[], datetime] | None = None,
     dry_run: bool = False,
@@ -135,6 +161,7 @@ async def run_biyearly_admission(
                 fetcher=fetcher,
                 repo=admission_repo,
                 resolver=resolver,
+                archive=archive,
                 table_extractor=table_extractor,
                 now=now,
                 dry_run=dry_run,
