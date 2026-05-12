@@ -74,3 +74,131 @@ variable "vertex_location" {
   description = "Vertex AI location (text-embedding-004 のリージョン)。"
   default     = "us-central1"
 }
+
+# ─────────────────────────────────────────────────────────────────────
+# Cloud Run Jobs (step 3)
+# ─────────────────────────────────────────────────────────────────────
+
+variable "etl_image" {
+  type        = string
+  description = "Cloud Run Jobs で使う Docker image URI (Artifact Registry)。空文字列なら Cloud Run Jobs と Scheduler の deploy をスキップ (chicken-and-egg: image を build してから埋める)。"
+  default     = ""
+}
+
+variable "etl_job_cpu" {
+  type        = string
+  description = "Cloud Run Job CPU 数。"
+  default     = "1"
+}
+
+variable "etl_job_memory" {
+  type        = string
+  description = "Cloud Run Job memory。yearly_navi (Docling) のメモリ要件で 2Gi 確保。"
+  default     = "2Gi"
+}
+
+variable "etl_job_task_timeout_seconds" {
+  type        = number
+  description = "Cloud Run Job タスクタイムアウト (秒)。weekly_crawl は 1,100 URL × 3s ≈ 55 分 → 余裕を見て 90 分。"
+  default     = 5400
+}
+
+variable "etl_job_max_retries" {
+  type        = number
+  description = "Cloud Run Job のタスクリトライ回数。run_etl_job の fail-fast 機構があるので 0 で OK。"
+  default     = 0
+}
+
+variable "etl_sitemap_url" {
+  type        = string
+  description = "weekly_crawl_etl の sitemap.xml URL (env: FUJISAWA_ETL_SITEMAP_URL)。"
+  default     = "https://www.city.fujisawa.kanagawa.jp/sitemap.xml"
+}
+
+variable "etl_authorized_facilities_url" {
+  type        = string
+  description = "half_yearly_facility_etl の認可施設一覧 HTML URL。"
+  default     = ""
+}
+
+variable "etl_unauthorized_facilities_url" {
+  type        = string
+  description = "half_yearly_facility_etl の認可外施設一覧 HTML URL。"
+  default     = ""
+}
+
+variable "etl_navi_pdf_url" {
+  type        = string
+  description = "yearly_navi_etl の申込ナビ PDF URL。"
+  default     = ""
+}
+
+variable "etl_admission_pdf_url_1st" {
+  type        = string
+  description = "biyearly_admission_etl の 1 次入所結果 PDF URL。"
+  default     = ""
+}
+
+variable "etl_admission_pdf_url_2nd" {
+  type        = string
+  description = "biyearly_admission_etl の 2 次入所結果 PDF URL。"
+  default     = ""
+}
+
+variable "etl_admission_year" {
+  type        = number
+  description = "biyearly_admission_etl の対象年度 (西暦)。"
+  default     = 2026
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# Cloud Scheduler (step 3)
+# ─────────────────────────────────────────────────────────────────────
+
+variable "scheduler_time_zone" {
+  type        = string
+  description = "Cloud Scheduler のタイムゾーン。"
+  default     = "Asia/Tokyo"
+}
+
+variable "scheduler_weekly_crawl_schedule" {
+  type        = string
+  description = "weekly_crawl_etl の cron 式 (default: 毎週日曜 03:00 JST)。"
+  default     = "0 3 * * 0"
+}
+
+variable "scheduler_monthly_vacancy_schedule" {
+  type        = string
+  description = "monthly_vacancy_etl の cron 式 (default: 毎月 22 日 03:00 JST)。"
+  default     = "0 3 22 * *"
+}
+
+variable "scheduler_monthly_stats_compute_schedule" {
+  type        = string
+  description = "monthly_stats_compute の cron 式 (default: 毎月 23 日 03:00 JST、vacancy 完了後)。"
+  default     = "0 3 23 * *"
+}
+
+variable "scheduler_half_yearly_facility_schedule" {
+  type        = string
+  description = "half_yearly_facility_etl の cron 式 (default: 4 月・10 月 1 日 03:00 JST)。"
+  default     = "0 3 1 4,10 *"
+}
+
+variable "scheduler_yearly_navi_schedule" {
+  type        = string
+  description = "yearly_navi_etl の cron 式 (default: 4 月・10 月 1 日 03:00 JST)。"
+  default     = "0 3 1 4,10 *"
+}
+
+variable "scheduler_biyearly_admission_1st_schedule" {
+  type        = string
+  description = "biyearly_admission_etl 1 次 の cron 式 (default: 2 月 25 日 03:00 JST、1 次内定発表後)。"
+  default     = "0 3 25 2 *"
+}
+
+variable "scheduler_biyearly_admission_2nd_schedule" {
+  type        = string
+  description = "biyearly_admission_etl 2 次 の cron 式 (default: 3 月 25 日 03:00 JST、2 次内定発表後)。"
+  default     = "0 3 25 3 *"
+}

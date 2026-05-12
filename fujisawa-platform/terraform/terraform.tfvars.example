@@ -25,3 +25,42 @@ consumer_service_account_emails = []
 
 # Vertex AI region (text-embedding-004)
 vertex_location = "us-central1"
+
+# ─────────────────────────────────────────────────────────────────────
+# Cloud Run Jobs (step 3)
+# ─────────────────────────────────────────────────────────────────────
+
+# Docker image URI。空文字列なら Cloud Run Jobs と Scheduler を deploy しない。
+# 初回は空のまま apply → image を build/push → ここに URI を埋めて再 apply。
+# 例: "asia-northeast1-docker.pkg.dev/sakamoto-family-agent/fujisawa-etl/fujisawa-etl:<sha>"
+etl_image = ""
+
+# Job スペック (yearly_navi の Docling で 2Gi 必要なので余裕を持って 2Gi)
+etl_job_cpu                  = "1"
+etl_job_memory               = "2Gi"
+etl_job_task_timeout_seconds = 5400 # 90 分 (weekly_crawl の 1,100 URL × 3s 想定)
+etl_job_max_retries          = 0    # run_etl_job ラッパーで fail-fast 制御
+
+# Job ごとの起点 URL / 年度
+etl_sitemap_url                 = "https://www.city.fujisawa.kanagawa.jp/sitemap.xml"
+etl_authorized_facilities_url   = "" # 例: "https://www.city.fujisawa.kanagawa.jp/.../ninka.html"
+etl_unauthorized_facilities_url = "" # 例: "https://www.city.fujisawa.kanagawa.jp/.../ninkagai.html"
+etl_navi_pdf_url                = "" # 例: "https://www.city.fujisawa.kanagawa.jp/.../r8_navi0129.pdf"
+etl_admission_pdf_url_1st       = "" # 例: "https://www.city.fujisawa.kanagawa.jp/.../r8-admission-1st.pdf"
+etl_admission_pdf_url_2nd       = ""
+etl_admission_year              = 2026
+
+# ─────────────────────────────────────────────────────────────────────
+# Cloud Scheduler (step 3)
+# ─────────────────────────────────────────────────────────────────────
+
+scheduler_time_zone = "Asia/Tokyo"
+
+# default で proposal §4.5.4 の頻度 (variables.tf 参照)。dev 環境では絞込 / 一時停止可能。
+# scheduler_weekly_crawl_schedule           = "0 3 * * 0"
+# scheduler_monthly_vacancy_schedule        = "0 3 22 * *"
+# scheduler_monthly_stats_compute_schedule  = "0 3 23 * *"
+# scheduler_half_yearly_facility_schedule   = "0 3 1 4,10 *"
+# scheduler_yearly_navi_schedule            = "0 3 1 4,10 *"
+# scheduler_biyearly_admission_1st_schedule = "0 3 25 2 *"
+# scheduler_biyearly_admission_2nd_schedule = "0 3 25 3 *"
