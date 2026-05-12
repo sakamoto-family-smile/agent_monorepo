@@ -110,6 +110,32 @@ class AdmissionRepo:
                 )
         return len(records)
 
+    async def list_recent_years(
+        self, *, min_year: int, max_year: int
+    ) -> list[AdmissionResultRecord]:
+        """指定年度範囲 (両端含む) の admission_results を全件取得。
+
+        `monthly_stats_compute` (Phase 4-2f) が直近 3 年分を読み出して集計するのに使う。
+        ORDER は `(facility_id, age_class, year)` で安定ソート。
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    facility_id, year, round, age_class,
+                    applicants_at_deadline, capacity, vacancy_after,
+                    min_basic_score, min_priority,
+                    min_coordination_score, min_index_notation,
+                    source_pdf_url, as_of, schema_version
+                FROM admission_results
+                WHERE year BETWEEN $1 AND $2
+                ORDER BY facility_id, age_class, year
+                """,
+                min_year,
+                max_year,
+            )
+        return [_row_to_record(r) for r in rows]
+
     async def count(self, *, year: int | None = None, round: str | None = None) -> int:
         """件数取得 (smoke / 監視用、year / round で絞り込み可能)。"""
         async with self._pool.acquire() as conn:
@@ -131,7 +157,7 @@ class AdmissionRepo:
         return int(row["c"])
 
 
-def _row_to_record(row: Any) -> AdmissionResultRecord:  # pragma: no cover — 将来の SELECT 用
+def _row_to_record(row: Any) -> AdmissionResultRecord:
     return AdmissionResultRecord(
         facility_id=row["facility_id"],
         year=row["year"],

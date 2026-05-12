@@ -10,7 +10,7 @@ Phase 4-2 の進行状況:
 - 4-2c-2: `PdfArchive` (GcsArchive / LocalArchive / NullArchive)
 - 4-2d: `monthly_vacancy_etl`
 - 4-2e: `yearly_navi_etl`
-- 4-2f: `monthly_stats_compute` (TBD)
+- 4-2f: `monthly_stats_compute`
 - 4-2g: `wayback_backfill` (TBD, 一度きり)
 """
 
@@ -26,6 +26,11 @@ from fujisawa_platform.etl.half_yearly_facility import (
     FacilityCrawlOutcome,
     crawl_and_replace_facilities,
     run_half_yearly_facility,
+)
+from fujisawa_platform.etl.monthly_stats_compute import (
+    StatsComputeOutcome,
+    compute_stats,
+    run_monthly_stats_compute,
 )
 from fujisawa_platform.etl.monthly_vacancy import (
     MonthlyVacancyOutcome,
@@ -62,8 +67,10 @@ __all__ = [
     "NaviCrawlOutcome",
     "NullArchive",
     "PdfArchive",
+    "StatsComputeOutcome",
     "build_archive_from_config",
     "build_facility_resolver",
+    "compute_stats",
     "crawl_and_index",
     "crawl_and_index_navi",
     "crawl_and_replace_facilities",
@@ -72,6 +79,7 @@ __all__ = [
     "run_biyearly_admission",
     "run_etl_job",
     "run_half_yearly_facility",
+    "run_monthly_stats_compute",
     "run_monthly_vacancy",
     "run_weekly_crawl",
     "run_yearly_navi",
