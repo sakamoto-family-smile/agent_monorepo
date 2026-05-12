@@ -1,0 +1,16 @@
+# Terraform local files
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+
+# bootstrap で project ごとに作るので commit しない
+backend.tf
+
+# 個人の値。example のみ commit する
+terraform.tfvars
+*.auto.tfvars
+
+# プロバイダ lock は commit する (.terraform.lock.hcl は除外しない)
