@@ -1,0 +1,27 @@
+# `terraform.tfvars` を作成する際は本ファイルを copy して値を埋めること。
+# `terraform.tfvars` は git ignore 対象 (gitignore でなくとも、機密含む可能性のため commit しないこと)。
+
+project_id = "sakamoto-family-agent"
+region     = "asia-northeast1"
+
+# driving-license-bot で作成済の Cloud SQL instance を共有する (proposal §4.5)。
+# 値は `gcloud sql instances list --project=<project_id>` で確認可能。
+shared_cloudsql_instance_name            = "driving-license-bot-pg"
+shared_cloudsql_instance_connection_name = "sakamoto-family-agent:asia-northeast1:driving-license-bot-pg"
+
+# PdfArchive bucket は ASIA-NORTHEAST1 single region (コスト最小)
+pdf_archive_bucket_location           = "ASIA-NORTHEAST1"
+pdf_archive_bucket_lifecycle_age_days = 1095 # 3 年
+
+# Artifact Registry の image retention
+artifact_registry_image_retention_count = 10
+
+# Consumer (info-bot / 保活) の SA。空 list で OK、後から terraform apply で追加可能。
+# consumer_service_account_emails = [
+#   "sa-info-bot@<project>.iam.gserviceaccount.com",
+#   "sa-hokatsu@<project>.iam.gserviceaccount.com",
+# ]
+consumer_service_account_emails = []
+
+# Vertex AI region (text-embedding-004)
+vertex_location = "us-central1"

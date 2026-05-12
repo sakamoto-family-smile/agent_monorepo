@@ -1,0 +1,12 @@
+# State は GCS で管理する (terraform destroy 時の履歴を残すため)。
+# bucket は事前に手動作成 (chicken-and-egg、`docs/SETUP.md` §2 参照)。
+#
+# このファイルを `backend.tf` にコピーして bucket / prefix を埋めること。
+# driving-license-bot と state バケットを共有する場合は prefix で分離する。
+
+# terraform {
+#   backend "gcs" {
+#     bucket = "<terraform-state-bucket>"
+#     prefix = "fujisawa-platform/terraform"
+#   }
+# }

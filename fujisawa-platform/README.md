@@ -4,7 +4,7 @@
 (`fujisawa-info-bot` / `fujisawa-hokatsu-agent`) が path dep で参照し、
 **クロール / PDF 解析 / ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL** を一元提供する。
 
-> **Status**: Phase 4-2h step 1 実装済 (cli.py + Dockerfile + SETUP.md / 残: step 2-3 terraform)
+> **Status**: Phase 4-2h step 2 実装済 (terraform GCP リソース / 残: step 3 Cloud Run Jobs)
 
 設計詳細は [`../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md`](../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md) 参照。
 本 README は「動かす / 取り込む」観点に絞る。
@@ -225,6 +225,7 @@ finally:
 | `fujisawa_platform.etl.cli` | `python -m fujisawa_platform.etl.cli <job_name>` Cloud Run Job dispatcher | 4-2h-1 | ✅ 実装済 |
 | `Dockerfile` (project root) | multi-stage build (uv + 4 extras)、1 image で 7 entrypoint | 4-2h-1 | ✅ 実装済 |
 | `docs/SETUP.md` | GCP 構築 runbook (terraform 外の手動ステップ) | 4-2h-1 | ✅ 実装済 |
+| `terraform/` | Cloud SQL DB / Secret Manager / IAM / GCS bucket / Artifact Registry | 4-2h-2 | ✅ 実装済 |
 
 Phase 4-2d 以降に追加予定:
 - `etl/monthly_vacancy.py` + `VacancyRepo` (PDF → vacancy / application snapshots)
