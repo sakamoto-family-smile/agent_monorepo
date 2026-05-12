@@ -11,7 +11,7 @@ Phase 4-2 の進行状況:
 - 4-2d: `monthly_vacancy_etl`
 - 4-2e: `yearly_navi_etl`
 - 4-2f: `monthly_stats_compute`
-- 4-2g: `wayback_backfill` (TBD, 一度きり)
+- 4-2g: `wayback_backfill` (一度きり)
 """
 
 from fujisawa_platform.etl._runner import EtlRunResult, run_etl_job
@@ -44,6 +44,12 @@ from fujisawa_platform.etl.pdf_archive import (
     PdfArchive,
     build_archive_from_config,
 )
+from fujisawa_platform.etl.wayback_backfill import (
+    BackfillItem,
+    WaybackBackfillOutcome,
+    backfill_admissions,
+    run_wayback_backfill,
+)
 from fujisawa_platform.etl.weekly_crawl import (
     CrawlOutcome,
     crawl_and_index,
@@ -57,6 +63,7 @@ from fujisawa_platform.etl.yearly_navi import (
 
 __all__ = [
     "AdmissionCrawlOutcome",
+    "BackfillItem",
     "CrawlOutcome",
     "EtlConfig",
     "EtlRunResult",
@@ -68,6 +75,8 @@ __all__ = [
     "NullArchive",
     "PdfArchive",
     "StatsComputeOutcome",
+    "WaybackBackfillOutcome",
+    "backfill_admissions",
     "build_archive_from_config",
     "build_facility_resolver",
     "compute_stats",
@@ -81,6 +90,7 @@ __all__ = [
     "run_half_yearly_facility",
     "run_monthly_stats_compute",
     "run_monthly_vacancy",
+    "run_wayback_backfill",
     "run_weekly_crawl",
     "run_yearly_navi",
 ]

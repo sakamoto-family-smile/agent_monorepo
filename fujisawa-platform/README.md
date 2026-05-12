@@ -4,7 +4,7 @@
 (`fujisawa-info-bot` / `fujisawa-hokatsu-agent`) が path dep で参照し、
 **クロール / PDF 解析 / ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL** を一元提供する。
 
-> **Status**: Phase 4-2f 実装済 (monthly_stats_compute: admission 集計 → competition_stats)
+> **Status**: Phase 4-2g 実装済、Phase 4-2 機能 Job 全完了 (残: 4-2h terraform)
 
 設計詳細は [`../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md`](../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md) 参照。
 本 README は「動かす / 取り込む」観点に絞る。
@@ -220,6 +220,8 @@ finally:
 | `fujisawa_platform.etl._repos.competition_stats` | `CompetitionStatsRepo` + `CompetitionStatsRecord` + `YearlyCompetitionEntry` + `HistoricalMinimumIndex` | 4-2f | ✅ 実装済 |
 | `fujisawa_platform.etl.stats_compute` | `compute_competition_stats` + `classify_level` / `classify_trend` / `confidence_from_years` (pure 関数) | 4-2f | ✅ 実装済 |
 | `fujisawa_platform.etl.monthly_stats_compute` | `run_monthly_stats_compute` / `compute_stats` (admission 集計 → competition_stats、外部 fetch なし) | 4-2f | ✅ 実装済 |
+| `fujisawa_platform.etl.min_index_parser` | `parse_min_index_table` + `MinIndexEntry` (令和 4 年最低指数 PDF) | 4-2g | ✅ 実装済 |
+| `fujisawa_platform.etl.wayback_backfill` | `run_wayback_backfill` / `backfill_admissions` / `BackfillItem` (Wayback 経由で令和 4-6 年バックフィル、一度きり) | 4-2g | ✅ 実装済 |
 
 Phase 4-2d 以降に追加予定:
 - `etl/monthly_vacancy.py` + `VacancyRepo` (PDF → vacancy / application snapshots)
