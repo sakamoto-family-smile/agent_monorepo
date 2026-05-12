@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | 0.11.2 |
+| **Version** | 0.12 |
 | **最終更新** | 2026-05-12 |
-| **Status** | Active (Phase 4-2h step 2 実装済: terraform GCP リソース / step 3 Cloud Run Jobs 着手予定) |
+| **Status** | Active (Phase 4-2h step 1-3 全実装済、配備可能状態 / 残: terraform CI 化は Phase 4-2h step 4 で別途) |
 | **Owner** | @kurama554101 |
 | **Type** | 共通基盤ライブラリ (path dep として info-bot / 保活 から参照) |
 | **README** | [`../README.md`](../README.md) |
@@ -27,6 +27,7 @@
 | 2026-05-12 | 0.11 | Phase 4-2g 実装 (wayback_backfill + min_index_parser、Wayback 経由で令和 4-6 年 PDF をバックフィル) |
 | 2026-05-12 | 0.11.1 | Phase 4-2h step 1 実装 (etl/cli.py + Dockerfile + docs/SETUP.md、Cloud Run Job entrypoint と配備 runbook) |
 | 2026-05-12 | 0.11.2 | Phase 4-2h step 2 実装 (terraform: Cloud SQL DB / Secret Manager / IAM / GCS bucket / Artifact Registry) |
+| 2026-05-12 | 0.12 | Phase 4-2h step 3 実装 (terraform: Cloud Run Jobs × 7 + Cloud Scheduler × 6、配備可能状態) |
 
 ---
 
@@ -71,8 +72,9 @@
 | **Phase 4-2f** | `monthly_stats_compute` + `CompetitionStatsRepo` + `stats_compute` (DB 内集計のみ、外部 fetch なし) | ✅ 完了 (PR #126) |
 | **Phase 4-2g** | `wayback_backfill` + `min_index_parser` (Wayback 経由で令和 4-6 年 PDF をバックフィル、一度きり実行) | ✅ 完了 (PR #127) |
 | **Phase 4-2h step 1** | `etl/cli.py` (Job dispatcher) + `Dockerfile` + `docs/SETUP.md` (GCP 構築 runbook) | ✅ 完了 (PR #129) |
-| **Phase 4-2h step 2** | terraform: Cloud SQL DB / Secret Manager / IAM / Artifact Registry / GCS bucket | 🔶 実装済 (本 PR) |
-| Phase 4-2h step 3 | terraform: Cloud Run Jobs × 7 + Cloud Scheduler × 6 | ⏳ 未着手 |
+| **Phase 4-2h step 2** | terraform: Cloud SQL DB / Secret Manager / IAM / Artifact Registry / GCS bucket | ✅ 完了 (PR #130) |
+| **Phase 4-2h step 3** | terraform: Cloud Run Jobs × 7 + Cloud Scheduler × 6 | 🔶 実装済 (本 PR) |
+| Phase 4-2h step 4 (任意) | CI で terraform plan / 静的解析 (tflint / tfsec) | ⏳ 後回し可 |
 | Phase 5 | observability (analytics-platform 計装) + monitoring | ⏳ 未着手 |
 
 ---

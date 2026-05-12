@@ -53,3 +53,18 @@ resource "google_project_iam_member" "etl_log_writer" {
   role    = "roles/logging.logWriter"
   member  = "serviceAccount:${google_service_account.etl.email}"
 }
+
+# ─────────────────────────────────────────────────────────────────────
+# Scheduler Service Account (step 3)
+# ─────────────────────────────────────────────────────────────────────
+# Cloud Scheduler は専用 SA で Cloud Run Job を invoke する。
+# (Cloud Scheduler の default SA を使う方法もあるが、IAM 権限を明示するため分離)
+
+resource "google_service_account" "scheduler" {
+  project      = var.project_id
+  account_id   = local.sa_scheduler_id
+  display_name = "fujisawa-platform Cloud Scheduler invoker"
+  description  = "Cloud Scheduler が Cloud Run Job を起動するための SA. Phase 4-2h step 3."
+
+  depends_on = [google_project_service.iam]
+}

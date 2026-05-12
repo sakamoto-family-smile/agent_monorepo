@@ -38,3 +38,22 @@ output "secret_ids" {
     vertex_project = google_secret_manager_secret.vertex_project.secret_id
   }
 }
+
+output "cloud_run_job_names" {
+  description = "deploy された Cloud Run Job 名の一覧。`gcloud run jobs execute <name>` で手動実行可能。"
+  value = local.deploy_jobs ? {
+    for k, job in google_cloud_run_v2_job.etl : k => job.name
+  } : {}
+}
+
+output "scheduler_job_names" {
+  description = "Cloud Scheduler に登録された Job 名の一覧 (wayback_backfill は除く)。"
+  value = local.deploy_jobs ? {
+    for k, sched in google_cloud_scheduler_job.etl : k => sched.name
+  } : {}
+}
+
+output "scheduler_service_account_email" {
+  description = "Cloud Scheduler が Cloud Run Job を invoke するための SA email。"
+  value       = google_service_account.scheduler.email
+}
