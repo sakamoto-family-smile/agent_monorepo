@@ -11,9 +11,15 @@
   唯一の Wayback バックフィル対象。
 - CDX API (`web.archive.org/cdx/search/cdx`) で取得した実 timestamp:
   `20220308001221` (2022-03-08 snapshot, mimetype application/pdf, 184,967 bytes)。
-- 令和 5-6 年の `akizyoukyou*.pdf` / `mousikomizyoukyou*.pdf` は通常 ETL
-  (`monthly_vacancy_etl`) と URL 構造が同じため、Wayback ではなく通常 Job 経由で
-  カバーすることを想定 (本リストには含めない)。
+- 令和 5-6 年の `akizyoukyou*.pdf` / `mousikomizyoukyou*.pdf` も Wayback で取得可能
+  であることは investigation note §A2-1 / §A2-4 で確認済 (現サイト側は両 URL パターン
+  とも 404 で消失していることを 2026-05-13 に再確認)。ただし以下が未解決のため、
+  本リストには含めず別 PR で追加予定:
+  - 8 件 (R5×4 + R6×4) の 14 桁 Wayback timestamp の個別確定 (CDX クエリ)
+  - `BackfillKind="regular"` (`parse_admission_table`) が `akizyoukyou*` /
+    `mousikomizyoukyou*` の表構造を扱えるかの Docling 実抽出検証
+    (`biyearly_admission_etl` 想定の「4 月入所結果 PDF」と構造が同じか、種別ごとに
+    新 `BackfillKind` を切るかは事前判定が必要)
 
 追加収録時の手順:
   1. `curl 'http://web.archive.org/cdx/search/cdx?url=<original_url>&output=json&limit=20'`
