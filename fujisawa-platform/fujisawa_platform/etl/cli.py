@@ -46,6 +46,7 @@ from fujisawa_platform.etl.monthly_stats_compute import run_monthly_stats_comput
 from fujisawa_platform.etl.monthly_vacancy import run_monthly_vacancy
 from fujisawa_platform.etl.pdf_archive import build_archive_from_config
 from fujisawa_platform.etl.wayback_backfill import run_wayback_backfill
+from fujisawa_platform.etl.wayback_items import RUNTIME_ITEMS as _WAYBACK_ITEMS
 from fujisawa_platform.etl.weekly_crawl import run_weekly_crawl
 from fujisawa_platform.etl.yearly_navi import run_yearly_navi
 from fujisawa_platform.knowledge_base import (
@@ -244,15 +245,13 @@ async def _dispatch(
         )
 
     if job == "wayback_backfill":
-        # 実 BackfillItem リストは proposal 0003 §A2-1 / 調査ノート由来。
-        # Phase 4-2h step 3 で wayback_items.py に切り出すか、env から読む。
-        # 本 step では空リスト fallback で、actual な items は手動 invoke 時に Job
-        # の env / 引数で渡す想定 (cf. SETUP.md)。
+        # 実 BackfillItem リストは `wayback_items.RUNTIME_ITEMS` に固定で持つ
+        # (Phase 4-2h step 3-2、investigation note §A2-1 由来)。
         from fujisawa_platform.crawler import WaybackConfig
 
         resolver = await build_facility_resolver(FacilitiesRepo(pool=pool))
         return await run_wayback_backfill(
-            items=[],  # NOTE: 実 items は manual run 時に注入する想定
+            items=list(_WAYBACK_ITEMS),
             wayback_config=WaybackConfig(user_agent=config.user_agent),
             admission_repo=AdmissionRepo(pool=pool),
             runs_repo=runs_repo,
