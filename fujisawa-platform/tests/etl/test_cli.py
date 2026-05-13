@@ -183,7 +183,13 @@ class TestDispatch:
         # wayback_backfill_enabled=true を明示
         monkeypatch.setenv("FUJISAWA_ETL_WAYBACK_BACKFILL_ENABLED", "true")
         await cli.main_async(["wayback_backfill"])
-        assert stub_resources["run_calls"]["run_wayback_backfill"].call_count == 1
+        recorded = stub_resources["run_calls"]["run_wayback_backfill"]
+        assert recorded.call_count == 1
+        # items は wayback_items.RUNTIME_ITEMS から list 化されて渡る (Phase 4-2h step 3-2)
+        from fujisawa_platform.etl.wayback_items import RUNTIME_ITEMS
+
+        assert recorded.kwargs is not None
+        assert recorded.kwargs["items"] == list(RUNTIME_ITEMS)
 
     @pytest.mark.asyncio
     async def test_unknown_job_raises(self, base_env: None, stub_resources: dict[str, Any]) -> None:
