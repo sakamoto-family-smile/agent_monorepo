@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from fujisawa_platform.etl.min_index_parser import (
     MinIndexEntry,
     parse_min_index_table,
+    parse_min_index_tables,
 )
 from fujisawa_platform.pdf_pipeline import PdfTable
 from fujisawa_platform.resolver import FacilityResolver, ResolverEntry
@@ -32,6 +33,8 @@ def _resolver() -> FacilityResolver:
         [
             ResolverEntry(facility_id="kouritsu-aaa", canonical_name="藤沢保育園"),
             ResolverEntry(facility_id="kouritsu-bbb", canonical_name="辻堂保育園"),
+            ResolverEntry(facility_id="r4-nijiiro-fuji", canonical_name="にじいろ保育園藤沢"),
+            ResolverEntry(facility_id="r4-doremi", canonical_name="どれみちゃいるど保育室"),
         ]
     )
 
@@ -131,6 +134,109 @@ class TestParseMinIndexTable:
         )
         entries = parse_min_index_table(table=table, source_pdf_url=_SOURCE, resolver=_resolver())
         assert entries == []
+
+
+    def test_fullwidth_age_headers_resolved(self) -> None:
+        """Docling は `０歳` (全角) でヘッダーを返すため正規表現を broader 化する。"""
+        table = PdfTable(
+            headers=["施設名", "０歳", "１歳", "２歳"],
+            rows=[["藤沢保育園", "10F11", "○", "8E9"]],
+        )
+        entries = parse_min_index_table(table=table, source_pdf_url=_SOURCE, resolver=_resolver())
+        ages = {e.age_class for e in entries}
+        assert ages == {0, 2}
+
+    def test_half_width_age_without_児_suffix(self) -> None:
+        """Docling は `0歳` (歳児 ではなく 歳) でも返すため両対応する。"""
+        table = PdfTable(
+            headers=["施設名", "0歳", "1歳"],
+            rows=[["藤沢保育園", "10F11", "○"]],
+        )
+        entries = parse_min_index_table(table=table, source_pdf_url=_SOURCE, resolver=_resolver())
+        assert [e.age_class for e in entries] == [0]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# parse_min_index_tables (複数 table を context-aware に処理)
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestParseMinIndexTables:
+    def test_facility_column_inferred_when_no_explicit_header(self) -> None:
+        """実 Docling 出力では `施設名` ヘッダーが無く `公立` などのカテゴリが入る。
+        age 列より左の最も左 col (= col 0) を facility 列とみなす。"""
+        table = PdfTable(
+            headers=["公立", "０歳", "１歳", "２歳"],
+            rows=[["藤沢保育園", "10F11", "9F10", "○"]],
+        )
+        entries = parse_min_index_tables(
+            tables=[table], source_pdf_url=_SOURCE, resolver=_resolver()
+        )
+        assert {e.age_class for e in entries} == {0, 1}
+        assert {e.facility_id for e in entries} == {"kouritsu-aaa"}
+
+    def test_docling_header_miss_inherits_prev_columns(self) -> None:
+        """Docling が改ページで header を取りこぼし、データ行を headers として誤抽出した
+        ケースを、前 table の column 設計を継承して救済する。"""
+        ok = PdfTable(
+            headers=["公立", "０歳", "１歳", "２歳"],
+            rows=[["藤沢保育園", "10F11", "9F10", "○"]],
+        )
+        # 後続 table は本来 headers であるべき行を data に押し込んでしまっている
+        broken = PdfTable(
+            headers=["にじいろ保育園藤沢", "10F11※", "10F11※", "10D13"],
+            rows=[["辻堂保育園", "8F12", "9F11", "○"]],
+        )
+        entries = parse_min_index_tables(
+            tables=[ok, broken], source_pdf_url=_SOURCE, resolver=_resolver()
+        )
+        # ok から: 藤沢の (0, 1) = 2 件
+        # broken から: にじいろ藤沢の (0, 1, 2) = 3 件, 辻堂の (0, 1) = 2 件
+        facility_age = {(e.facility_id, e.age_class) for e in entries}
+        assert ("kouritsu-aaa", 0) in facility_age
+        assert ("kouritsu-aaa", 1) in facility_age
+        assert ("r4-nijiiro-fuji", 0) in facility_age
+        assert ("r4-nijiiro-fuji", 1) in facility_age
+        assert ("r4-nijiiro-fuji", 2) in facility_age
+        assert ("kouritsu-bbb", 0) in facility_age
+        assert ("kouritsu-bbb", 1) in facility_age
+
+    def test_header_miss_without_prior_context_skipped(self) -> None:
+        """最初の table から age 列が出ない場合は救済できないので skip。"""
+        broken = PdfTable(
+            headers=["にじいろ保育園藤沢", "10F11"],
+            rows=[["辻堂保育園", "8F12"]],
+        )
+        entries = parse_min_index_tables(
+            tables=[broken], source_pdf_url=_SOURCE, resolver=_resolver()
+        )
+        assert entries == []
+
+    def test_range_age_header_skipped(self) -> None:
+        """家庭的保育の `0歳～2歳` 型 range header は本 parser では未対応 → skip。"""
+        table = PdfTable(
+            headers=["家庭的保育事業", "0歳～2歳"],
+            rows=[["藤沢保育園", "10F11"]],
+        )
+        entries = parse_min_index_tables(
+            tables=[table], source_pdf_url=_SOURCE, resolver=_resolver()
+        )
+        assert entries == []
+
+    def test_small_scale_4col_table(self) -> None:
+        """`小規模保育事業` のような 0-2 歳のみ 4 列 table も処理できる。"""
+        table = PdfTable(
+            headers=["小規模保育事業", "０歳", "１歳", "２歳"],
+            rows=[["どれみちゃいるど保育室", "○", "9F13", "-"]],
+        )
+        entries = parse_min_index_tables(
+            tables=[table], source_pdf_url=_SOURCE, resolver=_resolver()
+        )
+        assert len(entries) == 1
+        e = entries[0]
+        assert e.facility_id == "r4-doremi"
+        assert e.age_class == 1
+        assert e.notation == "9F13"
 
 
 class TestMinIndexEntryModel:

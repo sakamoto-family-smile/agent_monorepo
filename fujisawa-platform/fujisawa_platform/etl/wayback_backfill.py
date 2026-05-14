@@ -11,7 +11,8 @@
   [4] Docling で表抽出
   [5] kind ごとに parser を選択:
       - `regular`: `parse_admission_table` (令和 5-6 年の通常入所結果)
-      - `min_index_2022`: `parse_min_index_table` (令和 4 年最低指数)
+      - `min_index_2022`: `parse_min_index_tables` (令和 4 年最低指数。複数 table を
+        context-aware に処理し、Docling header miss を救済)
   [6] **(facility_id, year, round, age_class) で in-memory merge** してから AdmissionRepo に upsert
       (片方の PDF にしか値がないフィールドが None で上書きされるのを防ぐ)
   [7] `admission_results` に upsert (`min_*` 4 フィールドは令和 4 年のみ非 None)
@@ -35,7 +36,7 @@ from fujisawa_platform.crawler import WaybackClient, WaybackConfig, build_archiv
 from fujisawa_platform.etl._repos.admission import AdmissionResultRecord
 from fujisawa_platform.etl._runner import EtlRunResult, run_etl_job
 from fujisawa_platform.etl.admission_parser import parse_admission_table
-from fujisawa_platform.etl.min_index_parser import parse_min_index_table
+from fujisawa_platform.etl.min_index_parser import parse_min_index_tables
 from fujisawa_platform.etl.pdf_archive import NullArchive, PdfArchive, archive_path
 from fujisawa_platform.pdf_pipeline import PdfTable, extract_tables
 from fujisawa_platform.resolver import FacilityResolver
@@ -186,19 +187,18 @@ async def backfill_admissions(
                 ):
                     _merge_regular(merged, rec)
         elif item.kind == "min_index_2022":
-            for table in tables:
-                for entry in parse_min_index_table(
-                    table=table,
-                    source_pdf_url=item.archive_url,
-                    resolver=resolver,
-                ):
-                    _merge_min_index(
-                        merged,
-                        entry=entry,
-                        year=item.year,
-                        round=item.round,
-                        as_of=as_of,
-                    )
+            for entry in parse_min_index_tables(
+                tables=tables,
+                source_pdf_url=item.archive_url,
+                resolver=resolver,
+            ):
+                _merge_min_index(
+                    merged,
+                    entry=entry,
+                    year=item.year,
+                    round=item.round,
+                    as_of=as_of,
+                )
 
     # [6][7] AdmissionRepo に upsert
     records = list(merged.values())
