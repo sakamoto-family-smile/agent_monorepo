@@ -12,9 +12,11 @@
 | [`hotcook-agent`](./hotcook-agent/) | 実装 | シャープ ホットクック (KN-HW24H) の食材ベース料理提案エージェント (Phase 1) | ✅ 連携済 (PR #31) |
 | [`piyolog-analytics`](./piyolog-analytics/) | 実装 | ぴよログ (育児記録) を LINE Bot 経由で取り込んで家族で横断サマリ共有 (Phase 1) | ✅ 連携済 (PR #34) |
 | [`tech-news-agent`](./tech-news-agent/) | 実装 | データ基盤領域ニュース・論文の日次 LINE 配信 + 将来 QA 検索 (Phase 1 MVP) | ✅ 連携済 (本 PR) |
+| [`driving-license-bot`](./driving-license-bot/) | 実装 | 運転免許（仮免・本免）学科試験対策 LINE Bot。LLM 生成問題に根拠条文・教則ページを必ず添付 (Phase 0 基盤整備) | ✅ 連携済 |
 | [`security-platform`](./security-platform/) | 基盤 | 全エージェント共通のセキュリティ基盤（MCP Proxy / CVE 監視 / DLP / Red Team） | — (基盤側) |
 | [`analytics-platform`](./analytics-platform/) | 基盤 | 全エージェント横断の分析基盤（OTel + Phoenix + JSONL + DuckDB + dbt、ローカル版のみ） | — (基盤側、Phase 1-4 完了 / Phase 5+ 未着手) |
 | [`llm-client`](./llm-client/) | 基盤 | 薄い Anthropic Claude API ラッパ (prompt caching / 複数ターン / on_call フック)。モノレポ横断で再利用 | — (基盤側) |
+| [`fujisawa-platform`](./fujisawa-platform/) | 基盤 | 藤沢市 HP / PDF を一次ソースとする共通基盤ライブラリ（クロール / PDF 解析 / pgvector ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL）。`fujisawa-info-bot` / `fujisawa-hokatsu-agent` から path dep で参照される想定 (Phase 4-2h step 3 実装済) | — (基盤側) |
 | [`agent-system-1`](./agent-system-1/) | ダミー | 雛形（Research Assistant スキル用スケルトン） | — |
 | [`agent-system-2`](./agent-system-2/) | ダミー | 雛形（Code Helper スキル用スケルトン） | — |
 
@@ -136,6 +138,45 @@ Money Forward ME の家計データを起点に、家族単位で30〜50年の�
 
 ---
 
+### `driving-license-bot` — 運転免許 学科試験対策 LINE Bot (Phase 0)
+
+車の運転免許（仮免・本免）の学科試験対策を行う LINE Bot。問題は LLM（Vertex AI 上の Claude）で自動生成し、**根拠条文（道路交通法）・教則ページを必ず添付** することで学習者が一次ソースに到達できる導線を担保する。
+
+> 本サービスは個人運営の学習支援ツールであり、学科試験合格を保証するものではない（公認教習所が提供するものではない）。
+
+**主な機能 (計画)**
+- **問題自動生成**: Vertex AI Claude (Question Generator / Tutor) が学科試験形式の問題を生成
+- **品質クロスチェック**: Vertex AI Gemini (Quality Reviewer) が独立に問題品質を検証する二重 LLM 構成
+- **根拠提示**: 各問題に道路交通法の該当条文 / 教則該当ページを必ず添付
+- **学習履歴管理**: Firestore（セッション・ユーザー）+ BigQuery（出題履歴・分析、`analytics-platform` と共用）
+- **教材アセット**: GCS に標識画像 / 教則 PDF / 問題プールを格納
+- **非同期処理**: LINE Webhook は即時 200 OK を返し、Cloud Tasks 経由で `agent-service` にディスパッチ
+- **法令・教則の入手方針**: `docs/DATA_SOURCES.md` に調達方針を明記
+
+**アーキテクチャ**
+
+```
+LINE Platform
+   ↓
+Cloud Run: line-bot-service (FastAPI) ─ 即時 200 OK + Cloud Tasks enqueue
+   ↓
+Cloud Run: agent-service (Claude Agent SDK + Vertex AI Claude)
+   │  全 MCP 呼び出し → security-platform/MCP Proxy 経由
+   ├──► Vertex AI: Claude (Question Generator / Tutor)
+   ├──► Vertex AI: Gemini (Quality Reviewer cross-check)
+   ├──► Firestore (セッション・ユーザー)
+   ├──► BigQuery (出題履歴・分析、analytics-platform 共用)
+   └──► GCS (標識画像・教則 PDF・問題プール)
+```
+
+**スタック**: Python 3.12 / FastAPI / Claude Agent SDK / Vertex AI (Claude + Gemini) / Cloud Run / Cloud Tasks / Firestore / BigQuery / GCS / Terraform
+
+**ステータス / ロードマップ**: Phase 0 基盤整備進行中 → Phase 1 最小デプロイ（Terraform 一発削除可）→ Phase 2 機能拡充（`docs/PHASE2_PLAN.md` に PR 分割計画）
+
+詳細: [`driving-license-bot/README.md`](./driving-license-bot/README.md) / [`driving-license-bot/docs/DESIGN.md`](./driving-license-bot/docs/DESIGN.md)
+
+---
+
 ### `security-platform` — エージェントセキュリティ基盤
 
 全エージェント共通のセキュリティ監視・防御基盤。各エージェントの MCP トラフィックをプロキシ経由に集約し、脆弱性 CVE を継続監視する。
@@ -150,6 +191,32 @@ Money Forward ME の家計データを起点に、家族単位で30〜50年の�
 **スタック**: Python 3.12 / FastAPI / SQLite / uvicorn / Node.js (MCP scan) / Promptfoo
 
 詳細: [`security-platform/README.md`](./security-platform/README.md)
+
+---
+
+### `fujisawa-platform` — 藤沢市情報の共通基盤ライブラリ
+
+藤沢市の市役所 HP / PDF を一次ソースとする **共通基盤ライブラリ**。サービス単体では起動せず、将来開発予定の 2 エージェント (`fujisawa-info-bot` / `fujisawa-hokatsu-agent`) が `pyproject.toml` の `[tool.uv.sources]` で path dep として参照する形で利用される。**クロール / PDF 解析 / ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL** を一元提供する。
+
+**主な機能**
+- **Polite クロール**: `PoliteFetcher`（rate limit 遵守 / User-Agent + 連絡先明示）、`WaybackClient`（Internet Archive バックフィル）、`parse_sitemap` / `parse_feed`
+- **PDF 解析**: `docling` ベースの構造化抽出（ETL Job 用 optional 依存）
+- **ベクトル検索**: 開発・テスト時は `InMemoryStore`、本番は Cloud SQL (Postgres) + `pgvector` の `PgvectorStore`
+- **Embedding**: `MockEmbeddingClient`（CI / 開発）/ `VertexEmbeddingClient`（本番）
+- **出典 Skill**: 回答に対する一次ソース URL / 取得日時の付与
+- **表記ゆれ吸収**: `FacilityResolver` による施設名の正規化（canonical name + aliases、スコア付き照合）
+- **ETL 差分検知**: `compute_hash` / `has_changed` / `FreshnessMetadata` で更新検知 → 差分のみ再 embedding
+- **配備**: Terraform 構成完成済 (Cloud SQL + pgvector の本番ベクトル基盤)
+
+**消費側エージェント (今後開発予定 / 未実装)**
+- **`fujisawa-info-bot`**: 藤沢市の暮らし情報を返す市民向け LINE Bot
+- **`fujisawa-hokatsu-agent`**: 保育園入所活動（保活）支援エージェント
+
+**スタック**: Python 3.12 / uv / asyncpg / pgvector / Cloud SQL (Postgres) / Vertex AI Embeddings / docling / Terraform
+
+**ステータス**: Phase 4-2h step 3 実装済（Terraform 完成、配備可能状態）
+
+設計詳細: [`docs/PROPOSALS/0003-fujisawa-platform-shared-base.md`](./docs/PROPOSALS/0003-fujisawa-platform-shared-base.md) / [`fujisawa-platform/README.md`](./fujisawa-platform/README.md)
 
 ---
 
