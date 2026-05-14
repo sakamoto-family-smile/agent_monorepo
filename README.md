@@ -12,7 +12,7 @@
 | [`hotcook-agent`](./hotcook-agent/) | 実装 | シャープ ホットクック (KN-HW24H) の食材ベース料理提案エージェント (Phase 1) | ✅ 連携済 (PR #31) |
 | [`piyolog-analytics`](./piyolog-analytics/) | 実装 | ぴよログ (育児記録) を LINE Bot 経由で取り込んで家族で横断サマリ共有 (Phase 1) | ✅ 連携済 (PR #34) |
 | [`tech-news-agent`](./tech-news-agent/) | 実装 | データ基盤領域ニュース・論文の日次 LINE 配信 + 将来 QA 検索 (Phase 1 MVP) | ✅ 連携済 (本 PR) |
-| [`driving-license-bot`](./driving-license-bot/) | 実装 | 運転免許（仮免・本免）学科試験対策 LINE Bot。LLM 生成問題に根拠条文・教則ページを必ず添付 (Phase 0 基盤整備) | ✅ 連携済 |
+| [`driving-license-bot`](./driving-license-bot/) | 実装 | 運転免許（仮免・本免）学科試験対策 LINE Bot。Vertex AI Gemini で問題を自動生成し根拠条文・教則ページを必ず添付 (Phase 0 基盤整備) | ✅ 連携済 |
 | [`security-platform`](./security-platform/) | 基盤 | 全エージェント共通のセキュリティ基盤（MCP Proxy / CVE 監視 / DLP / Red Team） | — (基盤側) |
 | [`analytics-platform`](./analytics-platform/) | 基盤 | 全エージェント横断の分析基盤（OTel + Phoenix + JSONL + DuckDB + dbt、ローカル版のみ） | — (基盤側、Phase 1-4 完了 / Phase 5+ 未着手) |
 | [`llm-client`](./llm-client/) | 基盤 | 薄い Anthropic Claude API ラッパ (prompt caching / 複数ターン / on_call フック)。モノレポ横断で再利用 | — (基盤側) |
@@ -140,13 +140,13 @@ Money Forward ME の家計データを起点に、家族単位で30〜50年の�
 
 ### `driving-license-bot` — 運転免許 学科試験対策 LINE Bot (Phase 0)
 
-車の運転免許（仮免・本免）の学科試験対策を行う LINE Bot。問題は LLM（Vertex AI 上の Claude）で自動生成し、**根拠条文（道路交通法）・教則ページを必ず添付** することで学習者が一次ソースに到達できる導線を担保する。
+車の運転免許（仮免・本免）の学科試験対策を行う LINE Bot。問題は LLM（Vertex AI 上の Gemini、設計上は将来 Claude への切替も可）で自動生成し、**根拠条文（道路交通法）・教則ページを必ず添付** することで学習者が一次ソースに到達できる導線を担保する。
 
 > 本サービスは個人運営の学習支援ツールであり、学科試験合格を保証するものではない（公認教習所が提供するものではない）。
 
 **主な機能 (計画)**
-- **問題自動生成**: Vertex AI Claude (Question Generator / Tutor) が学科試験形式の問題を生成
-- **品質クロスチェック**: Vertex AI Gemini (Quality Reviewer) が独立に問題品質を検証する二重 LLM 構成
+- **問題自動生成**: Vertex AI Gemini (Question Generator / Tutor) が学科試験形式の問題を生成。`AGENT_LLM_PROVIDER=claude` への切替も実装済（Vertex AI Marketplace で Claude が承認された環境向け）
+- **品質クロスチェック**: Vertex AI Gemini (Quality Reviewer) が独立に問題品質を検証。Generator を Claude に切り替えれば Claude × Gemini の二重 LLM cross-check 構成になる
 - **根拠提示**: 各問題に道路交通法の該当条文 / 教則該当ページを必ず添付
 - **学習履歴管理**: Firestore（セッション・ユーザー）+ BigQuery（出題履歴・分析、`analytics-platform` と共用）
 - **教材アセット**: GCS に標識画像 / 教則 PDF / 問題プールを格納
@@ -160,16 +160,16 @@ LINE Platform
    ↓
 Cloud Run: line-bot-service (FastAPI) ─ 即時 200 OK + Cloud Tasks enqueue
    ↓
-Cloud Run: agent-service (Claude Agent SDK + Vertex AI Claude)
+Cloud Run: agent-service (Claude Agent SDK + Vertex AI)
    │  全 MCP 呼び出し → security-platform/MCP Proxy 経由
-   ├──► Vertex AI: Claude (Question Generator / Tutor)
-   ├──► Vertex AI: Gemini (Quality Reviewer cross-check)
+   ├──► Vertex AI: Gemini (Question Generator / Tutor)  ※既定。AGENT_LLM_PROVIDER で Claude に切替可
+   ├──► Vertex AI: Gemini (Quality Reviewer cross-check)  ※Generator を Claude にした場合に二重 LLM 構成
    ├──► Firestore (セッション・ユーザー)
    ├──► BigQuery (出題履歴・分析、analytics-platform 共用)
    └──► GCS (標識画像・教則 PDF・問題プール)
 ```
 
-**スタック**: Python 3.12 / FastAPI / Claude Agent SDK / Vertex AI (Claude + Gemini) / Cloud Run / Cloud Tasks / Firestore / BigQuery / GCS / Terraform
+**スタック**: Python 3.12 / FastAPI / Claude Agent SDK / Vertex AI (Gemini 既定 / Claude 切替可) / Cloud Run / Cloud Tasks / Firestore / BigQuery / GCS / Terraform
 
 **ステータス / ロードマップ**: Phase 0 基盤整備進行中 → Phase 1 最小デプロイ（Terraform 一発削除可）→ Phase 2 機能拡充（`docs/PHASE2_PLAN.md` に PR 分割計画）
 
