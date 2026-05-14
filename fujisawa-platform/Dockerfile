@@ -62,8 +62,15 @@ FROM python:3.12-slim-bookworm AS runtime
 # tini: signal handling (Cloud Run Job の SIGTERM を Python に届ける)
 # ca-certificates: HTTPS 検証 (httpx + Wayback + Vertex)
 # curl: 健全性確認 (Cloud Run Job 自身は不要だが docker run smoke で便利)
+# libxcb1 / libgl1 / libgomp1 / libglib2.0-0:
+#   Docling PDF pipeline (Pillow + torch + pdfium) が動的 link する system libs。
+#   未導入だと `ImportError: libxcb.so.1: cannot open shared object file` 等で
+#   wayback_backfill / biyearly_admission など PDF parse 系 Job が落ちる
+#   (2026-05-13 実 Cloud Run Job 実行で発覚)。
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends tini ca-certificates curl && \
+    apt-get install -y --no-install-recommends \
+        tini ca-certificates curl \
+        libxcb1 libgl1 libgomp1 libglib2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \
