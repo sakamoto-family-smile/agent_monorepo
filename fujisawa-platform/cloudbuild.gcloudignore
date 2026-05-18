@@ -1,0 +1,72 @@
+# fujisawa-platform Cloud Build 専用 ignore file。
+# build context はリポジトリルートだが、 fujisawa-platform image は他 agent
+# (driving-license-bot / analytics-platform / piyolog-analytics 等) に path
+# dep を持たないため、 これらは upload 不要。
+#
+# 利用方法 (リポジトリルートから):
+#   gcloud builds submit \
+#     --config=fujisawa-platform/cloudbuild.yaml \
+#     --ignore-file=fujisawa-platform/cloudbuild.gcloudignore \
+#     .
+#
+# monorepo root の `.gcloudignore` は driving-license-bot 用に tune されており、
+# fujisawa では別 file を `--ignore-file` で明示する。
+
+# VCS
+.git/
+.github/
+.gitignore
+.gitleaks.toml
+
+# Python build artifacts
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.venv/
+**/venv/
+**/*.egg-info/
+
+# Terraform
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/terraform.tfvars
+**/.env*
+**/.env.secrets
+
+# OS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Data fixtures
+**/data/raw/
+**/data/uploaded/
+**/data/payloads/
+**/data/dead_letter/
+**/data/analytics.duckdb*
+
+# 他 agent (fujisawa image には不要)
+agent-system-1/
+agent-system-2/
+analytics-platform/
+driving-license-bot/
+hotcook-agent/
+kanie-lab-agent/
+lifeplanner-agent/
+llm-client/
+piyolog-analytics/
+security-platform/
+stock-analysis-agent/
+tech-news-agent/
+
+# repo root の docs / 設定 (image には不要)
+LICENSE
+README.md
+docs/
