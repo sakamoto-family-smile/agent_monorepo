@@ -461,8 +461,8 @@ async def run_<job_name>(*, ..., archive: PdfArchive | None = None, ...):
 
 ### 9.0 設計判断
 
-- **`facilities` は全削除 → 全 INSERT を 1 トランザクション**: proposal 0003 §4.5.5 の方針。半年に 1 回しか走らず、件数が ~160 と小さいため UPSERT 並列より単純で安全。consumer 側は SELECT 失敗時に tenacity retry で吸収する想定。
-- **facility_id は `<type-slug>-<sha256[:12]>`**: 名前ベースの決定的 ID。半年ごとに replace_all しても同じ施設には同じ ID が返るので、`vacancy_snapshots.facility_id REFERENCES facilities` の FK が壊れない。例: `kouritsu-3a4b5c6d7e8f` (公立保育所 / 藤沢保育園)。
+- **`facilities` は UPSERT + 条件付き DELETE を 1 トランザクション**: proposal 0003 §4.5.5 の方針 (2026-05-18 改訂)。 旧設計の「全削除 → 全 INSERT」は admission_results 等が FK 参照を持つようになると `ForeignKeyViolationError` で fail するため、 `INSERT ... ON CONFLICT DO UPDATE` で incoming を UPSERT し、 incoming に無く下流 4 テーブル (`admission_results` / `vacancy_snapshots` / `application_snapshots` / `competition_stats`) から参照も無い orphan のみ DELETE する設計に変更。 atomicity は単一トランザクションで維持。 consumer 側は SELECT 失敗時に tenacity retry で吸収する想定。
+- **facility_id は `<type-slug>-<sha256[:12]>`**: 名前ベースの決定的 ID。半年ごとに UPSERT しても同じ施設には同じ ID が返るので、`vacancy_snapshots.facility_id REFERENCES facilities` の FK が壊れない。例: `kouritsu-3a4b5c6d7e8f` (公立保育所 / 藤沢保育園)。 この stable ID 設計があるため UPSERT が成立する (DELETE → INSERT は不要)。
 - **HTML テーブル抽出は BeautifulSoup 単独で完結**: 調査ノート §A4-3 では `pandas.read_html` + BS4 の 2 段だったが、リンク URL を別途 BS4 で取り直すなら最初から BS4 で `<th>` / `<td>` を見れば十分。pandas 依存を避け、`_html_table.py` 1 ファイルで完結させた。
 - **認可テーブル 5 種は HTML 内の出現順で type を割当**: `_AUTHORIZED_TABLE_TYPES = ["公立保育所", "法人等保育所", "認定こども園", "小規模保育事業", "家庭的保育事業"]`。HTML 構造が変わってテーブルが減った場合は `zip(strict=False)` で parsable な範囲だけ処理する fallback。
 - **認可外の facility_type は施設名末尾の括弧から抽出**: 「A 保育園 (藤沢型 A 型)」→ name="A 保育園", facility_type="藤沢型 A 型"。括弧無しは "認可外保育施設" にフォールバック。
@@ -472,7 +472,7 @@ async def run_<job_name>(*, ..., archive: PdfArchive | None = None, ...):
 
 | メソッド | 仕様 |
 |---|---|
-| `replace_all(records)` | `async with conn.transaction(): DELETE → INSERT × N`。空 list でも DELETE は実行 (古いマスタを残さない) |
+| `replace_all(records)` | `async with conn.transaction(): INSERT ... ON CONFLICT (facility_id) DO UPDATE × N → DELETE WHERE facility_id != ALL($1) AND NOT EXISTS (下流 4 テーブルへの参照)`。空 list でも条件付き DELETE は走る (orphan 陳腐化対応) |
 | `count()` | `SELECT COUNT(*) FROM facilities` (smoke / 監視用) |
 | 引数 jsonb | `aliases` は `json.dumps(..., ensure_ascii=False)` で `$10::jsonb` バインド (asyncpg は文字列を json型に渡せる) |
 

@@ -418,8 +418,16 @@ ETL の実行中に消費者エージェントが SELECT すると中間状態�
 - **`pages`** (週次フルクロール): `version` カラムを追加し、ETL は新 version で `INSERT`、
   完了後に view の `WHERE version = $latest` を切り替える blue-green 方式 (Phase 6 で実装、
   それまでは「古い行が混在」を許容)
-- **`facilities`** (半年次、頻度低): 全削除 → 全 INSERT を 1 トランザクションで。
-  消費者側は SELECT 失敗 → tenacity retry で吸収
+- **`facilities`** (半年次、頻度低): **UPSERT + 条件付き DELETE** を 1 トランザクションで。
+  - `INSERT ... ON CONFLICT (facility_id) DO UPDATE SET ...` で incoming を UPSERT
+  - `incoming` に無く、 下流 4 テーブル (`admission_results` / `vacancy_snapshots` /
+    `application_snapshots` / `competition_stats`) からも参照されていない facility
+    のみ DELETE
+  - 旧設計 (一律 DELETE → INSERT) は FK 参照を持つ admission_results 等が登場した
+    時点で `ForeignKeyViolationError` で fail する (2026-05-18 実 GCP 検証で発覚)。
+    facility_id は `slugify_facility_id(type, name)` で stable hash なため UPSERT
+    で十分という方針に修正
+  - 消費者側は SELECT 失敗 → tenacity retry で吸収 (atomicity は変わらず維持)
 
 #### 4.5.6 ETL 失敗時の handling
 
@@ -576,3 +584,4 @@ env なし。consumer 側で `from fujisawa_platform import ...` するだけで
 |---|---|---|
 | 2026-05-09 | Draft | 初稿 (本 PR) |
 | 2026-05-09 | Draft 改訂 | レビュー回答を反映: §4.1 アーキ図に Read-Only Path / Write Path の分離を明記、§4.5 を新設 (アクセス経路と ETL 投入タイミングを詳細化)、§4.4 に `etl/` ディレクトリ追加、§4.8 に ETL 個別有効化 env を追加 |
+| 2026-05-18 | 設計修正 | §4.5.5 の `facilities` 投入戦略を「全削除 → 全 INSERT」から「UPSERT + 条件付き DELETE」に変更。 旧設計は admission_results 等の FK 参照が登場すると `ForeignKeyViolationError` で fail することが実 GCP 検証で発覚 (R4 backfill 178 行 → half_yearly_facility 再実行時)。 facility_id が `slugify_facility_id` で stable hash 化済のため UPSERT で十分。 incoming に無く下流参照も無い orphan のみ DELETE して陳腐化対応。 atomicity 維持 (1 トランザクション) は変わらず。 |
