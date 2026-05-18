@@ -152,20 +152,34 @@ Cloud Run Job 側は `FUJISAWA_ETL_DB_PASSWORD` 等を Secret Manager の `lates
 
 `terraform apply` 後、`docker-asia-northeast1.pkg.dev/<project-id>/fujisawa-etl` リポジトリが作成される。
 
-### 6.2 イメージ build (リポジトリルートから)
+### 6.2 イメージ build + push (推奨: Cloud Build)
+
+リポジトリルートから:
 
 ```bash
-DOCKER_BUILDKIT=1 docker build \
-    -f fujisawa-platform/Dockerfile \
-    -t asia-northeast1-docker.pkg.dev/<project-id>/fujisawa-etl/fujisawa-etl:$(git rev-parse --short HEAD) \
+gcloud builds submit \
+    --config=fujisawa-platform/cloudbuild.yaml \
+    --ignore-file=fujisawa-platform/cloudbuild.gcloudignore \
+    --substitutions=_SHA=$(git rev-parse --short=7 HEAD) \
     .
 ```
 
-### 6.3 push
+- 同梱の `cloudbuild.gcloudignore` で他 agent ディレクトリを除外しており、 upload は数 MiB 程度に収まる
+- ローカル docker が古い場合の buildx frontend pull 詰まりを回避できる
+- 完了すると `asia-northeast1-docker.pkg.dev/<project-id>/fujisawa-etl/fujisawa-etl:<sha>` が push される
+
+### 6.2b (代替) ローカル docker build + push
+
+ローカル docker が新しく cross build できる環境ならこちらでも可。
 
 ```bash
 gcloud auth configure-docker asia-northeast1-docker.pkg.dev
-docker push asia-northeast1-docker.pkg.dev/<project-id>/fujisawa-etl/fujisawa-etl:<sha>
+DOCKER_BUILDKIT=1 docker buildx build \
+    --platform linux/amd64 \
+    -f fujisawa-platform/Dockerfile \
+    -t asia-northeast1-docker.pkg.dev/<project-id>/fujisawa-etl/fujisawa-etl:$(git rev-parse --short=7 HEAD) \
+    --push \
+    .
 ```
 
 ### 6.4 Cloud Run Job を新 image に更新
