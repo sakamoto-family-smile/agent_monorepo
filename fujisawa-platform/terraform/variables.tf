@@ -93,8 +93,8 @@ variable "etl_job_cpu" {
 
 variable "etl_job_memory" {
   type        = string
-  description = "Cloud Run Job memory。yearly_navi (Docling) のメモリ要件で 2Gi 確保。"
-  default     = "2Gi"
+  description = "Cloud Run Job memory。Docling pipeline (rapidocr + tableformer + layout-heron 同時 load) で 2Gi だと OOM (exit 137) するため 4Gi 確保。 2026-05-14 実 GCP 実行で wayback_backfill が 2Gi で OOM、 手動 4Gi bump で復旧確認済。"
+  default     = "4Gi"
 }
 
 variable "etl_job_task_timeout_seconds" {
@@ -117,14 +117,14 @@ variable "etl_sitemap_url" {
 
 variable "etl_authorized_facilities_url" {
   type        = string
-  description = "half_yearly_facility_etl の認可施設一覧 HTML URL。"
-  default     = ""
+  description = "half_yearly_facility_etl の認可施設一覧 HTML URL (env: FUJISAWA_ETL_AUTHORIZED_FACILITIES_URL)。 2026-05-15 sitemap 探索で確定。"
+  default     = "https://www.city.fujisawa.kanagawa.jp/hoiku/kenko/kosodate/hoikuen/ninka-ichiran.html"
 }
 
 variable "etl_unauthorized_facilities_url" {
   type        = string
-  description = "half_yearly_facility_etl の認可外施設一覧 HTML URL。"
-  default     = ""
+  description = "half_yearly_facility_etl の認可外施設一覧 HTML URL (env: FUJISAWA_ETL_UNAUTHORIZED_FACILITIES_URL)。 2026-05-15 sitemap 探索で確定。"
+  default     = "https://www.city.fujisawa.kanagawa.jp/hoiku/kenko/kosodate/hoikuen/shisetsu.html"
 }
 
 variable "etl_navi_pdf_url" {
