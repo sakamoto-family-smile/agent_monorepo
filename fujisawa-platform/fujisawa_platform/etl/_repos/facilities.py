@@ -46,14 +46,24 @@ class FacilitiesRepo:
         self._pool = pool
 
     async def replace_all(self, records: list[FacilityRecord]) -> int:
-        """全件を新しいリストで置き換える (DELETE + INSERT を 1 トランザクション)。
+        """incoming list で `facilities` テーブルを更新する (UPSERT + 条件付き DELETE)。
+
+        旧実装は `DELETE FROM facilities` + 一括 INSERT だったが、 admission_results
+        等の下流テーブルが FK 参照を持つようになると DELETE が
+        ForeignKeyViolationError で fail する。 facility_id は
+        `slugify_facility_id(type, name)` で stable なので、 incoming と既存で同じ
+        ID なら UPDATE、 新規なら INSERT、 incoming に無く下流参照も無い既存は
+        DELETE、 という UPSERT + 条件付き DELETE で再設計する。
+
+        単一トランザクションで実行することで部分更新を防ぐ点は変わらない。
 
         Returns:
-            INSERT した件数。空 list を渡した場合は 0 (DELETE のみ実行される)。
+            UPSERT した件数 (= len(records))。 削除件数は含まない。
         """
+        incoming_ids = [r.facility_id for r in records]
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("DELETE FROM facilities")
+                # まず incoming を UPSERT (facility_id が一致すれば UPDATE)
                 for record in records:
                     await conn.execute(
                         """
@@ -63,6 +73,21 @@ class FacilitiesRepo:
                             aliases, lat, lng, source_url, as_of, schema_version
                         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
                                   $10::jsonb, $11, $12, $13, $14, $15)
+                        ON CONFLICT (facility_id) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            facility_type = EXCLUDED.facility_type,
+                            address = EXCLUDED.address,
+                            phone = EXCLUDED.phone,
+                            capacity = EXCLUDED.capacity,
+                            nearest_station = EXCLUDED.nearest_station,
+                            walk_minutes = EXCLUDED.walk_minutes,
+                            official_url = EXCLUDED.official_url,
+                            aliases = EXCLUDED.aliases,
+                            lat = EXCLUDED.lat,
+                            lng = EXCLUDED.lng,
+                            source_url = EXCLUDED.source_url,
+                            as_of = EXCLUDED.as_of,
+                            schema_version = EXCLUDED.schema_version
                         """,
                         record.facility_id,
                         record.name,
@@ -80,6 +105,33 @@ class FacilitiesRepo:
                         record.as_of,
                         record.schema_version,
                     )
+
+                # incoming に無く、 下流 FK 参照も持たない facility のみ DELETE。
+                # FK 参照がある「閉園扱い」 facility は残し、 過去 admission_results
+                # 等の整合性を保つ。
+                await conn.execute(
+                    """
+                    DELETE FROM facilities f
+                    WHERE f.facility_id != ALL($1::text[])
+                      AND NOT EXISTS (
+                          SELECT 1 FROM admission_results ar
+                          WHERE ar.facility_id = f.facility_id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM vacancy_snapshots vs
+                          WHERE vs.facility_id = f.facility_id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM application_snapshots aps
+                          WHERE aps.facility_id = f.facility_id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM competition_stats cs
+                          WHERE cs.facility_id = f.facility_id
+                      )
+                    """,
+                    incoming_ids,
+                )
         return len(records)
 
     async def count(self) -> int:
