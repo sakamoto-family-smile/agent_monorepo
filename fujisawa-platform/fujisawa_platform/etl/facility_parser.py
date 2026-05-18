@@ -17,6 +17,7 @@ from datetime import datetime
 
 from fujisawa_platform.etl._html_table import HtmlTable
 from fujisawa_platform.etl._repos.facilities import FacilityRecord
+from fujisawa_platform.etl.facility_aliases import R4_FACILITY_ALIASES
 
 # 認可の facility_type に対応する slug prefix。
 # slugify_facility_id() で facility_id 衝突を防ぎつつ可読性も維持する。
@@ -95,6 +96,7 @@ def parse_authorized_table(
                 address=address,
                 phone=phone,
                 official_url=official_url,
+                aliases=R4_FACILITY_ALIASES.get(name, []),
                 source_url=source_url,
                 as_of=as_of,
             )
@@ -137,6 +139,7 @@ def parse_unauthorized_table(
                 capacity=capacity,
                 nearest_station=station,
                 walk_minutes=minutes,
+                aliases=R4_FACILITY_ALIASES.get(name, []),
                 source_url=source_url,
                 as_of=as_of,
             )

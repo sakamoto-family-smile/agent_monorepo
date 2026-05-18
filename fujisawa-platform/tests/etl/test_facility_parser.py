@@ -215,3 +215,65 @@ class TestParseUnauthorizedTable:
         )
         records = parse_unauthorized_table(table=table, source_url=_UNAUTHORIZED_URL, as_of=_NOW)
         assert records[0].facility_type == "認可外保育施設"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# alias merge (R4_FACILITY_ALIASES)
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestParserMergesR4Aliases:
+    """`facility_parser` が `R4_FACILITY_ALIASES` から alias を merge することを担保。
+
+    本番 DB の facilities テーブルは `FacilitiesRepo.replace_all` で半年に 1 回
+    全件入替されるため、 SQL UPDATE で alias を入れても消える。 parser がレコード
+    生成時に alias を merge する設計を保つことが、 wayback_backfill 等の resolver
+    で表記揺れ救済を持続させる前提となる。
+    """
+
+    def test_authorized_record_gets_alias_from_r4_dict(self) -> None:
+        from fujisawa_platform.etl.facility_aliases import R4_FACILITY_ALIASES
+
+        # R4_FACILITY_ALIASES に登録されている canonical 名を 1 つ採用
+        canonical = "まなびの森　湘南台もりのこ保育園"
+        assert canonical in R4_FACILITY_ALIASES, "fixture invariant"
+
+        table = HtmlTable(
+            headers=["施設名", "所在地番", "電話番号"],
+            rows=[[canonical, "藤沢市湘南台 X", "0466-00-0000"]],
+            row_links=[{}],
+        )
+        records = parse_authorized_table(
+            table=table, facility_type="法人等保育所", source_url=_AUTHORIZED_URL, as_of=_NOW
+        )
+        assert len(records) == 1
+        assert records[0].aliases == R4_FACILITY_ALIASES[canonical]
+
+    def test_unauthorized_record_gets_alias_from_r4_dict(self) -> None:
+        from fujisawa_platform.etl.facility_aliases import R4_FACILITY_ALIASES
+
+        # 認可外で alias 候補がある canonical 名を使う (= キディ系)
+        canonical = "キディ湘南C-X"
+        assert canonical in R4_FACILITY_ALIASES, "fixture invariant"
+
+        table = HtmlTable(
+            headers=["施設名", "所在地", "電話番号", "定員"],
+            rows=[[canonical, "藤沢市湘南台 Y", "0466-00-0001", "40"]],
+            row_links=[{}],
+        )
+        records = parse_unauthorized_table(
+            table=table, source_url=_UNAUTHORIZED_URL, as_of=_NOW
+        )
+        assert len(records) == 1
+        assert records[0].aliases == R4_FACILITY_ALIASES[canonical]
+
+    def test_record_without_alias_mapping_has_empty_aliases(self) -> None:
+        table = HtmlTable(
+            headers=["施設名", "所在地番", "電話番号"],
+            rows=[["架空 alias 未登録園", "藤沢市 Z", "0466-00-0002"]],
+            row_links=[{}],
+        )
+        records = parse_authorized_table(
+            table=table, facility_type="法人等保育所", source_url=_AUTHORIZED_URL, as_of=_NOW
+        )
+        assert records[0].aliases == []
