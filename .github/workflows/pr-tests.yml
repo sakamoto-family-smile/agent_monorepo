@@ -20,6 +20,7 @@ jobs:
       llm_client:           ${{ steps.detect.outputs.llm_client }}
       analytics_platform:   ${{ steps.detect.outputs.analytics_platform }}
       driving_license_bot:  ${{ steps.detect.outputs.driving_license_bot }}
+      fujisawa_platform:    ${{ steps.detect.outputs.fujisawa_platform }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -90,6 +91,12 @@ jobs:
             echo "driving_license_bot=true" >> "$GITHUB_OUTPUT"
           else
             echo "driving_license_bot=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -q '^fujisawa-platform/'; then
+            echo "fujisawa_platform=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "fujisawa_platform=false" >> "$GITHUB_OUTPUT"
           fi
 
   # ── security-platform ──────────────────────────────────────────────────────
@@ -715,3 +722,79 @@ jobs:
           # exit 0 = no changes / exit 2 = changes (with -detailed-exitcode); ここでは out=tfplan.out
           # を渡しているので exit 0 が成功、その他は失敗扱い。
           exit 1
+
+  # ── fujisawa-platform ─────────────────────────────────────────────────────
+  test-fujisawa-platform:
+    name: Test / fujisawa-platform
+    needs: detect-changes
+    if: needs.detect-changes.outputs.fujisawa_platform == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fujisawa-platform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        # 重い ML extras (pdf=docling, vertex, pgvector, gcs) を入れず default のみ。
+        # 本 CI は parser / ETL framework の unit test を主目的とする。
+        # docling を必要とする統合 test は別途 Cloud Build 側で smoke する設計。
+        run: uv sync --dev
+
+      - name: Run ruff
+        run: uv run ruff check fujisawa_platform tests
+
+      - name: Run tests
+        run: |
+          uv run pytest tests/ \
+            --tb=short -v --no-header
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-fujisawa-platform
+          path: fujisawa-platform/.pytest_cache/
+          retention-days: 7
+
+  # ── fujisawa-platform Terraform validate / fmt（GCP 認証なし） ─────────────
+  terraform-fujisawa-platform:
+    name: Terraform / fujisawa-platform
+    needs: detect-changes
+    if: needs.detect-changes.outputs.fujisawa_platform == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fujisawa-platform/terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Terraform fmt check
+        run: terraform fmt -check -recursive -diff
+
+      - name: Terraform init (no backend)
+        run: terraform init -backend=false -input=false
+
+      - name: Terraform validate
+        run: terraform validate -no-color
+        # NOTE: WIF 認証込みの `terraform plan` ジョブは Phase 4-2h step 4
+        #       (本 CI 拡張) では未対応。 driving-license-bot 用 WIF / SA は
+        #       fujisawa の tfstate bucket をスコープに含めていないため、
+        #       fujisawa 側で別 SA / wif.tf を切る別 PR で対応する。
+
