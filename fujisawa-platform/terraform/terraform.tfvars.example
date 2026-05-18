@@ -35,16 +35,19 @@ vertex_location = "us-central1"
 # 例: "asia-northeast1-docker.pkg.dev/sakamoto-family-agent/fujisawa-etl/fujisawa-etl:<sha>"
 etl_image = ""
 
-# Job スペック (yearly_navi の Docling で 2Gi 必要なので余裕を持って 2Gi)
+# Job スペック
+# memory は Docling pipeline (rapidocr + tableformer + layout-heron 同時 load) で
+# 2Gi だと OOM (exit 137) するため 4Gi 確保。 variables.tf の default も "4Gi"。
 etl_job_cpu                  = "1"
-etl_job_memory               = "2Gi"
+etl_job_memory               = "4Gi"
 etl_job_task_timeout_seconds = 5400 # 90 分 (weekly_crawl の 1,100 URL × 3s 想定)
 etl_job_max_retries          = 0    # run_etl_job ラッパーで fail-fast 制御
 
 # Job ごとの起点 URL / 年度
+# facility 系 URL は 2026-05-15 sitemap 探索で確定済。 variables.tf に default あり。
 etl_sitemap_url                 = "https://www.city.fujisawa.kanagawa.jp/sitemap.xml"
-etl_authorized_facilities_url   = "" # 例: "https://www.city.fujisawa.kanagawa.jp/.../ninka.html"
-etl_unauthorized_facilities_url = "" # 例: "https://www.city.fujisawa.kanagawa.jp/.../ninkagai.html"
+etl_authorized_facilities_url   = "https://www.city.fujisawa.kanagawa.jp/hoiku/kenko/kosodate/hoikuen/ninka-ichiran.html"
+etl_unauthorized_facilities_url = "https://www.city.fujisawa.kanagawa.jp/hoiku/kenko/kosodate/hoikuen/shisetsu.html"
 etl_navi_pdf_url                = "" # 例: "https://www.city.fujisawa.kanagawa.jp/.../r8_navi0129.pdf"
 etl_admission_pdf_url_1st       = "" # 例: "https://www.city.fujisawa.kanagawa.jp/.../r8-admission-1st.pdf"
 etl_admission_pdf_url_2nd       = ""
