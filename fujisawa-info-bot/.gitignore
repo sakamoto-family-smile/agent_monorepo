@@ -1,0 +1,22 @@
+# Python build / cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# uv / venv
+.venv/
+venv/
+*.egg-info/
+
+# 個人 env / secrets
+.env
+.env.local
+
+# Terraform local files (Phase 7 で導入時)
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
