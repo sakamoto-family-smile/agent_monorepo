@@ -1,0 +1,85 @@
+[project]
+name = "fujisawa-info-bot"
+version = "0.1.0"
+description = "藤沢市公式 HP を一次ソースとする LINE Bot エージェント (RAG + 出典 URL 付き回答 + 緊急情報 push)"
+requires-python = ">=3.12"
+# Phase 0 (雛形) 時点では FastAPI / config / HTTP / 軽量 utility のみ。
+# LangGraph / line-bot-sdk / Pub/Sub / Cloud Tasks / Vertex AI 等は Phase 1+
+# で各 Phase の必要時に追加していく。
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.4.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.27.0",
+    # path dep: fujisawa-platform (proposal 0003) の knowledge_base / crawler /
+    # skills / pdf_pipeline を Phase 1+ で利用する。 Phase 0 では import 済の
+    # 体裁を整えるためだけに依存宣言だけ入れておく。
+    "fujisawa-platform",
+]
+
+[project.optional-dependencies]
+# Phase 1 (LINE Webhook + 単純 reply) で有効化する想定。
+# line-bot-sdk v3+ は line-bot-sdk[messaging]/[insights] でサブモジュールが分かれる。
+line = [
+    "line-bot-sdk>=3.11.0",
+]
+
+# Phase 2 (RAG + LangGraph Supervisor) で有効化。
+# Vertex AI 経由の Gemini / Anthropic Claude を利用する想定。
+langgraph = [
+    "langgraph>=0.2.0",
+    "langchain-google-vertexai>=2.0.0",
+    "anthropic[vertex]>=0.40.0",
+]
+
+# Phase 3 (非同期 reply) / Phase 6 (Emergency push) で有効化。
+async-pipeline = [
+    "google-cloud-pubsub>=2.20.0",
+    "google-cloud-tasks>=2.16.0",
+]
+
+# Phase 6 (RSS poll) で有効化。
+rss = [
+    "feedparser>=6.0.0",
+]
+
+# Firestore (Phase 1 で users / sessions、 Phase 6 で emergency_seen)
+firestore = [
+    "google-cloud-firestore>=2.16.0",
+]
+
+[tool.uv.sources]
+# monorepo 内 path dep。 Cloud Run image build 時もリポジトリルートを context
+# にする (driving-license-bot / fujisawa-platform と同パターン)。
+fujisawa-platform = { path = "../fujisawa-platform" }
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "anyio[trio]>=4.4.0",
+    "httpx>=0.27.0",
+    "respx>=0.21.0",
+    "ruff>=0.6.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
