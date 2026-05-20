@@ -1,13 +1,13 @@
-"""POST /webhook — LINE Messaging API のコールバック (Phase 1: echo reply)。
+"""POST /webhook — LINE Messaging API のコールバック。
 
-Phase 1 の挙動:
+Phase 2 の挙動:
 - 即時 200 OK を返す
 - 署名検証失敗で 401
 - LINE_* env 未設定で 503
-- text MessageEvent には同じ本文を echo reply
-- それ以外のイベント (follow / sticker / image / etc.) は今は無視 (200)
+- text MessageEvent は LangGraph (Intent → RAG) を実行して結果を reply
+- それ以外のイベント (follow / sticker / image / etc.) は無視 (200)
 
-Phase 2 以降で Intent Agent / RAG Agent が呼ばれる流れに置き換わる。
+Phase 3 で Pub/Sub 経由の非同期化に置き換える (LINE 3 秒タイムアウト対策)。
 """
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ import logging
 from fastapi import APIRouter, Header, HTTPException, Request, status
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
-from app.line_client import InvalidSignatureError, get_line_bot_client
+from app.graph import GraphDependencies, run_graph
+from app.line_client import InvalidSignatureError, LineBotClient, get_line_bot_client
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,6 @@ async def webhook(
     """LINE Platform からの webhook を受け取り、 即時 200 を返す。"""
     client = get_line_bot_client()
     if client is None:
-        # LINE_* env 未設定 (Phase 0 状態 / 開発前)。 503 で運用に気づける状態にする。
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="LINE channel is not configured",
@@ -46,17 +46,22 @@ async def webhook(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid signature"
         ) from None
 
+    deps: GraphDependencies = request.app.state.graph_deps
     for event in events:
         try:
-            _handle_event(client, event)
+            await _handle_event(client, event, deps)
         except Exception:  # pragma: no cover - 個別 event 失敗は LINE 側を blocking しない
             logger.exception("error while handling LINE event: %r", event)
 
     return {"status": "ok"}
 
 
-def _handle_event(client, event) -> None:
-    """Phase 1: text MessageEvent のみ echo reply。 他は無視。"""
+async def _handle_event(
+    client: LineBotClient,
+    event: object,
+    deps: GraphDependencies,
+) -> None:
+    """Phase 2: text MessageEvent → LangGraph 実行 → reply。 他は無視。"""
     if not isinstance(event, MessageEvent):
         return
     message = event.message
@@ -65,7 +70,9 @@ def _handle_event(client, event) -> None:
     reply_token = event.reply_token
     if not reply_token:
         return
-    client.reply_text(reply_token, [message.text])
+    user_id = event.source.user_id if event.source else "unknown"
+    answer = await run_graph(deps=deps, user_id=user_id, query=message.text)
+    client.reply_text(reply_token, [answer])
 
 
 __all__ = ["router"]
