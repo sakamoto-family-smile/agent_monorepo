@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Version** | 0.1 |
-| **最終更新** | 2026-05-19 |
+| **最終更新** | 2026-05-20 |
 | **Status** | Draft |
 | **Owner** | @kurama554101 |
 | **README** | [`../README.md`](../README.md) |
@@ -14,6 +14,7 @@
 | 日付 | Version | 変更内容 |
 |---|---|---|
 | 2026-05-19 | 0.1 | 初版 (Phase 0 雛形と同時に作成) |
+| 2026-05-20 | 0.2 | Phase 2 (LangGraph Supervisor + Intent + RAG Agent) 確定 |
 
 ---
 
@@ -172,10 +173,158 @@ ngrok http 8080
 
 ---
 
-## 4. Phase 2 以降の予定
+## 4. Phase 2 (LangGraph Supervisor + Intent + RAG Agent) で確定した詳細
+
+### 4.0 設計判断
+
+- **LLM provider は Vertex Anthropic Claude を採用** (proposal §4.5 の Gemini default から逸脱)
+  - 理由: 共有パッケージ `llm-client` (`VertexAnthropicLLMClient`) が完備されており、 即動かせる
+  - 影響: コスト試算 (proposal §5.4) を Anthropic Vertex の単価で再評価する必要あり (follow-up backlog)
+  - Gemini 対応は `llm-client` 拡張 PR で後追い予定 ([[project_fujisawa_info_bot_followup]] に記録)
+- **同期 graph 実行を採用** (Phase 2 範囲)
+  - 理由: Pub/Sub 統合 (Phase 3) を別 PR にする方針。 Phase 2 PR を小さく保つ
+  - 制約: LINE webhook 3 秒タイムアウトに対し、 mock + InMemoryStore なら問題なし。 本番 (vertex_anthropic + pgvector) は Phase 7 デプロイ時に実測予定
+- **LangGraph を Phase 2 から採用** (proposal 準拠)
+  - 理由: Phase 4 (Crawl) 追加時に branch を増やすだけで済むよう、 雛形を早めに整える
+  - 範囲: `classify → conditional → rag | out_of_scope → END` の 3 node 構成 (intent + rag + out_of_scope)
+- **Skill prompt は markdown を `load_skill()` で動的読込**
+  - 理由: 人間が編集する prompt を python 文字列に埋めると編集体験が悪い。 `app/skills/*.md` を Skill としてキャッシュ付きで読込む
+  - `category_routing.md` が Phase 2 唯一の Skill。 Phase 4+ で `flex_message.md` / `feedback_response.md` 等を追加
+- **MockLLM + InMemoryStore + MockEmbedding を CI default に**
+  - 理由: 本番 vendor 呼出をテストに混ぜない (driving-license-bot / fujisawa-platform と同パターン)
+  - 副作用: `settings.llm_provider=mock` + `kb_store_mode=inmemory` + `embedding_provider=mock` のとき env を 1 つも設定せず動く
+- **出典フッタは LLM 任せにしない**
+  - 理由: 「公式 HP の出典 URL を必ず付ける」は本 Bot の核機能であり、 LLM 出力 verify を最小化したい
+  - 実装: `rag.py` の `_format_citations()` が `SearchHit` の URL を最大 3 件 (重複除外) で末尾に固定形式で付与
+
+### 4.1 ディレクトリ構成 (Phase 2 で追加)
+
+```
+app/
+├── llm.py                    # build_llm_client (mock | vertex_anthropic)
+├── kb.py                     # build_knowledge_backend (inmemory | pgvector)
+├── graph/
+│   ├── __init__.py           # public API: build_graph / run_graph / InfoBotState / Intent / GraphDependencies
+│   ├── state.py              # InfoBotState TypedDict (total=False)
+│   ├── supervisor.py         # LangGraph build_graph + run_graph + GraphDependencies
+│   └── agents/
+│       ├── intent.py         # classify_intent → IntentResult
+│       └── rag.py            # answer_with_rag → (text, hits)
+├── skills/
+│   ├── __init__.py           # load_skill(name) — lru_cache
+│   └── category_routing.md   # 7 カテゴリ分類 Skill
+```
+
+### 4.2 `app/config.py` 追加項目
+
+| 変数 | 型 / default | 用途 |
+|---|---|---|
+| `LLM_PROVIDER` | `mock` \| `vertex_anthropic` (default `mock`) | LLM 実装の切替 |
+| `GCP_PROJECT_ID` | str | vertex_anthropic / vertex embedding 時必須 |
+| `VERTEX_REGION` | str (default `us-east5`) | Claude が host されている region |
+| `ANTHROPIC_MODEL` | str (default `claude-haiku-4-5@20251001`) | Vertex 形式 |
+| `LLM_MAX_TOKENS` | int (default 1024) | max_tokens |
+| `KB_STORE_MODE` | `inmemory` \| `pgvector` (default `inmemory`) | 知識ベース実装 |
+| `EMBEDDING_PROVIDER` | `mock` \| `vertex` (default `mock`) | embedding 実装 |
+| `EMBEDDING_DIM` | int (default 768) | vertex の場合 768 固定 |
+| `CLOUD_SQL_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_DATABASE` | str | pgvector 接続情報 |
+| `RAG_ENABLED` | bool (default true) | RAG 経路 ON/OFF (Phase 2 ではまだ未使用 / Phase 3 で利用) |
+| `RAG_TOP_K` | int (default 5) | top-k 件数 |
+
+### 4.3 `app/graph/state.py` (InfoBotState)
+
+```python
+class InfoBotState(TypedDict, total=False):
+    user_id: str
+    query: str
+    intent: Literal["rag", "out_of_scope"]
+    category: str | None
+    rag_hits: list[SearchHit]
+    final_text: str
+```
+
+`total=False` により各 node が必要なキーだけ書き込めばよい。 proposal §4.4 の
+`messages` / `user_profile` / `crawl_pages` / `final_response (FlexMessage)` は
+Phase 4+ で追加。
+
+### 4.4 `app/graph/agents/intent.py`
+
+| 関数 | 入力 | 出力 |
+|---|---|---|
+| `classify_intent(query, llm)` | `str`, `LLMClient` | `IntentResult` (intent / category / confidence) |
+
+- 空 query → `out_of_scope` 固定 (LLM 呼出無し)
+- `_VALID_CATEGORIES` = `disaster, parenting, garbage, procedure, tourism, cityhall, other`
+- `other` カテゴリ + confidence ≥ 0.5 → `out_of_scope`
+- confidence < 0.5 → category None で全体検索 (RAG 救済)
+- LLM 出力に ```json ``` 等のラッパーが混入しても regex で最初の `{}` を取り出す
+- LLM 失敗 / JSON parse 失敗 → conservative に `rag + category=None + confidence=0.0`
+
+### 4.5 `app/graph/agents/rag.py`
+
+| 関数 | 入力 | 出力 |
+|---|---|---|
+| `answer_with_rag(query, embedding, store, llm, top_k, category)` | full kwargs | `(final_text, hits)` |
+
+flow:
+
+1. `embedding.embed(query)` → query_vec
+2. `store.search_pages(query_vec, top_k=, category=)` → top-k SearchHit
+3. ヒット 0 件 → `_NO_HIT_TEXT` (固定文 + コンタクトセンター案内) を返す
+4. LLM に system (`_SYSTEM_PROMPT`) + 抜粋 (最大 800 文字 × top_k 件) を渡す
+5. `_format_citations(hits)` で URL 重複除去 + 最大 3 件のフッタを付与
+6. LLM 例外時は固定の fallback 本文 + 出典フッタのみ
+
+### 4.6 `app/graph/supervisor.py`
+
+```
+START → classify → conditional ──▶ rag → END
+                              └─▶ out_of_scope → END
+```
+
+- `GraphDependencies` (LLMClient / EmbeddingClient / KnowledgeStore / top_k) を DI
+- `build_graph(deps)` で compile 済 graph を返す
+- `run_graph(deps, user_id, query)` でヘルパとして 1 ターン実行 → `final_text`
+
+### 4.7 webhook (`app/routes/line.py`) 更新
+
+- `request.app.state.graph_deps` から DI 取得
+- `_handle_event` を async 化、 text MessageEvent → `run_graph()` で graph 実行 → `client.reply_text(reply_token, [answer])`
+- 既存挙動 (503 / 401 / 非 text 無視) は維持
+
+### 4.8 `app/main.py` lifespan
+
+- startup で `build_llm_client(settings)` + `await build_knowledge_backend(settings)` を実行
+- `app.state.graph_deps = GraphDependencies(...)` / `app.state.kb_pool = backend.pool`
+- shutdown で `kb_pool.close()` (pgvector 時のみ非 None)
+
+### 4.9 テスト構成
+
+| ファイル | 件数 | 内容 |
+|---|---|---|
+| `tests/graph/test_intent.py` | ~14 | classify_intent の全分岐 (empty / valid / low conf / other / invalid / LLM 例外) |
+| `tests/graph/test_rag.py` | 7 | empty / no hit / 1 hit / 重複 URL / cap 3 / LLM 失敗 / category filter |
+| `tests/graph/test_supervisor.py` | 4 | run_graph end-to-end (空 / no data / out_of_scope / 出典付き) |
+| `tests/graph/test_factories.py` | 4 | build_llm_client / build_knowledge_backend の分岐 |
+| `tests/routes/test_line.py` | 6 | webhook (503 / 401 / no hit / 出典付き / 非 text 無視 / 複数 event) |
+
+`asyncio.run()` で seed する箇所が 1 件あるが、 test の async 関数本体ではないので副作用は限定的。
+
+### 4.10 Phase 2 で意図的に未対応にしたもの
+
+- Pub/Sub 非同期化 (Phase 3 で別 PR)
+- Firestore (sessions / feedback) — Phase 8
+- Crawl Agent (リンク追跡) — Phase 4
+- Emergency Agent + RSS poll — Phase 6
+- Vertex Gemini — `llm-client` 拡張 PR で対応予定
+- Flex Message (LINE リッチ表示) — Phase 8
+
+---
+
+## 5. Phase 3 以降の予定
 
 本ファイルは Phase ごとに節を追加していく。 各 Phase 完了 PR で:
 
-1. 該当 Phase の節を新規追加 (例: `## 4. Phase 2 (RAG + LangGraph Supervisor) で確定した詳細`)
+1. 該当 Phase の節を新規追加 (例: `## 5. Phase 3 (Pub/Sub 非同期 reply) で確定した詳細`)
 2. 設計判断 / 確定スキーマ / 関数シグネチャを記録
 3. proposal との差分があれば明示

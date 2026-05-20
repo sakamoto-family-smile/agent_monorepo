@@ -4,8 +4,8 @@
 LINE Bot エージェント。 RAG + リンク 1 階層追跡 + 緊急情報プッシュ + 多言語誘導
 を提供する。
 
-> **Status**: Phase 1 (LINE webhook + echo reply) 完了。
-> RAG / LangGraph / Emergency push は順次 Phase 2+ で実装。
+> **Status**: Phase 2 (LangGraph Supervisor + Intent + RAG Agent) 完了。
+> Pub/Sub 非同期化 / Crawl / Emergency push は順次 Phase 3+ で実装。
 
 設計詳細は [`../docs/PROPOSALS/0004-fujisawa-info-bot.md`](../docs/PROPOSALS/0004-fujisawa-info-bot.md) 参照。
 本 README は「動かす / 取り込む」観点に絞る。
@@ -81,16 +81,26 @@ proposal 0004 の設計を読んでから本 README に戻ること。 概要の
 
 ---
 
-## 2. 環境変数 (Phase 1 時点)
+## 2. 環境変数 (Phase 2 時点)
 
 `.env.example` を参照。 全変数は `FUJISAWA_INFO_BOT_` prefix。
 
 | 変数 | 必須 | 用途 |
 |---|---|---|
-| `FUJISAWA_INFO_BOT_LINE_CHANNEL_SECRET` | LINE 連携 | webhook 署名検証用 HMAC 鍵 |
-| `FUJISAWA_INFO_BOT_LINE_CHANNEL_ACCESS_TOKEN` | LINE 連携 | Reply Message API の Bearer |
+| `LINE_CHANNEL_SECRET` | LINE 連携 | webhook 署名検証用 HMAC 鍵 |
+| `LINE_CHANNEL_ACCESS_TOKEN` | LINE 連携 | Reply Message API の Bearer |
+| `LLM_PROVIDER` | optional (default `mock`) | `mock` / `vertex_anthropic` |
+| `GCP_PROJECT_ID` | `vertex_anthropic` 時必須 | Vertex AI を使う GCP project |
+| `VERTEX_REGION` | optional (default `us-east5`) | Vertex AI region |
+| `ANTHROPIC_MODEL` | optional | Vertex 形式モデル名 (例: `claude-haiku-4-5@20251001`) |
+| `KB_STORE_MODE` | optional (default `inmemory`) | `inmemory` / `pgvector` |
+| `EMBEDDING_PROVIDER` | optional (default `mock`) | `mock` / `vertex` |
+| `EMBEDDING_DIM` | optional (default `768`) | Vertex の場合 768 固定 |
+| `CLOUD_SQL_HOST` / `_USER` / `_PASSWORD` / `_DATABASE` | `pgvector` 時必須 | Cloud SQL fujisawa_kb_db への接続 |
+| `RAG_ENABLED` | optional (default `true`) | RAG 経路 ON/OFF |
+| `RAG_TOP_K` | optional (default `5`) | top-k 取得件数 |
 
-Phase 2+ で Vertex AI / Firestore / Pub/Sub 等が追加される。
+Phase 3+ で Pub/Sub / Cloud Tasks / Firestore 等が追加される。
 
 ---
 
@@ -98,27 +108,42 @@ Phase 2+ で Vertex AI / Firestore / Pub/Sub 等が追加される。
 
 ```
 fujisawa-info-bot/
-├── pyproject.toml             # uv project、 fujisawa-platform を path dep
-├── .env.example               # 環境変数テンプレ
+├── pyproject.toml                       # uv project, fujisawa-platform / llm-client path dep
+├── .env.example                         # 環境変数テンプレ
 ├── README.md
 ├── docs/
-│   └── DESIGN.md              # SYSTEM_DESIGN_TEMPLATE 準拠
+│   └── DESIGN.md                        # SYSTEM_DESIGN_TEMPLATE 準拠
 ├── app/
 │   ├── __init__.py
-│   ├── main.py                # FastAPI entrypoint
-│   ├── config.py              # pydantic-settings (LINE_* 等)
-│   ├── line_client.py         # LineBotClient + 署名検証
+│   ├── main.py                          # FastAPI entrypoint, lifespan で graph 初期化
+│   ├── config.py                        # pydantic-settings (LINE / LLM / KB)
+│   ├── line_client.py                   # LineBotClient + 署名検証
+│   ├── llm.py                           # build_llm_client (mock | vertex_anthropic)
+│   ├── kb.py                            # build_knowledge_backend (inmemory | pgvector)
+│   ├── graph/
+│   │   ├── state.py                     # InfoBotState TypedDict
+│   │   ├── supervisor.py                # LangGraph build_graph + run_graph
+│   │   └── agents/
+│   │       ├── intent.py                # classify_intent
+│   │       └── rag.py                   # answer_with_rag (検索 + LLM + 出典)
+│   ├── skills/
+│   │   ├── __init__.py                  # load_skill ヘルパ
+│   │   └── category_routing.md          # 7 カテゴリ分類 Skill prompt
 │   └── routes/
-│       └── line.py            # POST /webhook (Phase 1: echo reply)
+│       └── line.py                      # POST /webhook → graph 実行
 └── tests/
-    ├── __init__.py
     ├── test_main.py
     ├── test_line_client.py
+    ├── graph/
+    │   ├── test_intent.py
+    │   ├── test_rag.py
+    │   ├── test_supervisor.py
+    │   └── test_factories.py
     └── routes/
         └── test_line.py
 ```
 
-Phase 2+ で `app/graph/` (LangGraph) / `app/skills/` / `app/batch/` 等を順次追加していく (proposal 0004 §4.3 参照)。
+Phase 3+ で `app/batch/` (RSS poll) / `app/pubsub/` 等を順次追加していく (proposal 0004 §4.3 参照)。
 
 ---
 
@@ -127,8 +152,8 @@ Phase 2+ で `app/graph/` (LangGraph) / `app/skills/` / `app/batch/` 等を順�
 | Phase | 内容 | env flag |
 |---|---|---|
 | **Phase 0** | 雛形 — pyproject + README + FastAPI `/health` + CI 統合 (完了 PR #142) | — |
-| **Phase 1** | LINE webhook (FastAPI) + 署名検証 + 単純 echo reply (本 PR) | — |
-| **Phase 2** | LangGraph Supervisor + Intent Agent + RAG Agent (出典 URL 付き) | `RAG_ENABLED=true` |
+| **Phase 1** | LINE webhook (FastAPI) + 署名検証 + 単純 echo reply (完了 PR #143) | — |
+| **Phase 2** | LangGraph Supervisor + Intent Agent + RAG Agent (出典 URL 付き) (本 PR) | `RAG_ENABLED=true` |
 | **Phase 3** | Pub/Sub 経由の非同期 reply (3 秒 timeout 対策) | — |
 | **Phase 4** | Crawl Agent (リンク 1 階層追跡) | `CRAWL_ENABLED=true` |
 | **Phase 5** | weekly_crawl batch (KB 投入 ETL) — fujisawa-platform reuse 検討 | — |

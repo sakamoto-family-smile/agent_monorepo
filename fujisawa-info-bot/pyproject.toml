@@ -3,8 +3,8 @@ name = "fujisawa-info-bot"
 version = "0.1.0"
 description = "藤沢市公式 HP を一次ソースとする LINE Bot エージェント (RAG + 出典 URL 付き回答 + 緊急情報 push)"
 requires-python = ">=3.12"
-# Phase 1 (LINE webhook + 署名検証 + echo reply) まで反映。
-# LangGraph / Pub/Sub / Cloud Tasks / Vertex AI 等は Phase 2+ で必要時に追加。
+# Phase 2 (LangGraph Supervisor + Intent Agent + RAG Agent) まで反映。
+# Pub/Sub / Cloud Tasks / Firestore 等は Phase 3+ で必要時に追加。
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
@@ -13,19 +13,26 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
     "line-bot-sdk>=3.11.0",
-    # path dep: fujisawa-platform (proposal 0003) の knowledge_base / crawler /
-    # skills / pdf_pipeline を Phase 2+ で利用する。 Phase 1 では import 済の
-    # 体裁を整えるためだけに依存宣言だけ入れておく。
+    # Phase 2: LangGraph Supervisor + Intent / RAG ノード。
+    "langgraph>=0.2.0",
+    # path dep: fujisawa-platform (proposal 0003) の knowledge_base / skills を
+    # Phase 2 RAG で利用する。
     "fujisawa-platform",
+    # path dep: llm-client (Vertex Anthropic Claude wrapper + Mock)。
+    "llm-client",
 ]
 
 [project.optional-dependencies]
-# Phase 2 (RAG + LangGraph Supervisor) で有効化。
-# Vertex AI 経由の Gemini / Anthropic Claude を利用する想定。
-langgraph = [
-    "langgraph>=0.2.0",
-    "langchain-google-vertexai>=2.0.0",
+# Vertex AI 経由の Anthropic Claude を本番起動時に有効化。
+# 開発・テストは Mock LLM で完結するため default では入れない。
+vertex = [
     "anthropic[vertex]>=0.40.0",
+]
+
+# 本番 RAG 用 Cloud SQL pgvector。 開発・テストは InMemoryStore + MockEmbedding
+# で完結する。
+pgvector = [
+    "fujisawa-platform[pgvector,vertex]",
 ]
 
 # Phase 3 (非同期 reply) / Phase 6 (Emergency push) で有効化。
@@ -48,6 +55,7 @@ firestore = [
 # monorepo 内 path dep。 Cloud Run image build 時もリポジトリルートを context
 # にする (driving-license-bot / fujisawa-platform と同パターン)。
 fujisawa-platform = { path = "../fujisawa-platform" }
+llm-client = { path = "../llm-client" }
 
 [tool.uv]
 dev-dependencies = [
