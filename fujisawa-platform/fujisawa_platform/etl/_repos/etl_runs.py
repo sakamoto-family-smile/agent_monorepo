@@ -105,7 +105,15 @@ class EtlRunsRepo:
         Cloud Run task timeout で強制終了されたまま finish_run が呼ばれなかった
         orphan を、 次の Job 実行時に自動修復するための保険。 戻り値は更新された
         レコード数。
+
+        実装注: 閾値は呼出側 (Python) で `now - timedelta(hours=N)` を計算して
+        渡す。 PostgreSQL 側で `$1 - interval` を組み立てると、 asyncpg + PG の
+        型推論で `$1` が `interval` と誤推論され `timestamptz < interval` の
+        型ミスマッチが出る (2026-05-21 実 PG で検証)。
         """
+        from datetime import timedelta
+
+        cutoff = now - timedelta(hours=stale_after_hours)
         async with self._pool.acquire() as conn:
             result = await conn.execute(
                 """
@@ -115,11 +123,11 @@ class EtlRunsRepo:
                     error_message = 'reclassified by abort_stale_running'
                 WHERE job_name = $2
                   AND status = 'running'
-                  AND started_at < $1 - ($3 || ' hours')::interval
+                  AND started_at < $3
                 """,
                 now,
                 job_name,
-                str(stale_after_hours),
+                cutoff,
             )
         try:
             return int(result.split()[-1])
