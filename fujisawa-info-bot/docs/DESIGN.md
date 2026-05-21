@@ -15,6 +15,7 @@
 |---|---|---|
 | 2026-05-19 | 0.1 | 初版 (Phase 0 雛形と同時に作成) |
 | 2026-05-20 | 0.2 | Phase 2 (LangGraph Supervisor + Intent + RAG Agent) 確定 |
+| 2026-05-21 | 0.3 | Phase 7 (terraform + Cloud Run + LINE Channel 連携) 確定 |
 
 ---
 
@@ -321,10 +322,114 @@ START → classify → conditional ──▶ rag → END
 
 ---
 
-## 5. Phase 3 以降の予定
+## 5. Phase 7 (terraform + Cloud Run + LINE Channel 連携) で確定した詳細
+
+### 5.0 設計判断
+
+- **Cloud Run Service (Job ではない)** を採用: LINE webhook を受ける常駐型 HTTP endpoint なので Service が自然。 Job は cron 起動の ETL 用
+- **`min_instances = 0`** (アイドル時コスト 0): proposal §5.4 / cold start 対策節準拠。 災害時に大量 push を捌くなら env で 1 に切替可能
+- **`startup_cpu_boost = true`**: コールドスタートを 50-70% 短縮 (Cloud Run 標準機能)
+- **Cloud SQL connector 経由で fujisawa_kb_db に接続**: UNIX socket (`/cloudsql/<connection_name>`) で Auth Proxy 不要。 driving-license-bot / fujisawa-platform と同パターン
+- **fujisawa_kb_db は新規作らず、 fujisawa-platform 側のものを read-only で利用**: proposal §4.5.3 の責任分離 (etl_role: 書込み、 consumer_role: 読込み)。 terraform は user 作成のみ、 `GRANT SELECT` は psql で別途流す
+- **`allUsers` invoker 公開**: LINE Platform は任意 IP から webhook を打ってくる → 公開は必須。 偽 webhook の排除は app 側の HMAC-SHA256 署名検証で担う
+- **LINE secrets は terraform で値を持たない**: secret **resource** だけ作り、 値は LINE Developers Console で Channel 作成後に gcloud で投入。 git に secret を載せない方針
+- **DB password は terraform 自動生成 + Secret Manager 投入**: `random_password` で 32 文字を生成し、 `google_secret_manager_secret_version` で投入。 fujisawa-platform 側の etl_user と同パターン
+- **`image = ""` で chicken-and-egg 回避**: 初回 apply で Artifact Registry / Secret / IAM / SA だけ作る → Cloud Build → 2 回目 apply で Cloud Run Service を deploy
+- **`ignore_changes = [containers[0].image]`**: image roll-forward は `gcloud run services update` で行い、 terraform は image 差分を無視 (CI/CD のため)
+
+### 5.1 ディレクトリ構成 (Phase 7 で追加)
+
+```
+fujisawa-info-bot/
+├── Dockerfile                  # multi-stage Python + uv + uvicorn entrypoint
+├── cloudbuild.yaml             # Cloud Build config (monorepo root context)
+├── cloudbuild.gcloudignore     # build context 圧縮用
+├── docs/
+│   └── SETUP.md                # deploy runbook
+└── terraform/
+    ├── backend.tf              # GCS state backend
+    ├── versions.tf             # provider versions
+    ├── apis.tf                 # 必要 API 有効化
+    ├── variables.tf
+    ├── locals.tf
+    ├── iam.tf                  # SA + IAM bindings
+    ├── artifact_registry.tf    # image repo
+    ├── secrets.tf              # LINE secrets + DB password (random_password)
+    ├── cloudsql.tf             # consumer user (GRANT は psql で別途)
+    ├── cloud_run.tf            # Cloud Run Service + public invoker
+    ├── outputs.tf
+    ├── terraform.tfvars.example
+    └── .gitignore
+```
+
+### 5.2 `Dockerfile` の path dep ハンドリング
+
+build context は monorepo root。 path dep を成立させるため image layout を以下に:
+
+```
+/app/
+├── fujisawa-platform/    # path dep (../fujisawa-platform から COPY)
+├── llm-client/           # path dep
+└── fujisawa-info-bot/    # 本体
+    ├── .venv/            # uv sync で生成
+    └── app/              # FastAPI app
+```
+
+entrypoint: `tini -- uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+
+### 5.3 Terraform リソース構成
+
+| ファイル | リソース | 備考 |
+|---|---|---|
+| `iam.tf` | `google_service_account.service` + 4 つの `google_project_iam_member` | Cloud SQL Client / Vertex AI User / Logging Writer / Artifact Registry Reader |
+| `secrets.tf` | 3 つの `google_secret_manager_secret` (LINE 2 + DB password 1) + DB password の `random_password` + version + 3 つの `secretAccessor` IAM | LINE 値は手動投入 |
+| `cloudsql.tf` | `data.google_sql_database_instance.shared` + `google_sql_user.consumer` | GRANT は psql 経由 |
+| `cloud_run.tf` | `google_cloud_run_v2_service.info_bot` + `google_cloud_run_v2_service_iam_member.public_invoker` | `image=""` で count=0 |
+| `artifact_registry.tf` | `google_artifact_registry_repository` | `fujisawa-info-bot` repo |
+
+### 5.4 Cloud Run env 配線
+
+| env | 値 (本番) |
+|---|---|
+| `FUJISAWA_INFO_BOT_LINE_CHANNEL_SECRET` | Secret Manager (`-line-channel-secret`) |
+| `FUJISAWA_INFO_BOT_LINE_CHANNEL_ACCESS_TOKEN` | Secret Manager (`-line-channel-access-token`) |
+| `FUJISAWA_INFO_BOT_LLM_PROVIDER` | `vertex_anthropic` |
+| `FUJISAWA_INFO_BOT_GCP_PROJECT_ID` | `var.project_id` |
+| `FUJISAWA_INFO_BOT_VERTEX_REGION` | `us-east5` |
+| `FUJISAWA_INFO_BOT_ANTHROPIC_MODEL` | `claude-haiku-4-5@20251001` |
+| `FUJISAWA_INFO_BOT_KB_STORE_MODE` | `pgvector` |
+| `FUJISAWA_INFO_BOT_EMBEDDING_PROVIDER` | `vertex` |
+| `FUJISAWA_INFO_BOT_CLOUD_SQL_HOST` | `/cloudsql/<connection_name>` (UNIX socket) |
+| `FUJISAWA_INFO_BOT_CLOUD_SQL_USER` | `fujisawa_info_bot_user` |
+| `FUJISAWA_INFO_BOT_CLOUD_SQL_DATABASE` | `fujisawa_kb_db` |
+| `FUJISAWA_INFO_BOT_CLOUD_SQL_PASSWORD` | Secret Manager |
+| `FUJISAWA_INFO_BOT_RAG_ENABLED` | `true` |
+| `FUJISAWA_INFO_BOT_RAG_TOP_K` | `5` |
+
+### 5.5 deploy ライフサイクル
+
+1. (一度だけ) `terraform apply` で base 基盤を作成 (`image=""`)
+2. (一度だけ) `psql` で `GRANT SELECT ON pages TO fujisawa_info_bot_user`
+3. (一度だけ) LINE Channel 作成 → secret 投入
+4. (毎リリース) `gcloud builds submit` → image push
+5. (初回 deploy) `terraform apply` (`image=<URI>`)
+6. (以降の image roll-forward) `gcloud run services update --image=<URI>` (terraform は ignore)
+7. (一度だけ) LINE Developer Console で webhook URL 登録 + Verify
+
+### 5.6 Phase 7 で意図的に未対応にしたもの
+
+- **CI/CD 化** (GitHub Actions による自動 deploy) — 手動 deploy 運用が安定したら別 PR で
+- **WIF (Workload Identity Federation) ベースの CI 認証** — fujisawa-platform に B-1-1 backlog として既存
+- **Cloud Run の minimum revision instances 自動切替** (災害時 0→1 → 0) — 手動で十分
+- **monitoring / alerting** (Cloud Monitoring policies) — Phase 8 で feedback / 計装と一緒に
+- **Custom domain** (`bot.fujisawa.example.com` 等) — `*.run.app` で十分
+
+---
+
+## 6. Phase 8 以降の予定
 
 本ファイルは Phase ごとに節を追加していく。 各 Phase 完了 PR で:
 
-1. 該当 Phase の節を新規追加 (例: `## 5. Phase 3 (Pub/Sub 非同期 reply) で確定した詳細`)
+1. 該当 Phase の節を新規追加 (例: `## 6. Phase 8 (Feedback / リッチメニュー) で確定した詳細`)
 2. 設計判断 / 確定スキーマ / 関数シグネチャを記録
 3. proposal との差分があれば明示
