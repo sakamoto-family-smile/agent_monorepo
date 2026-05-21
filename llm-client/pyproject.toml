@@ -1,10 +1,16 @@
 [project]
 name = "llm-client"
-version = "0.1.0"
-description = "Thin Anthropic Claude API wrapper with prompt caching, multi-turn support, and monorepo-wide reuse"
+version = "0.2.0"
+description = "Thin Anthropic Claude / Google Gemini API wrapper with prompt caching, multi-turn support, and monorepo-wide reuse"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.30.0",
+]
+
+[project.optional-dependencies]
+# Vertex AI Gemini client は重い google-cloud-aiplatform に依存するため optional。
+vertex-gemini = [
+    "google-cloud-aiplatform>=1.60.0",
 ]
 
 [build-system]

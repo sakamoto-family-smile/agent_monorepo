@@ -648,6 +648,9 @@ rss = [
 vertex = [
     { name = "anthropic", extra = ["vertex"] },
 ]
+vertex-gemini = [
+    { name = "llm-client", extra = ["vertex-gemini"] },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -673,12 +676,13 @@ requires-dist = [
     { name = "langgraph", specifier = ">=0.2.0" },
     { name = "line-bot-sdk", specifier = ">=3.11.0" },
     { name = "llm-client", directory = "../llm-client" },
+    { name = "llm-client", extras = ["vertex-gemini"], marker = "extra == 'vertex-gemini'", directory = "../llm-client" },
     { name = "pydantic", specifier = ">=2.6.0" },
     { name = "pydantic-settings", specifier = ">=2.4.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
 ]
-provides-extras = ["vertex", "pgvector", "async-pipeline", "rss", "firestore"]
+provides-extras = ["vertex", "vertex-gemini", "pgvector", "async-pipeline", "rss", "firestore"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1396,14 +1400,23 @@ wheels = [
 
 [[package]]
 name = "llm-client"
-version = "0.1.0"
+version = "0.2.0"
 source = { directory = "../llm-client" }
 dependencies = [
     { name = "anthropic" },
 ]
 
+[package.optional-dependencies]
+vertex-gemini = [
+    { name = "google-cloud-aiplatform" },
+]
+
 [package.metadata]
-requires-dist = [{ name = "anthropic", specifier = ">=0.30.0" }]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.30.0" },
+    { name = "google-cloud-aiplatform", marker = "extra == 'vertex-gemini'", specifier = ">=1.60.0" },
+]
+provides-extras = ["vertex-gemini"]
 
 [package.metadata.requires-dev]
 dev = [

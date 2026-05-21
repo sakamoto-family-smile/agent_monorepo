@@ -18,7 +18,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LLMProvider = Literal["mock", "vertex_anthropic"]
+LLMProvider = Literal["mock", "vertex_anthropic", "vertex_gemini"]
 KBStoreMode = Literal["inmemory", "pgvector"]
 EmbeddingProvider = Literal["mock", "vertex"]
 
@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     vertex_region: str = Field(default="us-east5")
     # Vertex AI 経由の Anthropic Claude モデル名 (例: claude-haiku-4-5@20251001)
     anthropic_model: str = Field(default="claude-haiku-4-5@20251001")
+    # Vertex AI 経由の Gemini モデル名 (例: gemini-2.5-flash)
+    gemini_model: str = Field(default="gemini-2.5-flash")
     llm_max_tokens: int = Field(default=1024)
 
     # ── Knowledge Base (Phase 2) ──────────────────────────────────────

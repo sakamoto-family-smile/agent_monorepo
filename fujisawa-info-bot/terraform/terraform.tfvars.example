@@ -25,7 +25,8 @@ service_memory                  = "1Gi"
 service_request_timeout_seconds = 60
 
 # LLM (Phase 2 / 7: Vertex Anthropic Claude default)
-llm_provider    = "vertex_anthropic"
-vertex_region   = "us-east5"
-anthropic_model = "claude-haiku-4-5@20251001"
+llm_provider    = "vertex_gemini"
+vertex_region   = "asia-northeast1"
+anthropic_model = "claude-sonnet-4-5@20250929" # llm_provider=vertex_anthropic 用
+gemini_model    = "gemini-2.5-flash"           # llm_provider=vertex_gemini 用 (default)
 rag_top_k       = 5
