@@ -1,13 +1,15 @@
-"""Thin Anthropic Claude API wrapper for monorepo-wide reuse.
+"""Thin Claude / Gemini API wrapper for monorepo-wide reuse.
 
 主な型とクライアント:
   - `LLMClient` Protocol (complete / complete_messages)
   - `AnthropicLLMClient` (Anthropic API 直)
-  - `VertexAnthropicLLMClient` (GCP Vertex AI)
+  - `VertexAnthropicLLMClient` (GCP Vertex AI 経由 Anthropic Claude)
+  - `VertexGeminiLLMClient` (GCP Vertex AI 経由 Google Gemini)
   - `MockLLMClient` (テスト・オフライン)
 
 prompt caching:
-  `cache_system=True` を渡すと system プロンプトを `cache_control=ephemeral` 化。
+  `cache_system=True` を渡すと system プロンプトを `cache_control=ephemeral` 化
+  (Anthropic 系のみ。 Gemini は no-op で将来対応予定)。
 
 observability:
   `on_call` コールバックで呼び出し毎にイベントを受け取れる。
@@ -20,6 +22,7 @@ from .mock import MockLLMClient
 from .protocol import LLMClient
 from .types import ChatMessage, LlmCallEvent, OnCallCallback
 from .vertex_client import VertexAnthropicLLMClient
+from .vertex_gemini_client import VertexGeminiLLMClient
 
 __all__ = [
     "AnthropicLLMClient",
@@ -29,5 +32,6 @@ __all__ = [
     "MockLLMClient",
     "OnCallCallback",
     "VertexAnthropicLLMClient",
+    "VertexGeminiLLMClient",
     "system_payload",
 ]

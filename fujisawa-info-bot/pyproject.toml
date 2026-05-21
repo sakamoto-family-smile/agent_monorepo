@@ -29,6 +29,11 @@ vertex = [
     "anthropic[vertex]>=0.40.0",
 ]
 
+# Vertex AI 経由の Gemini を本番起動時に有効化 (proposal §4.5 default)。
+vertex-gemini = [
+    "llm-client[vertex-gemini]",
+]
+
 # 本番 RAG 用 Cloud SQL pgvector。 開発・テストは InMemoryStore + MockEmbedding
 # で完結する。
 pgvector = [

@@ -51,17 +51,18 @@ COPY fujisawa-info-bot/README.md /app/fujisawa-info-bot/README.md
 WORKDIR /app/fujisawa-info-bot
 
 # 依存解決 (本体 import まで成立させる必要があるので extra も含める)。
-#   - vertex:    本番 LLM (anthropic[vertex])
-#   - pgvector:  本番 KB (asyncpg + pgvector + fujisawa-platform pgvector extra)
+#   - vertex:        本番 LLM (anthropic[vertex])
+#   - vertex-gemini: 本番 LLM Gemini (google-cloud-aiplatform、 proposal §4.5 default)
+#   - pgvector:      本番 KB (asyncpg + pgvector + fujisawa-platform pgvector extra)
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project --no-dev --no-editable \
-        --extra vertex --extra pgvector
+        --extra vertex --extra vertex-gemini --extra pgvector
 
 COPY fujisawa-info-bot/app /app/fujisawa-info-bot/app
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --no-editable \
-        --extra vertex --extra pgvector
+        --extra vertex --extra vertex-gemini --extra pgvector
 
 # ---------------------------------------------------------------------------
 # Stage 2: runtime

@@ -96,6 +96,10 @@ resource "google_cloud_run_v2_service" "info_bot" {
         name  = "FUJISAWA_INFO_BOT_ANTHROPIC_MODEL"
         value = var.anthropic_model
       }
+      env {
+        name  = "FUJISAWA_INFO_BOT_GEMINI_MODEL"
+        value = var.gemini_model
+      }
 
       # ─── KB (pgvector via Cloud SQL Auth Proxy unix socket) ────
       env {
