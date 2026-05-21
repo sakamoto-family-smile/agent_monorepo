@@ -1,0 +1,79 @@
+# fujisawa-info-bot Cloud Build 専用 ignore file。
+# build context はリポジトリルート、 fujisawa-platform / llm-client / fujisawa-info-bot を
+# 必要とするが、 それ以外の agent は不要。
+
+# VCS
+.git/
+.github/
+.gitignore
+.gitleaks.toml
+
+# Python build artifacts
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.venv/
+**/venv/
+**/*.egg-info/
+
+# Terraform
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/terraform.tfvars
+**/.env*
+**/.env.secrets
+
+# OS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Data fixtures
+**/data/raw/
+**/data/uploaded/
+**/data/payloads/
+**/data/dead_letter/
+**/data/analytics.duckdb*
+
+# 他 agent (fujisawa-info-bot image には不要)
+agent-system-1/
+agent-system-2/
+analytics-platform/
+driving-license-bot/
+hotcook-agent/
+kanie-lab-agent/
+lifeplanner-agent/
+piyolog-analytics/
+security-platform/
+stock-analysis-agent/
+tech-news-agent/
+
+# fujisawa-platform の terraform / tests / docs (image には source のみ)
+fujisawa-platform/terraform/
+fujisawa-platform/tests/
+fujisawa-platform/docs/
+fujisawa-platform/Dockerfile
+fujisawa-platform/cloudbuild.yaml
+fujisawa-platform/cloudbuild.gcloudignore
+fujisawa-platform/Makefile
+
+# llm-client の tests / docs
+llm-client/tests/
+llm-client/docs/
+
+# fujisawa-info-bot 自身の tests / docs / terraform
+fujisawa-info-bot/tests/
+fujisawa-info-bot/docs/
+fujisawa-info-bot/terraform/
+
+# repo root の docs / 設定 (image には不要)
+LICENSE
+README.md
+docs/

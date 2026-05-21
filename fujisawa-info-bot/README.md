@@ -4,8 +4,8 @@
 LINE Bot エージェント。 RAG + リンク 1 階層追跡 + 緊急情報プッシュ + 多言語誘導
 を提供する。
 
-> **Status**: Phase 2 (LangGraph Supervisor + Intent + RAG Agent) 完了。
-> Pub/Sub 非同期化 / Crawl / Emergency push は順次 Phase 3+ で実装。
+> **Status**: Phase 2 (LangGraph + RAG) + Phase 7 (terraform / Cloud Run deploy) 完了。
+> Pub/Sub 非同期化 / Crawl / Emergency push / Feedback は順次 Phase 3+ で実装。
 
 設計詳細は [`../docs/PROPOSALS/0004-fujisawa-info-bot.md`](../docs/PROPOSALS/0004-fujisawa-info-bot.md) 参照。
 本 README は「動かす / 取り込む」観点に絞る。
@@ -153,12 +153,12 @@ Phase 3+ で `app/batch/` (RSS poll) / `app/pubsub/` 等を順次追加してい
 |---|---|---|
 | **Phase 0** | 雛形 — pyproject + README + FastAPI `/health` + CI 統合 (完了 PR #142) | — |
 | **Phase 1** | LINE webhook (FastAPI) + 署名検証 + 単純 echo reply (完了 PR #143) | — |
-| **Phase 2** | LangGraph Supervisor + Intent Agent + RAG Agent (出典 URL 付き) (本 PR) | `RAG_ENABLED=true` |
+| **Phase 2** | LangGraph Supervisor + Intent Agent + RAG Agent (出典 URL 付き) (完了 PR #144) | `RAG_ENABLED=true` |
 | **Phase 3** | Pub/Sub 経由の非同期 reply (3 秒 timeout 対策) | — |
 | **Phase 4** | Crawl Agent (リンク 1 階層追跡) | `CRAWL_ENABLED=true` |
-| **Phase 5** | weekly_crawl batch (KB 投入 ETL) — fujisawa-platform reuse 検討 | — |
+| **Phase 5** | weekly_crawl batch (KB 投入 ETL) — fujisawa-platform 側で実装 (完了 PR #146 + #147 fix) | — |
 | **Phase 6** | Emergency RSS poll + Cloud Tasks + opt-in/out | `EMERGENCY_ENABLED=true` |
-| **Phase 7** | terraform / Cloud Run deploy / Cloud Scheduler | — |
+| **Phase 7** | terraform / Cloud Run / LINE Channel 連携 (本 PR) | — |
 | **Phase 8** | Feedback (👍👎) / リッチメニュー / 多言語誘導 / observability | — |
 
 ---
@@ -169,3 +169,4 @@ Phase 3+ で `app/batch/` (RSS poll) / `app/pubsub/` 等を順次追加してい
 - [`../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md`](../docs/PROPOSALS/0003-fujisawa-platform-shared-base.md) — 共通基盤
 - [`../docs/PROPOSALS/notes/fujisawa-platform-investigation-2026-05-09.md`](../docs/PROPOSALS/notes/fujisawa-platform-investigation-2026-05-09.md) — 事前調査
 - [`docs/DESIGN.md`](docs/DESIGN.md) — Phase ごとの設計詳細記録
+- [`docs/SETUP.md`](docs/SETUP.md) — Phase 7 deploy runbook (terraform / LINE Channel)
