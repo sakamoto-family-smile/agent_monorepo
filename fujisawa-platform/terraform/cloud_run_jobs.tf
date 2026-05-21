@@ -83,6 +83,14 @@ resource "google_cloud_run_v2_job" "etl" {
             }
           }
         }
+        env {
+          name  = "FUJISAWA_ETL_MIN_INTERVAL_SEC"
+          value = tostring(var.etl_min_interval_sec)
+        }
+        env {
+          name  = "FUJISAWA_ETL_MIN_INTERVAL_SEC_HEAD"
+          value = tostring(var.etl_min_interval_sec_head)
+        }
 
         # ─── Vertex AI ─────────────────────────────────────────────
         env {

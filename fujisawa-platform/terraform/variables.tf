@@ -99,14 +99,26 @@ variable "etl_job_memory" {
 
 variable "etl_job_task_timeout_seconds" {
   type        = number
-  description = "Cloud Run Job タスクタイムアウト (秒)。weekly_crawl は 1,100 URL × 3s ≈ 55 分 → 余裕を見て 90 分。"
-  default     = 5400
+  description = "Cloud Run Job タスクタイムアウト (秒)。 2026-05-21 改訂: weekly_crawl の差分 crawl 化に伴い、 初回 full crawl (sitemap 7,906 URL × GET 3s ≈ 6.6 時間) を吸収するため 8 時間 (28,800s) に拡張。 通常週次は HEAD + 数百 GET で ~1〜2 時間で完走するため余裕。"
+  default     = 28800
 }
 
 variable "etl_job_max_retries" {
   type        = number
   description = "Cloud Run Job のタスクリトライ回数。run_etl_job の fail-fast 機構があるので 0 で OK。"
   default     = 0
+}
+
+variable "etl_min_interval_sec" {
+  type        = number
+  description = "PoliteFetcher の GET 連続リクエスト最小間隔 (秒)。 藤沢市 HP は 3.0 を default。 緊急時のみ短縮を検討。"
+  default     = 3.0
+}
+
+variable "etl_min_interval_sec_head" {
+  type        = number
+  description = "PoliteFetcher の HEAD 連続リクエスト最小間隔 (秒)。 weekly_crawl の差分 crawl で 7,906 URL を 1 時間程度で HEAD チェック完了するため 0.5 秒。 HEAD はボディ転送無しなので GET より短く設定可能。"
+  default     = 0.5
 }
 
 variable "etl_sitemap_url" {

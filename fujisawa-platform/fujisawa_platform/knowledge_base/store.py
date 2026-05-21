@@ -59,6 +59,10 @@ class KnowledgeStore(Protocol):
         category: str | None = None,
     ) -> list[SearchHit]: ...
 
+    async def get_last_modified_map(
+        self, urls: list[str]
+    ) -> dict[str, datetime | None]: ...
+
 
 class InMemoryStore:
     """テスト・ローカル開発用の in-memory 実装。
@@ -106,6 +110,23 @@ class InMemoryStore:
         )
         sorted_hits = sorted(candidates, key=lambda kv: kv[1], reverse=True)
         return [SearchHit(page=p, score=s) for p, s in sorted_hits[:top_k]]
+
+    async def get_last_modified_map(
+        self, urls: list[str]
+    ) -> dict[str, datetime | None]:
+        """指定 URL の `last_modified` を一括取得 (差分 crawl 用)。
+
+        - 指定 URL が pages テーブルに無ければ key 不在 (initial crawl 用)
+        - last_modified カラムが NULL のときは value=None を返す
+          ↳ consumer 側で「DB に row はあるが last_modified 不明」 として再 fetch 判定
+        """
+        target = set(urls)
+        result: dict[str, datetime | None] = {}
+        for page in self._pages.values():
+            url_str = str(page.url)
+            if url_str in target:
+                result[url_str] = page.last_modified
+        return result
 
 
 def _cosine(a: list[float], b: list[float]) -> float:

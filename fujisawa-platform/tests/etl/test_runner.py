@@ -23,6 +23,7 @@ class _FakeRepo:
     def __init__(self, *, recent: list[EtlRunRecord] | None = None) -> None:
         self.starts: list[dict[str, Any]] = []
         self.finishes: list[dict[str, Any]] = []
+        self.aborts: list[dict[str, Any]] = []
         self._recent = recent or []
 
     async def start_run(self, **kwargs: Any) -> None:
@@ -33,6 +34,27 @@ class _FakeRepo:
 
     async def recent_runs(self, job_name: str, *, limit: int = 5) -> list[EtlRunRecord]:
         return self._recent[:limit]
+
+    async def abort_stale_running(self, **kwargs: Any) -> int:
+        self.aborts.append(kwargs)
+        return 0
+
+
+class _LegacyRepo:
+    """abort_stale_running を持たない古い repo (互換性検証用)。"""
+
+    def __init__(self) -> None:
+        self.starts: list[dict[str, Any]] = []
+        self.finishes: list[dict[str, Any]] = []
+
+    async def start_run(self, **kwargs: Any) -> None:
+        self.starts.append(kwargs)
+
+    async def finish_run(self, **kwargs: Any) -> None:
+        self.finishes.append(kwargs)
+
+    async def recent_runs(self, job_name: str, *, limit: int = 5) -> list[EtlRunRecord]:
+        return []
 
 
 def _record(*, run_id: str, status: str, source_hash: str | None = None) -> EtlRunRecord:
@@ -228,3 +250,52 @@ class TestEtlRunResultModel:
         )
         with pytest.raises(Exception):
             result.rows_written = 20  # type: ignore[misc]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# orphan running record reclassify (2026-05-21 追加)
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestAbortStaleRunning:
+    @pytest.mark.asyncio
+    async def test_calls_abort_stale_running_before_fn(self) -> None:
+        repo = _FakeRepo()
+
+        async def _fn() -> EtlRunResult:
+            return EtlRunResult(rows_written=1)
+
+        await run_etl_job(
+            job_name="weekly_crawl_etl",
+            run_id="run-1",
+            repo=repo,  # type: ignore[arg-type]
+            fn=_fn,
+            now=lambda: datetime(2026, 5, 21, 3, 0, tzinfo=UTC),
+        )
+
+        assert len(repo.aborts) == 1
+        kwargs = repo.aborts[0]
+        assert kwargs["job_name"] == "weekly_crawl_etl"
+        assert kwargs["now"] == datetime(2026, 5, 21, 3, 0, tzinfo=UTC)
+        # stale_after_hours は private const なので具体的な数値検証はしない、
+        # 0 より大きいことだけを保証する。
+        assert kwargs["stale_after_hours"] > 0
+
+    @pytest.mark.asyncio
+    async def test_legacy_repo_without_abort_method_is_supported(self) -> None:
+        """abort_stale_running を持たない古い repo でも実行できる (graceful 後方互換)。"""
+        repo = _LegacyRepo()
+
+        async def _fn() -> EtlRunResult:
+            return EtlRunResult(rows_written=1)
+
+        result = await run_etl_job(
+            job_name="weekly_crawl_etl",
+            run_id="run-1",
+            repo=repo,  # type: ignore[arg-type]
+            fn=_fn,
+            now=lambda: datetime(2026, 5, 21, 3, 0, tzinfo=UTC),
+        )
+
+        assert result.status == "success"
+        assert len(repo.finishes) == 1

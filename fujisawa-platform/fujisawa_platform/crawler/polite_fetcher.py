@@ -43,7 +43,15 @@ class PoliteFetcherConfig(BaseModel):
     min_interval_sec: float = Field(
         default=3.0,
         ge=0.0,
-        description="連続リクエスト間の最小間隔 (秒)。藤沢市 HP は 3.0 を default とする。",
+        description="連続 GET リクエスト間の最小間隔 (秒)。藤沢市 HP は 3.0 を default とする。",
+    )
+    min_interval_sec_head: float = Field(
+        default=0.5,
+        ge=0.0,
+        description=(
+            "連続 HEAD リクエスト間の最小間隔 (秒)。 HEAD はボディ転送無しで負荷が"
+            "小さいため GET より短く設定可能。 weekly_crawl の差分 crawl で利用。"
+        ),
     )
     max_retries: int = Field(
         default=3,
@@ -91,6 +99,16 @@ class NotModified:
     url: HttpUrl
 
 
+@dataclass(frozen=True)
+class HeadResult:
+    """HEAD request の結果。 weekly_crawl の差分判定用。"""
+
+    url: HttpUrl
+    status_code: int
+    last_modified: datetime | None
+    etag: str | None
+
+
 class PoliteFetcher:
     """`async with` で使う礼儀正しい fetcher。
 
@@ -104,7 +122,8 @@ class PoliteFetcher:
         self._config = config
         self._client: httpx.AsyncClient | None = None
         self._lock = asyncio.Lock()  # 同時接続 1
-        self._last_fetch_at: float | None = None  # monotonic 秒
+        self._last_fetch_at: float | None = None  # 直前の GET (monotonic 秒)
+        self._last_head_at: float | None = None  # 直前の HEAD (monotonic 秒)
 
     async def __aenter__(self) -> PoliteFetcher:
         self._client = httpx.AsyncClient(
@@ -168,12 +187,73 @@ class PoliteFetcher:
                 self._last_fetch_at = time.monotonic()
             raise RuntimeError("unreachable")  # pragma: no cover
 
-    async def _wait_interval(self) -> None:
-        """直前の fetch から min_interval_sec 経過していなければ待つ。"""
-        if self._last_fetch_at is None:
+    async def head(self, url: str) -> HeadResult:
+        """1 URL に HEAD を打って Last-Modified / ETag を取得する。
+
+        本文を転送しないので polite rate は GET より短い `min_interval_sec_head`
+        を別途使う。 5xx は GET と同じく指数バックオフでリトライし、 4xx は
+        即 raise する。
+
+        Returns:
+            `HeadResult` (status_code は 200 が通常、 但し 304 は HEAD では
+            意味を持たないため `If-Modified-Since` ヘッダは送らない)。
+        """
+        if self._client is None:
+            raise RuntimeError("PoliteFetcher must be used as async context manager")
+
+        async with self._lock:
+            await self._wait_interval(self._last_head_at, self._config.min_interval_sec_head)
+            try:
+                async for attempt in AsyncRetrying(
+                    stop=stop_after_attempt(self._config.max_retries + 1),
+                    wait=wait_exponential(multiplier=self._config.backoff_base_sec),
+                    retry=retry_if_exception_type(_RetryableError),
+                    reraise=False,
+                ):
+                    with attempt:
+                        return await self._do_head(url)
+            except RetryError as err:
+                cause = err.last_attempt.exception()
+                if isinstance(cause, _RetryableError) and cause.__cause__ is not None:
+                    raise cause.__cause__
+                raise
+            finally:
+                self._last_head_at = time.monotonic()
+            raise RuntimeError("unreachable")  # pragma: no cover
+
+    async def _do_head(self, url: str) -> HeadResult:
+        assert self._client is not None
+        response = await self._client.head(url)
+        if 500 <= response.status_code < 600:
+            err = httpx.HTTPStatusError(
+                f"Server error {response.status_code}",
+                request=response.request,
+                response=response,
+            )
+            raise _RetryableError(str(err)) from err
+        response.raise_for_status()
+        return HeadResult(
+            url=HttpUrl(str(response.url)),
+            status_code=response.status_code,
+            last_modified=_parse_http_date(response.headers.get("last-modified")),
+            etag=response.headers.get("etag"),
+        )
+
+    async def _wait_interval(
+        self, last_at: float | None = None, min_interval: float | None = None
+    ) -> None:
+        """直前の request から指定 interval 経過していなければ待つ。
+
+        引数省略時は GET 用の値 (`_last_fetch_at` / `min_interval_sec`) を使う。
+        """
+        ref_at = last_at if last_at is not None else self._last_fetch_at
+        ref_interval = (
+            min_interval if min_interval is not None else self._config.min_interval_sec
+        )
+        if ref_at is None:
             return
-        elapsed = time.monotonic() - self._last_fetch_at
-        remaining = self._config.min_interval_sec - elapsed
+        elapsed = time.monotonic() - ref_at
+        remaining = ref_interval - elapsed
         if remaining > 0:
             await asyncio.sleep(remaining)
 

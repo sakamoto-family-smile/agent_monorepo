@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS etl_runs (
     run_id          TEXT NOT NULL,                    -- '<job_name>-<YYYYMMDD>-<HHMM>'
     started_at      TIMESTAMPTZ NOT NULL,
     finished_at     TIMESTAMPTZ,
-    status          TEXT NOT NULL,                    -- 'running' | 'success' | 'failed' | 'skipped_unchanged'
+    status          TEXT NOT NULL,                    -- 'running' | 'success' | 'failed' | 'skipped_unchanged' | 'aborted'
     source_url      TEXT,
     source_hash     TEXT,                             -- 取得元のSHA-256 (前回と同じならスキップ)
     rows_written    INTEGER,

@@ -187,7 +187,7 @@
 │ Write Path (バッチ ETL、§4.5 参照)                                        │
 │                                                                          │
 │  Cloud Scheduler ──▶ Cloud Run Jobs (fujisawa-platform/etl/ 配下)        │
-│   - weekly_crawl_etl       (週次、sitemap.xml の 1,100+ URL)             │
+│   - weekly_crawl_etl       (週次、sitemap.xml ~7,900 URL を差分 crawl)    │
 │   - monthly_vacancy_etl    (月次 22 日、空き / 申込状況 PDF)             │
 │   - monthly_stats_compute  (月次 23 日、competition_stats 集計)          │
 │   - half_yearly_facility_etl (半年次、施設一覧 HTML)                     │
@@ -394,7 +394,7 @@ fujisawa-platform = { path = "../fujisawa-platform" }
 
 | Job 名 | 頻度 / トリガ | 取得対象 | 書き込み先テーブル | 主な利用先 |
 |---|---|---|---|---|
-| `weekly_crawl_etl` | 毎週日曜 03:00 JST | `sitemap.xml` の 1,100+ URL を polite crawl (1 URL/3s ≈ 1 時間) | `pages` (HTML 本文 + embedding) | LINE bot (0004) RAG |
+| `weekly_crawl_etl` | 毎週日曜 03:00 JST | `sitemap.xml` の URL (実測 7,906 件 @ 2026-05) を **差分 crawl** (HEAD で Last-Modified 比較 → 更新有り URL のみ GET、 通常週次は数百件) | `pages` (HTML 本文 + embedding) | LINE bot (0004) RAG |
 | `monthly_vacancy_etl` | 毎月 22 日 03:00 JST | 空き状況 / 申込状況 PDF (Docling 構造化) | `vacancy_snapshots`, `application_snapshots` | 保活 (0005) VacancyAgent |
 | `monthly_stats_compute` | 毎月 23 日 03:00 JST | 過去 3 年分のスナップショット集計 (外部 fetch なし) | `competition_stats` | 保活 StrategyAgent |
 | `half_yearly_facility_etl` | 4 月・10 月 1 日 03:00 JST | 認可・認可外施設一覧 HTML (`pandas.read_html` + BeautifulSoup でリンク URL 抽出) | `facilities` (160 件) | 保活 SearchAgent |
@@ -585,3 +585,4 @@ env なし。consumer 側で `from fujisawa_platform import ...` するだけで
 | 2026-05-09 | Draft | 初稿 (本 PR) |
 | 2026-05-09 | Draft 改訂 | レビュー回答を反映: §4.1 アーキ図に Read-Only Path / Write Path の分離を明記、§4.5 を新設 (アクセス経路と ETL 投入タイミングを詳細化)、§4.4 に `etl/` ディレクトリ追加、§4.8 に ETL 個別有効化 env を追加 |
 | 2026-05-18 | 設計修正 | §4.5.5 の `facilities` 投入戦略を「全削除 → 全 INSERT」から「UPSERT + 条件付き DELETE」に変更。 旧設計は admission_results 等の FK 参照が登場すると `ForeignKeyViolationError` で fail することが実 GCP 検証で発覚 (R4 backfill 178 行 → half_yearly_facility 再実行時)。 facility_id が `slugify_facility_id` で stable hash 化済のため UPSERT で十分。 incoming に無く下流参照も無い orphan のみ DELETE して陳腐化対応。 atomicity 維持 (1 トランザクション) は変わらず。 |
+| 2026-05-21 | 設計修正 | §4.5.4 の `weekly_crawl_etl` を「全件 GET」から「HEAD で Last-Modified 比較 → 差分 GET」 方式に変更。 旧設計の sitemap URL 数想定 (1,100+) は実測 7,906 件で 7 倍規模、 全件 3 秒/URL polite rate だと 6.6 時間必要で task timeout 90 分内に完走不能だった (2026-05-16 自動実行が 1,797 URL 処理時点で timeout)。 新方式は HEAD (0.5 秒/URL × 7,906 = 66 分) で更新検知 → 数百件の GET だけ実施。 task timeout は 28,800 秒 (8 時間) に拡張 (初回 full crawl 用)。 `_runner.py` に orphan `running` レコードの reclassify (`abort_stale_running`) も同 PR で追加。 派生 backlog: `docs/PROPOSALS/notes/fujisawa-info-bot-follow-up-2026-05-21.md` 項目 G。 |

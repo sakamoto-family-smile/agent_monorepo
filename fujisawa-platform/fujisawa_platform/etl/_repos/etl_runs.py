@@ -92,6 +92,40 @@ class EtlRunsRepo:
                 run_id,
             )
 
+    async def abort_stale_running(
+        self,
+        *,
+        job_name: str,
+        now: datetime,
+        stale_after_hours: int = 4,
+    ) -> int:
+        """`running` のまま `stale_after_hours` 時間以上経過したレコードを
+        `aborted` に reclassify する。
+
+        Cloud Run task timeout で強制終了されたまま finish_run が呼ばれなかった
+        orphan を、 次の Job 実行時に自動修復するための保険。 戻り値は更新された
+        レコード数。
+        """
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE etl_runs
+                SET status = 'aborted',
+                    finished_at = $1,
+                    error_message = 'reclassified by abort_stale_running'
+                WHERE job_name = $2
+                  AND status = 'running'
+                  AND started_at < $1 - ($3 || ' hours')::interval
+                """,
+                now,
+                job_name,
+                str(stale_after_hours),
+            )
+        try:
+            return int(result.split()[-1])
+        except (ValueError, IndexError):
+            return 0
+
     async def recent_runs(self, job_name: str, *, limit: int = 5) -> list[EtlRunRecord]:
         """直近 N 件の実行履歴を取得 (started_at 降順)。
 
