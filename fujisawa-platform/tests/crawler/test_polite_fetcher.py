@@ -20,6 +20,7 @@ import respx
 
 from fujisawa_platform.crawler.polite_fetcher import (
     FetchResult,
+    HeadResult,
     NotModified,
     PoliteFetcher,
     PoliteFetcherConfig,
@@ -235,3 +236,81 @@ class TestRequiredUserAgent:
         """UA 未設定の config は構築段階で弾く (匿名 fetch を防ぐ)。"""
         with pytest.raises(ValueError, match="user_agent"):
             PoliteFetcherConfig(user_agent="")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# HEAD method (Phase 5 差分 crawl 用)
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestHead:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_head_returns_last_modified_and_etag(
+        self, config: PoliteFetcherConfig
+    ) -> None:
+        respx.head("https://www.city.fujisawa.kanagawa.jp/x").mock(
+            return_value=httpx.Response(
+                200,
+                headers={
+                    "Last-Modified": "Wed, 20 May 2026 15:00:03 GMT",
+                    "ETag": '"a325-652410cf27c25"',
+                },
+            )
+        )
+
+        async with PoliteFetcher(config) as fetcher:
+            head = await fetcher.head("https://www.city.fujisawa.kanagawa.jp/x")
+
+        assert isinstance(head, HeadResult)
+        assert head.status_code == 200
+        assert head.last_modified == datetime(2026, 5, 20, 15, 0, 3, tzinfo=UTC)
+        assert head.etag == '"a325-652410cf27c25"'
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_head_4xx_raises(self, config: PoliteFetcherConfig) -> None:
+        respx.head("https://www.city.fujisawa.kanagawa.jp/missing").mock(
+            return_value=httpx.Response(404),
+        )
+
+        async with PoliteFetcher(config) as fetcher:
+            with pytest.raises(httpx.HTTPStatusError):
+                await fetcher.head("https://www.city.fujisawa.kanagawa.jp/missing")
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_head_uses_separate_rate_from_get(self) -> None:
+        """HEAD と GET は別々の rate limiter を持つ。 短い HEAD interval が GET の間隔
+        の判定に影響しないことを確認する。"""
+        cfg = PoliteFetcherConfig(
+            user_agent="test/0.1 (https://example.com)",
+            min_interval_sec=2.0,
+            min_interval_sec_head=0.001,
+            max_retries=0,
+            backoff_base_sec=0.001,
+        )
+        respx.head("https://www.city.fujisawa.kanagawa.jp/a").mock(
+            return_value=httpx.Response(200)
+        )
+        respx.head("https://www.city.fujisawa.kanagawa.jp/b").mock(
+            return_value=httpx.Response(200)
+        )
+
+        async with PoliteFetcher(cfg) as fetcher:
+            t0 = time.monotonic()
+            await fetcher.head("https://www.city.fujisawa.kanagawa.jp/a")
+            await fetcher.head("https://www.city.fujisawa.kanagawa.jp/b")
+            elapsed = time.monotonic() - t0
+
+        # HEAD interval = 0.001 秒なので 2 連続 HEAD は 1 秒未満で完了するはず
+        assert elapsed < 1.0
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_head_outside_context_manager_raises(
+        self, config: PoliteFetcherConfig
+    ) -> None:
+        fetcher = PoliteFetcher(config)
+        with pytest.raises(RuntimeError, match="async context manager"):
+            await fetcher.head("https://example.com/")

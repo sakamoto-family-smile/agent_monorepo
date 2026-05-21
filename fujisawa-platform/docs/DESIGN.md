@@ -28,6 +28,7 @@
 | 2026-05-12 | 0.11.1 | Phase 4-2h step 1 実装 (etl/cli.py + Dockerfile + docs/SETUP.md、Cloud Run Job entrypoint と配備 runbook) |
 | 2026-05-12 | 0.11.2 | Phase 4-2h step 2 実装 (terraform: Cloud SQL DB / Secret Manager / IAM / GCS bucket / Artifact Registry) |
 | 2026-05-12 | 0.12 | Phase 4-2h step 3 実装 (terraform: Cloud Run Jobs × 7 + Cloud Scheduler × 6、配備可能状態) |
+| 2026-05-21 | 0.13 | `weekly_crawl_etl` 差分 crawl 化 (HEAD で Last-Modified 比較 → 更新有り URL のみ GET)。 sitemap 規模が想定 1,100 URL → 実測 7,906 URL で task timeout 内に完走不能だったため。 polite_fetcher に `head()` 追加、 `_runner.py` に orphan running reclassify 追加、 task_timeout 5400→28800 秒。 proposal §4.5.4 更新。 |
 
 ---
 
@@ -76,6 +77,100 @@
 | **Phase 4-2h step 3** | terraform: Cloud Run Jobs × 7 + Cloud Scheduler × 6 | 🔶 実装済 (本 PR) |
 | Phase 4-2h step 4 (任意) | CI で terraform plan / 静的解析 (tflint / tfsec) | ⏳ 後回し可 |
 | Phase 5 | observability (analytics-platform 計装) + monitoring | ⏳ 未着手 |
+
+---
+
+## 2.5. Phase 5 (weekly_crawl 差分 crawl 化) で確定した詳細 (2026-05-21)
+
+> proposal 0003 §4.5.4 v2 / §8 Implementation History 2026-05-21 を実装した記録。
+
+### 2.5.0 設計判断
+
+- **sitemap 規模見積りの是正**: proposal §3.2 で "1,100+ URL" としていた sitemap が、
+  2026-05 計測で **7,906 URL** に増えていた。 旧 weekly_crawl は GET 3 秒/URL × 7906 = 6.6 時間
+  必要で Cloud Run task timeout 90 分内に完走不可。 2026-05-16 の自動実行が 1,797 URL
+  処理時点で timeout し、 stale な `running` レコードが残っていた。
+- **HEAD + Last-Modified 差分判定を採用**: 藤沢市サーバーは全ページで HTTP `Last-Modified`
+  を正常に返すことを実測で確認 (例: `/index.html` 2026-05-20, `/hoiku/.../ninka-ichiran.html`
+  2026-05-12, `/bosai/shobo/tsuho/index.html` 2025-09-30)。 sitemap.xml に `<lastmod>` は
+  含まれないため、 lastmod ベースの差分は使えないが、 HEAD で代替可能と判明。
+- **HEAD は GET より polite rate を短く (0.5 秒) する**: ボディ転送無しでサーバー負荷が
+  GET の数十分の 1 のため、 1 秒間隔まで縮めるのは合理的。 7,906 × 0.5s = 66 分で全件 HEAD 可。
+- **ETag は使わない**: Last-Modified だけで十分な精度。 ETag 併用は DB スキーマ拡張 +
+  両方一致判定ロジックの複雑化が必要で割に合わない。 サーバーの時計調整やキャッシュの
+  誤動作で偽差分が出る程度のリスクは許容範囲。
+- **初回 / 大幅更新時は HEAD スキップ + 全件 GET fallback**: DB が空 or `last_modified`
+  カラムが NULL の URL は HEAD を打たずに即 GET。 これで「初回 7,906 × 3s = 6.6 時間 +
+  HEAD 1 時間 = 7.6 時間」 を「初回 6.6 時間のみ」 に短縮。 task_timeout 8 時間に拡張して吸収。
+- **orphan `running` レコードの自動 reclassify**: Cloud Run task timeout で強制終了されると
+  `finish_run` が呼ばれず `running` のまま残る (2026-05-16 が実例)。 `run_etl_job` の start
+  時に 12 時間超の `running` を `aborted` に reclassify する保守ロジックを追加。
+
+### 2.5.1 `polite_fetcher.head()` の挙動
+
+| API | 用途 |
+|---|---|
+| `PoliteFetcher.head(url)` | 1 URL に HEAD を打って `HeadResult (status, last_modified, etag)` を返す。 4xx は raise、 5xx は retry。 |
+| `PoliteFetcherConfig.min_interval_sec_head` | HEAD 専用 polite rate (default 0.5 秒)。 `min_interval_sec` (GET 用、 3 秒 default) と独立。 |
+| `_last_head_at` / `_last_fetch_at` | 内部状態。 HEAD と GET の rate limiter を別々に持つ。 |
+
+### 2.5.2 `weekly_crawl.crawl_and_index()` のフロー
+
+```
+1. fetcher.fetch(sitemap_url)              # GET (1 回、 1 KB)
+2. parse_sitemap → list[entry]
+3. store.get_last_modified_map(urls)       # SELECT WHERE url = ANY($1) (1 クエリ)
+4. for each URL:
+   ├─ DB に row 無い → GET 対象 (HEAD スキップ)
+   ├─ DB last_modified NULL → GET 対象 (HEAD スキップ、 保守的)
+   └─ DB last_modified 有り:
+       └─ fetcher.head(url)
+           ├─ サーバー側 Last-Modified > DB 値 → GET 対象
+           ├─ Last-Modified 不在 → GET 対象 (保守的)
+           ├─ HEAD 4xx/5xx → GET 対象 (fallback)
+           └─ それ以外 → skip_unchanged
+5. GET 対象だけ fetcher.fetch(url) → extract_main_text → embed → upsert
+```
+
+### 2.5.3 `CrawlOutcome` 新フィールド
+
+| フィールド | 用途 |
+|---|---|
+| `skipped_unchanged` | HEAD 比較で skip した URL 数 (通常運用で最も多い) |
+| `head_checks` | HEAD を打った URL 数 (HEAD コスト計測用) |
+| `skipped_not_modified` | GET の 304 で skip した URL 数 (差分 crawl では原則 0、 保険用に残す) |
+
+### 2.5.4 `_runner.run_etl_job` の orphan reclassify
+
+start_run 直前に以下を実行:
+
+```python
+await repo.abort_stale_running(
+    job_name=job_name,
+    now=started_at,
+    stale_after_hours=12,  # _STALE_RUNNING_HOURS
+)
+```
+
+`AttributeError` (古い repo / mock) は graceful に握りつぶす。 既存テストとの互換性を保つ。
+
+`etl_runs.status` のドメイン値に `aborted` を追加 (SQL は `TEXT NOT NULL` のため schema 変更不要、 コメントのみ更新)。 `aborted` は `failed` とは別物として扱うため、 fail-fast 判定 (5 連敗) には**カウントしない**。
+
+### 2.5.5 terraform 変更
+
+| 変数 | 旧 | 新 | 用途 |
+|---|---|---|---|
+| `etl_job_task_timeout_seconds` | 5400 | **28800** | 初回 full crawl (6.6 時間) を吸収する 8 時間 |
+| `etl_min_interval_sec` (新規) | — | 3.0 | GET 用 polite rate (env: `FUJISAWA_ETL_MIN_INTERVAL_SEC`) |
+| `etl_min_interval_sec_head` (新規) | — | 0.5 | HEAD 用 polite rate (env: `FUJISAWA_ETL_MIN_INTERVAL_SEC_HEAD`) |
+
+通常週次の Job 実行時間は HEAD ~1 時間 + GET 数百件 (15-30 分) = 1.5 時間程度に収まるため、 timeout 8 時間でもコスト増は無視できる (Cloud Run は実行時間ベース課金)。
+
+### 2.5.6 既知の制約 / 残課題
+
+- 2026-05-16 の orphan `running` レコードは次回 Job 実行時に自動 reclassify される (本 PR のロジックが効く)
+- 既に書き込まれていた 1,681 行 (2026-05-16 partial run の成果物) はそのまま残る — last_modified カラムが入っているため、 次回 weekly_crawl で重複 GET にはならない
+- proposal §4.6 の Test Plan には差分 crawl の挙動テストが含まれていなかったので、 本 PR で追加した tests/etl/test_weekly_crawl.py の `TestCrawlAndIndexIncremental` クラスを補強テストとして扱う
 
 ---
 

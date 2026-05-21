@@ -49,6 +49,11 @@ class EtlRunResult(BaseModel):
 # 直近 N 件すべて failed なら job 関数を呼ばずに status='failed' を返す。
 _FAIL_FAST_THRESHOLD = 5
 
+# orphan `running` レコードの reclassify 閾値。 Cloud Run task timeout の
+# 最大値 (24 時間) より十分短く、 通常 Job の実行時間より長い値を選ぶ。
+# weekly_crawl は最長 8 時間想定なので 12 時間で十分。
+_STALE_RUNNING_HOURS = 12
+
 
 async def run_etl_job(
     *,
@@ -72,6 +77,16 @@ async def run_etl_job(
     """
     _now = now or _utcnow
     started_at = _now()
+
+    # orphan な `running` レコードを `aborted` に書き換える (Cloud Run task
+    # timeout で強制終了されて finish_run が呼ばれなかったケースの後始末)。
+    # 後続の recent_runs / fail-fast 判定が正確な状態を見られるよう、 最初に行う。
+    try:
+        await repo.abort_stale_running(
+            job_name=job_name, now=started_at, stale_after_hours=_STALE_RUNNING_HOURS
+        )
+    except AttributeError:  # pragma: no cover — 旧 repo (テストの簡易 mock) との互換性
+        pass
 
     # fail-fast 判定 (直近 N 件すべて failed なら fn を呼ばずに失敗扱い)
     recent = await repo.recent_runs(job_name, limit=_FAIL_FAST_THRESHOLD)

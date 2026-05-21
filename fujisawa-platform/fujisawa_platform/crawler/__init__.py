@@ -2,6 +2,7 @@
 
 from fujisawa_platform.crawler.polite_fetcher import (
     FetchResult,
+    HeadResult,
     NotModified,
     PoliteFetcher,
     PoliteFetcherConfig,
@@ -26,6 +27,7 @@ from fujisawa_platform.crawler.wayback import (
 
 __all__ = [
     "FetchResult",
+    "HeadResult",
     "NotModified",
     "PoliteFetcher",
     "PoliteFetcherConfig",

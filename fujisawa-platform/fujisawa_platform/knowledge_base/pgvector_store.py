@@ -113,6 +113,23 @@ class PgvectorStore:
             return False
         return n > 0
 
+    async def get_last_modified_map(
+        self, urls: list[str]
+    ) -> dict[str, datetime | None]:
+        """指定 URL の `last_modified` を一括取得 (差分 crawl 用)。
+
+        urls が空なら DB を叩かずに空 dict を返す。 N+1 を避けるため
+        `WHERE url = ANY($1::text[])` で一発取得する。
+        """
+        if not urls:
+            return {}
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT url, last_modified FROM pages WHERE url = ANY($1::text[])",
+                urls,
+            )
+        return {row["url"]: _coerce_dt_optional(row["last_modified"]) for row in rows}
+
     async def search_pages(
         self,
         query_embedding: list[float],
