@@ -2,6 +2,13 @@
 
 Phase 2: LLM / KB (knowledge_base) 関連の設定を追加した。 default は全て
 mock / inmemory なので、 env 何も設定しなくても CI / 開発で graph が動く。
+
+env 名のルール:
+- `env_prefix="FUJISAWA_INFO_BOT_"` + 大文字化したフィールド名 → 例: `line_channel_secret`
+  フィールド → `FUJISAWA_INFO_BOT_LINE_CHANNEL_SECRET` env が読まれる。
+- `alias=` は意図的に使わない: pydantic-settings v2 では `alias` を付けると
+  `env_prefix` が適用されなくなり、 Cloud Run の prefix 込み env と
+  mismatch する (2026-05-22 実 GCP deploy で発覚)。
 """
 
 from __future__ import annotations
@@ -30,38 +37,33 @@ class Settings(BaseSettings):
     # ChannelSecret は HMAC-SHA256 で X-Line-Signature を検証する鍵。
     # ChannelAccessToken は Reply / Push API 呼出時の Bearer。
     # どちらかが空文字列なら `line_configured = False` で webhook は 503 を返す。
-    line_channel_secret: str = Field(default="", alias="LINE_CHANNEL_SECRET")
-    line_channel_access_token: str = Field(default="", alias="LINE_CHANNEL_ACCESS_TOKEN")
+    line_channel_secret: str = Field(default="")
+    line_channel_access_token: str = Field(default="")
 
     # ── LLM (Phase 2) ─────────────────────────────────────────────────
     # default は mock。 本番は env で vertex_anthropic に切替。
-    llm_provider: LLMProvider = Field(default="mock", alias="LLM_PROVIDER")
-    gcp_project_id: str = Field(default="", alias="GCP_PROJECT_ID")
-    vertex_region: str = Field(default="us-east5", alias="VERTEX_REGION")
+    llm_provider: LLMProvider = Field(default="mock")
+    gcp_project_id: str = Field(default="")
+    vertex_region: str = Field(default="us-east5")
     # Vertex AI 経由の Anthropic Claude モデル名 (例: claude-haiku-4-5@20251001)
-    anthropic_model: str = Field(
-        default="claude-haiku-4-5@20251001",
-        alias="ANTHROPIC_MODEL",
-    )
-    llm_max_tokens: int = Field(default=1024, alias="LLM_MAX_TOKENS")
+    anthropic_model: str = Field(default="claude-haiku-4-5@20251001")
+    llm_max_tokens: int = Field(default=1024)
 
     # ── Knowledge Base (Phase 2) ──────────────────────────────────────
-    kb_store_mode: KBStoreMode = Field(default="inmemory", alias="KB_STORE_MODE")
-    embedding_provider: EmbeddingProvider = Field(
-        default="mock",
-        alias="EMBEDDING_PROVIDER",
-    )
-    embedding_dim: int = Field(default=768, alias="EMBEDDING_DIM")
+    kb_store_mode: KBStoreMode = Field(default="inmemory")
+    embedding_provider: EmbeddingProvider = Field(default="mock")
+    embedding_dim: int = Field(default=768)
     # pgvector 接続情報 (kb_store_mode=pgvector 時に必須)
-    cloud_sql_host: str = Field(default="", alias="CLOUD_SQL_HOST")
-    cloud_sql_port: int = Field(default=5432, alias="CLOUD_SQL_PORT")
-    cloud_sql_user: str = Field(default="", alias="CLOUD_SQL_USER")
-    cloud_sql_password: str = Field(default="", alias="CLOUD_SQL_PASSWORD")
-    cloud_sql_database: str = Field(default="fujisawa_kb_db", alias="CLOUD_SQL_DATABASE")
+    cloud_sql_host: str = Field(default="")
+    cloud_sql_port: int = Field(default=5432)
+    cloud_sql_user: str = Field(default="")
+    cloud_sql_password: str = Field(default="")
+    cloud_sql_database: str = Field(default="fujisawa_kb_db")
 
     # ── Feature flags ─────────────────────────────────────────────────
-    feature_rag_enabled: bool = Field(default=True, alias="RAG_ENABLED")
-    rag_top_k: int = Field(default=5, alias="RAG_TOP_K")
+    # env: FUJISAWA_INFO_BOT_RAG_ENABLED / FUJISAWA_INFO_BOT_RAG_TOP_K
+    rag_enabled: bool = Field(default=True)
+    rag_top_k: int = Field(default=5)
 
     @property
     def line_configured(self) -> bool:
