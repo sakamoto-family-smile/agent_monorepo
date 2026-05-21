@@ -73,7 +73,9 @@ fujisawa-info-bot/tests/
 fujisawa-info-bot/docs/
 fujisawa-info-bot/terraform/
 
-# repo root の docs / 設定 (image には不要)
-LICENSE
-README.md
-docs/
+# repo root の docs / 設定 (image には不要)。 leading `/` で root のみに限定し、
+# fujisawa-platform/README.md / fujisawa-info-bot/README.md / llm-client/README.md
+# などの subdirectory の README は image に含める (Dockerfile COPY が必要としている)。
+/LICENSE
+/README.md
+/docs/

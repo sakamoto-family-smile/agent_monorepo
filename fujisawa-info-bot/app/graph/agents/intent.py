@@ -4,7 +4,7 @@
 LLM 出力 (JSON 1 行) を期待し、 parse 失敗時は fallback で `rag` + category None
 にする (RAG 側の全体検索で何かしらヒットさせる救済策)。
 
-settings の `feature_rag_enabled=False` 時は LLM を呼ばずに out_of_scope 固定。
+settings の `rag_enabled=False` 時は LLM を呼ばずに out_of_scope 固定。
 """
 
 from __future__ import annotations
