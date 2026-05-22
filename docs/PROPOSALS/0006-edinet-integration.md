@@ -138,9 +138,20 @@
 └──────────────────────────────────┘
 
 [Daily batch (Cloud Run Jobs、 後追い)]
-   Cloud Scheduler ──▶ Cloud Run Job (edinet_index_etl)
-                          ├─ 昨日の文書 INDEX を fetch
-                          └─ Cloud SQL `edinet_documents` に upsert
+   Cloud Scheduler (毎日 02:00 JST) ──▶ Cloud Run Job (edinet_index_etl)
+                          ├─ 直近 7 日分 (rolling window) の文書 INDEX を fetch
+                          │   - 1 日ずつ api/v2/documents.json?date=YYYY-MM-DD&type=2 を叩く
+                          │   - type=2 で securities_code 等のフルメタデータ取得
+                          ├─ 全書類タイプ (有報・四半期・大量保有 等) を取得 (絞らず保存)
+                          └─ Cloud SQL `edinet_documents` に upsert (PK=document_id)
+                              - 新規書類: INSERT
+                              - 既存書類: status 系フィールドのみ UPDATE
+                                (取下げ / 開示停止が遅れて反映されるため 7 日窓 で捕捉)
+
+[One-shot backfill (初回 / 過去データ投入)]
+   gcloud run jobs execute ... -- args=edinet_backfill --from=YYYY-MM-DD --to=YYYY-MM-DD
+   - デプロイ直後の初期 backfill (過去 90 日 ~ 1 年) に利用
+   - 通常運用後は再実行しない
 ```
 
 ### 4.2 データモデル
@@ -159,7 +170,7 @@ class DocumentType(StrEnum):
 
 
 class DocumentMetadata(BaseModel):
-    document_id: str          # docID (例: "S100ABC1")
+    document_id: str          # docID (例: "S100ABC1")、 immutable
     edinet_code: str          # 提出者 EDINET code (例: "E02144")
     securities_code: str | None  # 4 桁証券コード (例: "7203")
     submitter_name: str       # 提出者名 (例: "トヨタ自動車株式会社")
@@ -167,6 +178,13 @@ class DocumentMetadata(BaseModel):
     submit_date: date         # 提出日
     period_end: date | None   # 期末日
     description: str          # 書類概要
+    # ── 以下、 status 系 (rolling window で upsert される可能性) ──
+    withdrawal_status: int    # 0=有効、 1=取下げ
+    disclosure_status: int    # 0=開示中、 1=開示停止、 2=公開停止
+    doc_info_edit_status: int # 0=未編集、 1=編集済 (件名 / 概要が訂正されている)
+    xbrl_flag: bool           # XBRL 有無
+    pdf_flag: bool            # PDF 有無
+    attach_doc_flag: bool     # 添付書類有無
 
 
 class DocumentBody(BaseModel):
@@ -181,16 +199,27 @@ class DocumentBody(BaseModel):
 
 ```sql
 CREATE TABLE edinet_documents (
-    document_id        TEXT PRIMARY KEY,
-    edinet_code        TEXT NOT NULL,
-    securities_code    TEXT,                       -- 4 桁証券コード (nullable)
-    submitter_name     TEXT NOT NULL,
-    document_type      TEXT NOT NULL,              -- DocumentType 値
-    submit_date        DATE NOT NULL,
-    period_end         DATE,
-    description        TEXT,
-    cache_uri          TEXT,                       -- gs://bucket/path or file:// (NULL なら未 cache)
-    cached_at          TIMESTAMPTZ
+    document_id            TEXT PRIMARY KEY,
+    edinet_code            TEXT NOT NULL,
+    securities_code        TEXT,                   -- 4 桁証券コード (nullable)
+    submitter_name         TEXT NOT NULL,
+    document_type          TEXT NOT NULL,          -- DocumentType 値
+    submit_date            DATE NOT NULL,
+    period_end             DATE,
+    description            TEXT,
+    -- ── status 系 (rolling 7 日窓 upsert で最新化される) ──
+    withdrawal_status      SMALLINT NOT NULL DEFAULT 0,  -- 0=有効, 1=取下げ
+    disclosure_status      SMALLINT NOT NULL DEFAULT 0,  -- 0=開示中, 1=開示停止, 2=公開停止
+    doc_info_edit_status   SMALLINT NOT NULL DEFAULT 0,
+    xbrl_flag              BOOLEAN NOT NULL DEFAULT FALSE,
+    pdf_flag               BOOLEAN NOT NULL DEFAULT FALSE,
+    attach_doc_flag        BOOLEAN NOT NULL DEFAULT FALSE,
+    -- ── cache 状態 ──
+    cache_uri              TEXT,                   -- gs://bucket/path or file:// (NULL なら未 cache)
+    cached_at              TIMESTAMPTZ,
+    -- ── upsert 監査用 ──
+    first_seen_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_index_refreshed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX edinet_documents_securities_code_submit_date_idx
@@ -199,7 +228,16 @@ CREATE INDEX edinet_documents_edinet_code_submit_date_idx
     ON edinet_documents (edinet_code, submit_date DESC);
 CREATE INDEX edinet_documents_type_submit_date_idx
     ON edinet_documents (document_type, submit_date DESC);
+-- 取下げ・開示停止された書類を素早く絞り込むため
+CREATE INDEX edinet_documents_status_idx
+    ON edinet_documents (withdrawal_status, disclosure_status)
+    WHERE withdrawal_status <> 0 OR disclosure_status <> 0;
 ```
+
+書類本体 (PDF / XBRL) は **immutable** だが、 status 系フィールド (取下げ / 開示停止 / 編集) は提出後に変わる可能性がある。 そのため:
+- INDEX 取得は **rolling 7 日窓で upsert** (毎日同じ日を 7 回 fetch、 status の遅延変更を 1 週間以内に反映)
+- 書類本体の cache TTL は **∞** (immutable のため再取得不要)
+- 利用側 (orchestrator) は `withdrawal_status = 0 AND disclosure_status = 0` の書類のみを採用
 
 ### 4.3 API
 
@@ -316,6 +354,9 @@ edinet-index-etl/             # or stock-analysis-agent/app/batch/edinet_index.p
 | `EDINET_CACHE_ROOT` | `./data/edinet` | LocalCache のルート |
 | `EDINET_CACHE_GCS_BUCKET` | (未設定) | GcsCache のバケット名 |
 | `EDINET_HTTP_QPS` | `1.0` | EDINET API への秒間リクエスト上限 |
+| `EDINET_DAILY_WINDOW_DAYS` | `7` | daily batch の rolling window 日数 (status 系の遅延変更を捕捉) |
+| `EDINET_DOCUMENT_TYPES` | (空 = 全件) | 取得対象書類タイプの csv (空なら全件保存)。 絞る場合 `120,140,160` 等 |
+| `EDINET_BATCH_SCHEDULE` | `0 2 * * *` (毎日 02:00 JST) | Cloud Scheduler cron |
 
 ---
 
@@ -423,6 +464,7 @@ edinet-index-etl/             # or stock-analysis-agent/app/batch/edinet_index.p
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-05-22 | Draft | 初稿 (本 PR) |
+| 2026-05-23 | Draft 改訂 | レビュー反映: daily batch を「rolling 7 日窓 + upsert」 に明文化、 status 系フィールド (取下げ / 開示停止 / 編集) を `DocumentMetadata` + Cloud SQL schema に追加、 schedule を 02:00 JST に確定、 one-shot backfill コマンド追加 |
 
 ---
 
@@ -434,7 +476,7 @@ edinet-index-etl/             # or stock-analysis-agent/app/batch/edinet_index.p
 | **Phase 1b** | `code_resolver` (Edinetcode.csv からマッピング構築) | 半日 |
 | **Phase 1c** | LocalCache 完成 + GcsCache 実装 | 半日 |
 | **Phase 1d** | stock-analysis-agent の `edinet_collector` 追加、 orchestrator に EDINET 経路組み込み (PDF 直渡し) | 1 日 |
-| **Phase 1e** | (任意) daily batch Cloud Run Job で INDEX を Cloud SQL に upsert | 1 日 |
+| **Phase 1e** | daily batch Cloud Run Job で INDEX (rolling 7 日窓) を Cloud SQL に upsert + 初回 backfill コマンド | 1 日 |
 | **Phase 2** | XBRL parser 統合 (構造化数値取得) | 2-3 日 |
 | **Phase 3** | 大量保有報告 / 公開買付の subscribe + LINE Bot 連携 | 別 PR |
 | **Phase 4** | MCP server 化 (`edinet-mcp-server/`) | 別 PR |
