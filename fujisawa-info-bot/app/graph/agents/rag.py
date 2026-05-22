@@ -59,6 +59,19 @@ async def answer_with_rag(
     query_vec = embedding.embed(query)
     hits = await store.search_pages(query_vec, top_k=top_k, category=category)
 
+    # category 指定で 0 hit のときは category=None で全体検索 fallback。
+    # weekly_crawl が category 列を自動付与しない現状 (全行 NULL) で、
+    # Intent agent の category 推定が空振りするとそのまま 0 hit になり
+    # 「該当ページ無し」 を返してしまうため、 category なし再検索で救う。
+    # weekly_crawl の category 自動付与 (follow-up backlog) 完了後は本 fallback
+    # を撤去するか re-rank ロジックに置換する。
+    if not hits and category is not None:
+        logger.info(
+            "answer_with_rag: 0 hits with category=%r, retrying without category",
+            category,
+        )
+        hits = await store.search_pages(query_vec, top_k=top_k, category=None)
+
     if not hits:
         return (_NO_HIT_TEXT, [])
 
