@@ -252,6 +252,42 @@ gcloud run jobs update fujisawa-wayback-backfill \
 
 ---
 
+## 9.5 pages.category の backfill (2026-05-22 hotfix 経由のみ)
+
+weekly_crawl_etl が `pages.category` を自動付与する機能を追加した後、 既存行の
+category は NULL のまま残る。 URL pattern ベースの分類なので **LLM 不要・数秒で
+backfill 可能**。 cloud_sql_proxy 経由で psql を流す:
+
+```bash
+psql "host=127.0.0.1 user=postgres dbname=fujisawa_kb_db" <<'SQL'
+-- 優先度順 (specific → general)。 keyword は etl/_category_classifier.py と同期。
+UPDATE pages SET category = 'garbage'
+ WHERE url ~ '(gomi|recycle)' AND category IS NULL;
+
+UPDATE pages SET category = 'disaster'
+ WHERE url ~ '(bosai|bousai|bouhan|bohan|saigai|shobo|kikikanri)' AND category IS NULL;
+
+UPDATE pages SET category = 'parenting'
+ WHERE url ~ '(hoiku|kosodate|kosodatekyouiku|youchien|jido|kosodateshienin)' AND category IS NULL;
+
+UPDATE pages SET category = 'procedure'
+ WHERE url ~ '(tetsuduki|jumin|koseki|mynumber|mado-c)' AND category IS NULL;
+
+UPDATE pages SET category = 'tourism'
+ WHERE url ~ '(kanko|kankou|kankoshinko|kouen|leisure)' AND category IS NULL;
+
+UPDATE pages SET category = 'cityhall'
+ WHERE url ~ '(shise|kouhou|kishakaiken|kikaku|zaisei|koho)' AND category IS NULL;
+
+-- 確認
+SELECT category, COUNT(*) FROM pages GROUP BY category ORDER BY category NULLS LAST;
+SQL
+```
+
+次回以降の weekly_crawl_etl は新 image (PR #154 以降) で category を自動付与する。
+
+---
+
 ## 10. Troubleshooting
 
 | 症状 | 対処 |
