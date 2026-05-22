@@ -267,3 +267,62 @@ class TestSyncMain:
         exit_code = cli.main()
         assert exit_code == 0
         assert stub_resources["run_calls"]["run_monthly_stats_compute"].call_count == 1
+
+
+class TestMakeEmbedder:
+    """`_make_embedder` の Vertex / Mock 切替を検証。
+
+    2026-05-22 hotfix: vertex_project_id 設定済なら Vertex を返すように修正
+    (それ以前は常に Mock を返していた)。
+    """
+
+    def test_returns_mock_when_vertex_project_id_empty(self) -> None:
+        from fujisawa_platform.knowledge_base import MockEmbeddingClient
+
+        config = cli.EtlConfig(
+            db_host="h",
+            db_user="u",
+            db_password="p",
+            user_agent="ua/0.1 (https://example.com)",
+            sitemap_url="https://example.com/sitemap.xml",
+            vertex_project_id=None,
+        )
+        embedder = cli._make_embedder(config)
+        assert isinstance(embedder, MockEmbeddingClient)
+
+    def test_returns_vertex_when_project_id_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """VertexEmbeddingClient が引数通り構築されることを確認 (実 vertexai は触らない)。"""
+        captured: dict[str, Any] = {}
+
+        class _StubVertex:
+            def __init__(self, *, project_id: str, region: str, model: str, dimension: int) -> None:
+                captured["init"] = {
+                    "project_id": project_id,
+                    "region": region,
+                    "model": model,
+                    "dimension": dimension,
+                }
+
+        monkeypatch.setattr(cli, "VertexEmbeddingClient", _StubVertex)
+
+        config = cli.EtlConfig(
+            db_host="h",
+            db_user="u",
+            db_password="p",
+            user_agent="ua/0.1 (https://example.com)",
+            sitemap_url="https://example.com/sitemap.xml",
+            vertex_project_id="my-project",
+            vertex_location="us-central1",
+            embedding_model="text-embedding-004",
+            embedding_dim=768,
+        )
+        embedder = cli._make_embedder(config)
+        assert isinstance(embedder, _StubVertex)
+        assert captured["init"] == {
+            "project_id": "my-project",
+            "region": "us-central1",
+            "model": "text-embedding-004",
+            "dimension": 768,
+        }
