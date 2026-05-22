@@ -1,0 +1,48 @@
+[project]
+name = "edinet-client"
+version = "0.1.0"
+description = "Thin EDINET API v2 wrapper for monorepo-wide reuse (proposal 0006)"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27.0",
+    "pydantic>=2.6.0",
+    "tenacity>=8.5.0",
+]
+
+[project.optional-dependencies]
+# GCS バックエンドの Cache を使う場合のみ有効化 (Phase 1c で実装、 本 PR は scaffold のみ)
+gcs = [
+    "google-cloud-storage>=2.18.0",
+]
+
+# XBRL 構造化抽出 (Phase 2 で実装)
+xbrl = [
+    "lxml>=5.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["edinet_client"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+ignore = ["E501"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "respx>=0.21.0",
+    "ruff>=0.6.0",
+]
