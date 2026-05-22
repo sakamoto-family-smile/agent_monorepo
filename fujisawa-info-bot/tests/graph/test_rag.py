@@ -122,6 +122,39 @@ class TestAnswerWithRAG:
         # 出典は重複除外 → URL 出現は 1 回
         assert text.count(same_url) == 1
 
+    async def test_category_zero_hit_falls_back_to_global_search(
+        self, embedding: MockEmbeddingClient, store: InMemoryStore
+    ) -> None:
+        """category 指定で 0 hit のとき category=None で再検索する fallback。
+
+        2026-05-22 実 deploy で pages.category が全行 NULL のため category 指定
+        検索が常に空振りする問題に対する fallback。 weekly_crawl の category
+        自動付与未実装期間の救済策。
+        """
+        # category=NULL のページを 1 件入れる (実 DB と同じ状態)
+        page = PageDocument(
+            page_id="p1",
+            url="https://www.city.fujisawa.kanagawa.jp/garbage",
+            title="ゴミ収集",
+            content="ゴミ収集の日程",
+            embedding=embedding.embed("ゴミ"),
+            category=None,  # ← 全行 NULL を再現
+            fetched_at=datetime.now(UTC),
+        )
+        await store.upsert_page(page)
+
+        text, hits = await answer_with_rag(
+            query="ゴミの日",
+            embedding=embedding,
+            store=store,
+            llm=MockLLMClient(fixed_reply=_FIXED_REPLY),
+            top_k=3,
+            category="garbage",  # 指定するが DB は NULL なのでマッチしない
+        )
+        # fallback が効いて hit するはず
+        assert len(hits) == 1
+        assert _FIXED_REPLY in text
+
     async def test_caps_citations_to_three(
         self, embedding: MockEmbeddingClient, store: InMemoryStore
     ) -> None:
