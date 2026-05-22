@@ -47,6 +47,7 @@ from fujisawa_platform.crawler import (
     PoliteFetcherConfig,
     parse_sitemap,
 )
+from fujisawa_platform.etl._category_classifier import classify_category
 from fujisawa_platform.etl._html import extract_main_text, extract_title
 from fujisawa_platform.etl._runner import EtlRunResult, run_etl_job
 from fujisawa_platform.knowledge_base import EmbeddingClient
@@ -166,6 +167,7 @@ async def crawl_and_index(
             title=extract_title(page_result.text),
             content=text,
             embedding=embedder.embed(text),
+            category=classify_category(url_str),
             fetched_at=_now(),
             last_modified=page_result.last_modified,
         )
