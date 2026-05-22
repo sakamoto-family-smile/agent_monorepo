@@ -14,6 +14,7 @@ Store 実装:
 from fujisawa_platform.knowledge_base.embedding import (
     EmbeddingClient,
     MockEmbeddingClient,
+    VertexEmbeddingClient,
 )
 from fujisawa_platform.knowledge_base.pgvector_store import (
     PgvectorStore,
@@ -34,5 +35,6 @@ __all__ = [
     "PageDocument",
     "PgvectorStore",
     "SearchHit",
+    "VertexEmbeddingClient",
     "build_pgvector_pool",
 ]

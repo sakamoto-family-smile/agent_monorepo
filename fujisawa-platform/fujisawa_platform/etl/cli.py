@@ -53,6 +53,7 @@ from fujisawa_platform.knowledge_base import (
     EmbeddingClient,
     MockEmbeddingClient,
     PgvectorStore,
+    VertexEmbeddingClient,
     build_pgvector_pool,
 )
 
@@ -297,12 +298,32 @@ def _make_archive(config: EtlConfig) -> PdfArchive:
 
 
 def _make_embedder(config: EtlConfig) -> EmbeddingClient:
-    """Vertex AI を有効化する条件で切り替え (Phase 4-2h step 2 で本番化)。"""
+    """`vertex_project_id` 設定有無で Vertex / Mock を切り替える。
+
+    - 未設定: `MockEmbeddingClient` (SHA-256 hash ベースの偽 vector、 CI / dry-run 用)
+    - 設定済: `VertexEmbeddingClient` (本番、 Vertex AI text-embedding-004 768 dim)
+
+    2026-05-22 hotfix 以前は `vertex_project_id` 設定済でも Mock を返す TODO が
+    残っていた。 結果として `weekly_crawl_etl` の embedding が全件 Mock で生成され、
+    fujisawa-info-bot RAG が機能しない問題が発覚 (Phase 7 実機検証で発覚)。
+    本変更後は backfill で全 pages を再 embed する必要あり (docs/SETUP.md §8)。
+    """
     if not config.vertex_project_id:
         logger.warning("vertex_project_id not set; using MockEmbeddingClient")
         return MockEmbeddingClient(dimension=config.embedding_dim)
-    # Phase 4-2h step 2 で VertexEmbeddingClient に差し替え予定
-    return MockEmbeddingClient(dimension=config.embedding_dim)
+    logger.info(
+        "Using VertexEmbeddingClient: project=%s region=%s model=%s dim=%d",
+        config.vertex_project_id,
+        config.vertex_location,
+        config.embedding_model,
+        config.embedding_dim,
+    )
+    return VertexEmbeddingClient(
+        project_id=config.vertex_project_id,
+        region=config.vertex_location,
+        model=config.embedding_model,
+        dimension=config.embedding_dim,
+    )
 
 
 def _generate_run_id(job: str) -> str:
