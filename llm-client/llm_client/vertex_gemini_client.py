@@ -20,7 +20,7 @@ import time
 from typing import Any
 
 from ._emit import safe_emit
-from .types import ChatMessage, OnCallCallback
+from .types import ChatMessage, LLMUsage, OnCallCallback
 
 
 class VertexGeminiLLMClient:
@@ -34,6 +34,11 @@ class VertexGeminiLLMClient:
             max_tokens=2048,
         )
         text = await client.complete(system="あなたは...", user="質問")
+
+        # usage 情報込みで取得 (品質メトリクス / 課金用)
+        text, usage = await client.complete_with_usage(
+            system="...", user="...", temperature=0.4,
+        )
     """
 
     _PROVIDER = "vertex_gemini"
@@ -45,6 +50,7 @@ class VertexGeminiLLMClient:
         region: str,
         model: str,
         max_tokens: int,
+        temperature: float | None = None,
         on_call: OnCallCallback | None = None,
     ) -> None:
         try:
@@ -61,6 +67,7 @@ class VertexGeminiLLMClient:
         self._region = region
         self._model = model
         self._max_tokens = max_tokens
+        self._temperature = temperature
         self._on_call = on_call
         self._generative_model_cls = GenerativeModel  # 遅延 instantiate
 
@@ -70,12 +77,15 @@ class VertexGeminiLLMClient:
         system: str,
         user: str,
         cache_system: bool = False,
+        temperature: float | None = None,
     ) -> str:
-        return await self.complete_messages(
+        text, _ = await self.complete_with_usage(
             system=system,
-            messages=[{"role": "user", "content": user}],
+            user=user,
             cache_system=cache_system,
+            temperature=temperature,
         )
+        return text
 
     async def complete_messages(
         self,
@@ -83,7 +93,43 @@ class VertexGeminiLLMClient:
         system: str,
         messages: list[ChatMessage],
         cache_system: bool = False,
+        temperature: float | None = None,
     ) -> str:
+        text, _ = await self._complete_messages_with_usage(
+            system=system,
+            messages=messages,
+            cache_system=cache_system,
+            temperature=temperature,
+        )
+        return text
+
+    async def complete_with_usage(
+        self,
+        *,
+        system: str,
+        user: str,
+        cache_system: bool = False,
+        temperature: float | None = None,
+    ) -> tuple[str, LLMUsage]:
+        """`complete` と同じだが (text, LLMUsage) を返す。
+
+        consumer 側で品質メトリクスや課金計算に token 数を使いたい場合に。
+        """
+        return await self._complete_messages_with_usage(
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            cache_system=cache_system,
+            temperature=temperature,
+        )
+
+    async def _complete_messages_with_usage(
+        self,
+        *,
+        system: str,
+        messages: list[ChatMessage],
+        cache_system: bool,
+        temperature: float | None,
+    ) -> tuple[str, LLMUsage]:
         started = time.monotonic()
         try:
             # GenerativeModel は system_instruction を constructor で受ける
@@ -92,11 +138,16 @@ class VertexGeminiLLMClient:
                 system_instruction=system if system else None,
             )
             contents = _to_gemini_contents(messages)
+            gen_config = _build_gen_config(
+                max_tokens=self._max_tokens,
+                temperature=temperature if temperature is not None else self._temperature,
+            )
             resp = await model_instance.generate_content_async(
                 contents,
-                generation_config={"max_output_tokens": self._max_tokens},
+                generation_config=gen_config,
             )
             text = _extract_text(resp)
+            usage = _extract_usage(resp, model=self._model)
         except Exception as e:
             safe_emit(
                 self._on_call,
@@ -115,7 +166,14 @@ class VertexGeminiLLMClient:
             started=started,
             error=None,
         )
-        return text
+        return text, usage
+
+
+def _build_gen_config(*, max_tokens: int, temperature: float | None) -> dict[str, Any]:
+    cfg: dict[str, Any] = {"max_output_tokens": max_tokens}
+    if temperature is not None:
+        cfg["temperature"] = temperature
+    return cfg
 
 
 def _to_gemini_contents(messages: list[ChatMessage]) -> list[dict[str, Any]]:
@@ -133,7 +191,6 @@ def _to_gemini_contents(messages: list[ChatMessage]) -> list[dict[str, Any]]:
 def _extract_text(resp: Any) -> str:
     """Gemini レスポンスから text を抽出。 candidates[0].content.parts[*].text を結合。"""
     try:
-        # SDK が `text` property を提供している場合
         if hasattr(resp, "text") and resp.text:
             return str(resp.text)
     except (ValueError, AttributeError):
@@ -149,6 +206,18 @@ def _extract_text(resp: Any) -> str:
             if t:
                 parts_text.append(t)
     return "".join(parts_text)
+
+
+def _extract_usage(resp: Any, *, model: str) -> LLMUsage:
+    """Gemini レスポンスから usage 情報を抽出。"""
+    usage_md = getattr(resp, "usage_metadata", None)
+    if usage_md is None:
+        return LLMUsage(model=model)
+    return LLMUsage(
+        model=model,
+        input_tokens=int(getattr(usage_md, "prompt_token_count", 0) or 0),
+        output_tokens=int(getattr(usage_md, "candidates_token_count", 0) or 0),
+    )
 
 
 __all__ = ["VertexGeminiLLMClient"]

@@ -1,17 +1,24 @@
-"""LLM クライアント抽象（Vertex AI Claude をラップする）。
+"""LLM クライアント抽象（Vertex AI Claude / Gemini をラップする）。
 
 設計（DESIGN.md §4.2）:
 - Vertex AI 経由の Claude（asia-northeast1）を採用
 - Workload Identity 認証（API キーは持たない）
 - prompt caching: system prompt を `cache_control` で固定（呼び出し側で制御）
 
-Protocol で抽象化することで、テスト時は MockLLMClient を DI して LLM 呼び出し
+Protocol で抽象化することで、 テスト時は MockLLMClient を DI して LLM 呼び出し
 を発生させずに動作確認できる。
+
+2026-05-22: `VertexGeminiClient` を `llm-client` パッケージ
+(`VertexGeminiLLMClient`) の thin wrapper に置換 (PR-150 follow-up)。 monorepo
+内の Gemini 呼出経路を一本化する。 sync ⇄ async ブリッジは `_run_async()`。
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -19,6 +26,37 @@ import app.config
 from app.agent.errors import LLMClientError
 
 logger = logging.getLogger(__name__)
+
+def _run_async[T](coro: Awaitable[T]) -> T:
+    """sync コンテキストから async coroutine を実行する。
+
+    - 現在の thread に走っている event loop が無ければ `asyncio.run` で実行
+    - 既に loop が走っている (例: FastAPI 内 → pipeline.run async → review sync)
+      なら、 別 thread で新規 loop を起こして実行する (`asyncio.run` は
+      RuntimeError になるため)。 thread overhead は LLM 呼出本体 (数秒) に
+      比較すれば無視できる
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop in this thread → safe to use asyncio.run
+        return asyncio.run(coro)
+
+    # Running loop in current thread → bridge via separate thread
+    result: dict[str, Any] = {}
+
+    def _runner() -> None:
+        try:
+            result["value"] = asyncio.run(coro)  # type: ignore[arg-type]
+        except BaseException as exc:  # noqa: BLE001
+            result["error"] = exc
+
+    t = threading.Thread(target=_runner, daemon=True)
+    t.start()
+    t.join()
+    if "error" in result:
+        raise result["error"]
+    return result["value"]  # type: ignore[no-any-return]
 
 
 @dataclass
@@ -196,11 +234,19 @@ class VertexAnthropicClient:
 
 
 class VertexGeminiClient:
-    """Gemini on Vertex AI の同期クライアント。Quality Reviewer の cross-check 用。
+    """Gemini on Vertex AI の同期クライアント。 Quality Reviewer の cross-check 用。
 
-    Question Generator が Claude である一方、Quality Reviewer は意図的に
-    別系列（Gemini）を使うことで、共通モード失敗を検出可能にする
-    （DESIGN.md §3.2 / §3.1.1）。
+    Question Generator が Claude である一方、 Quality Reviewer は意図的に
+    別系列 (Gemini) を使うことで、 共通モード失敗を検出可能にする
+    (DESIGN.md §3.2 / §3.1.1)。
+
+    実装: 2026-05-22 から shared な `llm-client` パッケージの
+    `VertexGeminiLLMClient` を内部で使う。 driving-license-bot の sync API
+    (`LLMClient` Protocol) との互換性のため、 内部の async 呼出を
+    `_run_async()` で synchronously ブリッジする。
+
+    `cache_system` は Anthropic 風 prompt caching のフラグで Gemini では no-op。
+    context caching API 対応時に拡張予定 (proposal-level 検討事項)。
     """
 
     def __init__(
@@ -214,16 +260,25 @@ class VertexGeminiClient:
         self._region = region
         self._model = model
         try:
-            import vertexai
-            from vertexai.generative_models import GenerativeModel
-        except ImportError as exc:  # pragma: no cover — google-cloud-aiplatform 未導入時
+            from llm_client import VertexGeminiLLMClient as _Inner
+        except ImportError as exc:  # pragma: no cover — llm-client 未導入時
             raise LLMClientError(
-                "google-cloud-aiplatform (vertexai) is required for VertexGeminiClient"
+                "llm-client (with [vertex-gemini] extra) is required for VertexGeminiClient"
             ) from exc
-        vertexai.init(project=project_id, location=region)
-        self._model_obj = GenerativeModel(model)
+
+        # llm-client 側の max_tokens は constructor で固定するため、 generate()
+        # の per-call max_tokens は llm-client 側に毎回 instance を作り直すと
+        # 重い。 そのため後段で max_tokens / temperature を per-call override する
+        # ため、 ここでは consumer 提供 default を仮置きする。
+        self._inner = _Inner(
+            project_id=project_id,
+            region=region,
+            model=model,
+            max_tokens=4096,
+        )
         logger.info(
-            "VertexGeminiClient initialized project=%s region=%s model=%s",
+            "VertexGeminiClient initialized via llm-client.VertexGeminiLLMClient "
+            "(project=%s region=%s model=%s)",
             project_id,
             region,
             model,
@@ -238,37 +293,32 @@ class VertexGeminiClient:
         temperature: float = 0.4,
         cache_system: bool = True,  # noqa: ARG002 — Gemini は Anthropic と異なるキャッシュ方式
     ) -> LLMResponse:
-        """Vertex AI 経由で Gemini を呼び出す。
+        """Vertex AI 経由で Gemini を呼び出す (sync ラッパ)。
 
-        Gemini にはシステムロールがないため、system + user を結合して 1 つの
-        ユーザープロンプトとして渡す。`cache_system` パラメータは Anthropic との
-        Protocol 統一のため受け取るが Gemini では無視される（context caching は
-        別 API のため Phase 5+ で導入検討）。
+        内部実装は `llm_client.VertexGeminiLLMClient.complete_with_usage()` で、
+        text + token usage を取得して `LLMResponse` を組み立てる。
         """
-        try:
-            from vertexai.generative_models import GenerationConfig
-        except ImportError as exc:  # pragma: no cover
-            raise LLMClientError("vertexai import failed") from exc
+        # per-call max_tokens override
+        self._inner._max_tokens = max_tokens  # noqa: SLF001 — driving-license-bot 側で per-call 上書きが必要なため
 
-        prompt = f"{system}\n\n---\n\n{user}"
-        config = GenerationConfig(
-            max_output_tokens=max_tokens,
-            temperature=temperature,
-        )
         try:
-            resp = self._model_obj.generate_content(
-                prompt, generation_config=config
+            text, usage = _run_async(
+                self._inner.complete_with_usage(
+                    system=system,
+                    user=user,
+                    temperature=temperature,
+                )
             )
         except Exception as exc:  # noqa: BLE001
             raise LLMClientError(f"Vertex Gemini call failed: {exc}") from exc
 
-        text = getattr(resp, "text", "") or ""
-        usage = getattr(resp, "usage_metadata", None)
         return LLMResponse(
             text=text,
-            model=self._model,
-            input_tokens=getattr(usage, "prompt_token_count", 0) if usage else 0,
-            output_tokens=getattr(usage, "candidates_token_count", 0) if usage else 0,
+            model=usage.model,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_read_input_tokens=usage.cache_read_input_tokens,
+            cache_creation_input_tokens=usage.cache_creation_input_tokens,
         )
 
 

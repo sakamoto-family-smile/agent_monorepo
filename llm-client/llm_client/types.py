@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
 
@@ -11,6 +12,25 @@ class ChatMessage(TypedDict):
 
     role: Literal["user", "assistant"]
     content: str
+
+
+@dataclass(frozen=True)
+class LLMUsage:
+    """LLM 呼出 1 回分の usage / コストメタデータ。
+
+    `complete_with_usage()` の戻り値 2nd 要素。 consumer (driving-license-bot 等)
+    が品質メトリクスや課金計算に使う。
+
+    cache 系 4 フィールドは Anthropic で意味を持つ。 Gemini は cache_creation /
+    cache_read を区別しないため両方 0 となる (将来 Vertex context caching API
+    対応時に拡張)。
+    """
+
+    model: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
 
 
 class LlmCallEvent(TypedDict, total=False):

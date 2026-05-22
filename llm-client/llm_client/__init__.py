@@ -20,7 +20,7 @@ from ._system_payload import system_payload
 from .anthropic_client import AnthropicLLMClient
 from .mock import MockLLMClient
 from .protocol import LLMClient
-from .types import ChatMessage, LlmCallEvent, OnCallCallback
+from .types import ChatMessage, LlmCallEvent, LLMUsage, OnCallCallback
 from .vertex_client import VertexAnthropicLLMClient
 from .vertex_gemini_client import VertexGeminiLLMClient
 
@@ -28,6 +28,7 @@ __all__ = [
     "AnthropicLLMClient",
     "ChatMessage",
     "LLMClient",
+    "LLMUsage",
     "LlmCallEvent",
     "MockLLMClient",
     "OnCallCallback",
