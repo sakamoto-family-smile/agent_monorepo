@@ -749,6 +749,7 @@ dependencies = [
     { name = "itsdangerous" },
     { name = "jinja2" },
     { name = "line-bot-sdk" },
+    { name = "llm-client" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
@@ -795,6 +796,7 @@ requires-dist = [
     { name = "itsdangerous", specifier = ">=2.2.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "line-bot-sdk", specifier = ">=3.11.0" },
+    { name = "llm-client", directory = "../llm-client" },
     { name = "pgvector", marker = "extra == 'pgvector'", specifier = ">=0.3.0" },
     { name = "pydantic", specifier = ">=2.6.0" },
     { name = "pydantic-settings", specifier = ">=2.4.0" },
@@ -1540,6 +1542,28 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b3/07/d5cd69937689799d3e64825e20af2af384798278750132346da10ffd8e5f/line_bot_sdk-3.23.0.tar.gz", hash = "sha256:33380c43e488e346e698bf564a4d613cd6ff0518024168ccbfdc32e28f082a01", size = 471233, upload-time = "2026-04-07T11:21:41.032Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/10/7d/416aa1c5e26ae9f78c57d28510952efaa23e97d8a6229354eeb6d0cce47c/line_bot_sdk-3.23.0-py2.py3-none-any.whl", hash = "sha256:29a0bc206f8cc6b965e5b44e9e946108252b0bbe698115af00aeece12df6cd10", size = 819500, upload-time = "2026-04-07T11:21:38.867Z" },
+]
+
+[[package]]
+name = "llm-client"
+version = "0.2.0"
+source = { directory = "../llm-client" }
+dependencies = [
+    { name = "anthropic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.30.0" },
+    { name = "google-cloud-aiplatform", marker = "extra == 'vertex-gemini'", specifier = ">=1.60.0" },
+]
+provides-extras = ["vertex-gemini"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.2.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23.0" },
+    { name = "ruff", specifier = ">=0.6.0" },
 ]
 
 [[package]]

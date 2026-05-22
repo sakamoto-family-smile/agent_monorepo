@@ -28,6 +28,10 @@ dependencies = [
     "python-multipart>=0.0.9",
     # Analytics platform (path dep) for OTel + AnalyticsLogger
     "analytics-platform",
+    # llm-client (path dep) — Vertex Gemini クライアントを VertexGeminiLLMClient
+    # 経由で利用する (PR-150 follow-up: Vertex Gemini 呼出を monorepo 横断で
+    # 統一)。 google-cloud-aiplatform は既に直接 dep にあるので extra は不要。
+    "llm-client",
 ]
 
 [project.optional-dependencies]
@@ -48,6 +52,7 @@ pgvector = [
 
 [tool.uv.sources]
 analytics-platform = { path = "../analytics-platform" }
+llm-client = { path = "../llm-client" }
 
 [build-system]
 requires = ["hatchling"]
