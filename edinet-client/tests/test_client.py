@@ -267,6 +267,46 @@ class TestDownload:
         assert "type=1" in str(route.calls[0].request.url)
 
 
+class TestApiKeySafeFromLogs:
+    """API key は header (`Ocp-Apim-Subscription-Key`) で送る。 URL の query
+    parameter に乗せない (httpx INFO log が URL を吐く際に key が漏れるため)。
+    """
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_list_documents_key_in_header_not_url(self, cache: InMemoryCache) -> None:
+        route = respx.get("https://api.edinet-fsa.go.jp/api/v2/documents.json").mock(
+            return_value=httpx.Response(200, json={"results": []}),
+        )
+        async with EdinetClient(
+            api_key="super-secret-key-12345", cache=cache, min_interval_sec=0.001
+        ) as client:
+            await client.list_documents(date(2026, 5, 22))
+
+        request = route.calls[0].request
+        # URL に key が含まれていない
+        assert "super-secret-key-12345" not in str(request.url)
+        assert "Subscription-Key=" not in str(request.url)
+        # header に key が乗っている
+        assert request.headers.get("Ocp-Apim-Subscription-Key") == "super-secret-key-12345"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_download_key_in_header_not_url(self, cache: InMemoryCache) -> None:
+        route = respx.get(
+            "https://api.edinet-fsa.go.jp/api/v2/documents/S100ABC1"
+        ).mock(return_value=httpx.Response(200, content=b"%PDF-1.4 fake"))
+        async with EdinetClient(
+            api_key="super-secret-key-67890", cache=cache, min_interval_sec=0.001
+        ) as client:
+            await client.download("S100ABC1", content_type="pdf")
+
+        request = route.calls[0].request
+        assert "super-secret-key-67890" not in str(request.url)
+        assert "Subscription-Key=" not in str(request.url)
+        assert request.headers.get("Ocp-Apim-Subscription-Key") == "super-secret-key-67890"
+
+
 class TestRetryAndRateLimit:
     @pytest.mark.asyncio
     @respx.mock
