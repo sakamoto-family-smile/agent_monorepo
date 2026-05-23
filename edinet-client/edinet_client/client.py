@@ -31,6 +31,7 @@ from tenacity import (
 )
 
 from .cache import Cache, ContentType
+from .code_resolver import EdinetCodeResolver
 from .types import DocumentBody, DocumentMetadata, DocumentType
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class EdinetClient:
         *,
         api_key: str,
         cache: Cache,
+        code_resolver: EdinetCodeResolver | None = None,
         user_agent: str = "edinet-client/0.1 (+https://github.com/sakamoto-family-smile/agent_monorepo)",
         min_interval_sec: float = 1.0,
         max_retries: int = 3,
@@ -66,6 +68,7 @@ class EdinetClient:
             raise ValueError("api_key is required (register at disclosure2.edinet-fsa.go.jp)")
         self._api_key = api_key
         self._cache = cache
+        self._code_resolver = code_resolver
         self._user_agent = user_agent
         self._min_interval_sec = min_interval_sec
         self._max_retries = max_retries
@@ -102,6 +105,18 @@ class EdinetClient:
         payload = await self._get_json(f"{self._base_url}/documents.json", params=params)
         results = payload.get("results", []) or []
         return [_to_document_metadata(item) for item in results]
+
+    def resolve_edinet_code(self, ticker: str) -> str | None:
+        """ticker (e.g., "7203" / "7203.T") から EDINET code を返す。
+
+        `code_resolver` が constructor で渡されていない場合は RuntimeError。
+        """
+        if self._code_resolver is None:
+            raise RuntimeError(
+                "EdinetClient was constructed without code_resolver; "
+                "pass code_resolver=EdinetCodeResolver.from_csv_path(...) to enable ticker lookup"
+            )
+        return self._code_resolver.resolve_edinet_code(ticker)
 
     async def download(
         self,
