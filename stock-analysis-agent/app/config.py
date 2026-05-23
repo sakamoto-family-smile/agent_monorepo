@@ -91,8 +91,12 @@ class Settings:
     edinet_quarterly_lookback: int = int(os.getenv("EDINET_QUARTERLY_LOOKBACK", "4"))
     # EDINET API 連続 request の最小間隔 (秒)
     edinet_min_interval_sec: float = float(os.getenv("EDINET_MIN_INTERVAL_SEC", "1.0"))
-    # 最新書類検索の窓 (日)。 1 年分の四半期 + 年次を拾えれば十分
+    # 最新書類検索の窓 (日)。 Phase 1d の orchestrator 直接 fetch 経路で使う。
+    # Phase 1e の DB lookup ベースでは形式的 (実質ほぼ即時 lookup)
     edinet_search_window_days: int = int(os.getenv("EDINET_SEARCH_WINDOW_DAYS", "400"))
+    # daily batch の rolling 窓日数。 status 系の遅延変更 (取下げ / 開示停止)
+    # を捕捉するため 7 日が default (proposal §4.1)
+    edinet_daily_window_days: int = int(os.getenv("EDINET_DAILY_WINDOW_DAYS", "7"))
 
     @property
     def cors_origins(self):

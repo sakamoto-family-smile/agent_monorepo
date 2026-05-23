@@ -1,20 +1,21 @@
-"""EDINET 書類取得 collector (proposal 0006 Phase 1d)。
+"""EDINET 書類取得 collector (proposal 0006 Phase 1d + Phase 1e)。
 
 orchestrator から呼ばれ、 指定 ticker (証券コード or `XXXX.T`) に対応する
-**最新有価証券報告書 + 直近 N 期の四半期報告書** を EDINET API で取得する。
+**最新有価証券報告書 + 直近 N 期の四半期報告書** を取得する。
 
-返り値は書類メタデータ + 書類本体 (PDF) のリスト。 Claude Agent SDK 側で
-workspace に書き出し、 Read tool で読ませて分析に投入する想定 (orchestrator
-側で `Read` ツール経由でローカル PDF を渡す)。
+Phase 1e 以降の取得経路:
+1. `code_resolver` で ticker → EDINET code 解決
+2. `EdinetIndexRepo.list_by_edinet_code()` で **DB から該当書類を即時 lookup**
+3. DB hit → 該当 doc_id だけ EDINET API で本体 (PDF) を取得
+4. DB miss (= daily batch が回っていない / 新規銘柄) → Phase 1d の API 全件
+   fetch にフォールバック (互換性維持、 ただし latency 高)
 
 設計判断:
 - 失敗時 (API key 無効 / ticker 未登録 / 書類なし) は **空 list を返す**
-  (例外で orchestrator 全体を落とさない)。 EDINET は補助情報なので、 取れな
-  ければ既存の yfinance + Brave Search で分析を続行する
+  (例外で orchestrator 全体を落とさない)
 - `settings.edinet_enabled = false` のとき早期 return → 0 書類
-- `code_resolver` (Edinetcode.csv) 未設定なら early-return + warning log
-- 探索範囲は直近 `edinet_search_window_days` 日 (default 400 日)。 1 年強で
-  年次 + 4 四半期分が捕捉できる
+- DB に該当書類がある場合は 1 日 1 リクエストの 400 回 fetch を **完全 skip**
+  (初回 latency ~7 分 → ~10 秒程度に短縮)
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from edinet_client import (
 )
 
 from config import settings
+from services.edinet_index_repo import EdinetIndexRepo
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,12 @@ async def collect_filings(ticker: str) -> list[EdinetFilingResult]:
         )
         return []
 
+    # 1) DB から事前 INDEX を lookup (Phase 1e の高速経路)
+    selected = await _select_filings_from_db(
+        edinet_code=edinet_code,
+        n_quarters=settings.edinet_quarterly_lookback,
+    )
+
     cache = _build_cache()
     async with EdinetClient(
         api_key=settings.edinet_api_key,
@@ -85,25 +93,29 @@ async def collect_filings(ticker: str) -> list[EdinetFilingResult]:
         code_resolver=resolver,
         min_interval_sec=settings.edinet_min_interval_sec,
     ) as client:
-        # 1) 探索窓内の文書 INDEX を 1 日ずつ取得
-        candidates = await _gather_filings_for_edinet_code(
-            client=client,
-            edinet_code=edinet_code,
-            window_days=settings.edinet_search_window_days,
-        )
-
-        if not candidates:
+        # 2) DB miss → 旧経路 (1 日ずつ fetch) にフォールバック
+        if not selected:
             logger.info(
-                "no EDINET filings found in window for edinet_code=%s ticker=%s",
+                "EDINET index empty in DB for edinet_code=%s, "
+                "falling back to direct API fetch (slow). "
+                "Run `python -m app.batch.edinet_index_etl` to populate DB.",
                 edinet_code,
-                ticker,
             )
-            return []
-
-        # 2) 必要な書類だけ選別: 直近の年次 + 直近 N 期の四半期
-        selected = _select_target_filings(
-            candidates, n_quarters=settings.edinet_quarterly_lookback
-        )
+            candidates = await _gather_filings_for_edinet_code(
+                client=client,
+                edinet_code=edinet_code,
+                window_days=settings.edinet_search_window_days,
+            )
+            if not candidates:
+                logger.info(
+                    "no EDINET filings found in window for edinet_code=%s ticker=%s",
+                    edinet_code,
+                    ticker,
+                )
+                return []
+            selected = _select_target_filings(
+                candidates, n_quarters=settings.edinet_quarterly_lookback
+            )
         if not selected:
             return []
 
@@ -192,6 +204,41 @@ async def _gather_filings_for_edinet_code(
             if d.edinet_code == edinet_code and d.is_available:
                 matches.append(d)
     return matches
+
+
+async def _select_filings_from_db(
+    *, edinet_code: str, n_quarters: int
+) -> list[DocumentMetadata]:
+    """DB (`edinet_documents`) から最新有報 + 直近 N 期の四半期を引く。
+
+    DB が空 (daily batch 未実行) なら空 list を返す → caller は API fallback。
+    """
+    repo = EdinetIndexRepo()
+    try:
+        annual_rows = await repo.list_by_edinet_code(
+            edinet_code,
+            document_types=[DocumentType.ANNUAL_REPORT.value],
+            limit=1,
+        )
+        quarterly_rows = await repo.list_by_edinet_code(
+            edinet_code,
+            document_types=[DocumentType.QUARTERLY_REPORT.value],
+            limit=n_quarters,
+        )
+    except Exception:  # noqa: BLE001 — テーブル未作成等は warn して fallback へ
+        logger.warning(
+            "EDINET index DB lookup failed for edinet_code=%s "
+            "(table may be missing). Run "
+            "`python -m app.batch.edinet_index_etl` to populate. "
+            "Falling back to direct API fetch.",
+            edinet_code,
+        )
+        return []
+    metas: list[DocumentMetadata] = []
+    if annual_rows:
+        metas.append(annual_rows[0].to_metadata())
+    metas.extend(r.to_metadata() for r in quarterly_rows)
+    return metas
 
 
 def _select_target_filings(
