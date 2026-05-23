@@ -264,6 +264,73 @@ class TestCollectionFlow:
         assert results[0].metadata.document_id == "ANNUAL1"
 
 
+class TestSemiAnnualSelection:
+    """Phase 2c: `_select_target_filings` が半期報告書 (160) も中間期として
+    扱う。 2024-04 金商法改正で多くの企業が四半期 (140) を廃止して半期 (160)
+    のみ提出するようになったため、 両者を統一的に target とする。
+    """
+
+    def test_select_includes_semi_annual_as_interim(self):
+        from agents.edinet_collector import _select_target_filings
+
+        annual = _make_metadata(
+            doc_id="ANN",
+            edinet_code="E12345",
+            doc_type=DocumentType.ANNUAL_REPORT,
+            submit_date=date(2025, 6, 25),
+        )
+        semi1 = _make_metadata(
+            doc_id="SEMI_1",
+            edinet_code="E12345",
+            doc_type=DocumentType.SEMI_ANNUAL_REPORT,
+            submit_date=date(2025, 11, 14),
+        )
+        semi0 = _make_metadata(
+            doc_id="SEMI_0",
+            edinet_code="E12345",
+            doc_type=DocumentType.SEMI_ANNUAL_REPORT,
+            submit_date=date(2024, 11, 14),
+        )
+        result = _select_target_filings([annual, semi1, semi0], n_quarters=2)
+        ids = sorted(r.document_id for r in result)
+        assert ids == ["ANN", "SEMI_0", "SEMI_1"]
+
+    def test_select_mixed_quarterly_and_semi(self):
+        """混在 (改正前後で報告形態が変わった企業) でも新しい順に N 件採用。"""
+        from agents.edinet_collector import _select_target_filings
+
+        docs = [
+            _make_metadata(
+                doc_id="ANN",
+                edinet_code="E12345",
+                doc_type=DocumentType.ANNUAL_REPORT,
+                submit_date=date(2025, 6, 25),
+            ),
+            _make_metadata(
+                doc_id="Q_NEW",
+                edinet_code="E12345",
+                doc_type=DocumentType.QUARTERLY_REPORT,
+                submit_date=date(2026, 2, 14),
+            ),
+            _make_metadata(
+                doc_id="SEMI_NEW",
+                edinet_code="E12345",
+                doc_type=DocumentType.SEMI_ANNUAL_REPORT,
+                submit_date=date(2025, 11, 14),
+            ),
+            _make_metadata(
+                doc_id="SEMI_OLD",
+                edinet_code="E12345",
+                doc_type=DocumentType.SEMI_ANNUAL_REPORT,
+                submit_date=date(2024, 11, 14),
+            ),
+        ]
+        result = _select_target_filings(docs, n_quarters=2)
+        ids = sorted(r.document_id for r in result)
+        # 有報 + 新しい順 2 件
+        assert ids == ["ANN", "Q_NEW", "SEMI_NEW"]
+
+
 class TestXbrlIntegration:
     """Phase 2b: collector が PDF + XBRL を両方取得して financials を埋める。"""
 

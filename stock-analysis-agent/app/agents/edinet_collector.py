@@ -278,7 +278,11 @@ async def _fetch_and_parse_xbrl(
 async def _select_filings_from_db(
     *, edinet_code: str, n_quarters: int
 ) -> list[DocumentMetadata]:
-    """DB (`edinet_documents`) から最新有報 + 直近 N 期の四半期を引く。
+    """DB (`edinet_documents`) から最新有報 + 直近 N 期の中間 (四半期 / 半期) を引く。
+
+    2024-04 金商法改正で多くの企業は四半期報告書 (140) を廃止し半期報告書 (160)
+    のみ提出するようになった。 collector は両者を target とし、 重複しない範囲で
+    新しい順に最大 N 件まで採用する。
 
     DB が空 (daily batch 未実行) なら空 list を返す → caller は API fallback。
     """
@@ -289,9 +293,12 @@ async def _select_filings_from_db(
             document_types=[DocumentType.ANNUAL_REPORT.value],
             limit=1,
         )
-        quarterly_rows = await repo.list_by_edinet_code(
+        interim_rows = await repo.list_by_edinet_code(
             edinet_code,
-            document_types=[DocumentType.QUARTERLY_REPORT.value],
+            document_types=[
+                DocumentType.QUARTERLY_REPORT.value,
+                DocumentType.SEMI_ANNUAL_REPORT.value,
+            ],
             limit=n_quarters,
         )
     except Exception:  # noqa: BLE001 — テーブル未作成等は warn して fallback へ
@@ -306,31 +313,35 @@ async def _select_filings_from_db(
     metas: list[DocumentMetadata] = []
     if annual_rows:
         metas.append(annual_rows[0].to_metadata())
-    metas.extend(r.to_metadata() for r in quarterly_rows)
+    metas.extend(r.to_metadata() for r in interim_rows)
     return metas
 
 
 def _select_target_filings(
     candidates: list[DocumentMetadata], *, n_quarters: int
 ) -> list[DocumentMetadata]:
-    """候補書類から「最新有報 1 件 + 直近 N 期の四半期 」を選別。"""
-    # 提出日 降順
+    """候補書類から「最新有報 1 件 + 直近 N 期の四半期 / 半期」を選別。
+
+    2024-04 金商法改正で多くの企業は四半期報告書 (140) を廃止し半期報告書 (160)
+    のみ提出するようになった。 両方を中間期報告書として扱い、 新しい順に N 件採用。
+    """
     sorted_docs = sorted(candidates, key=lambda d: d.submit_date, reverse=True)
 
     annual: DocumentMetadata | None = None
-    quarterlies: list[DocumentMetadata] = []
+    interims: list[DocumentMetadata] = []
+    interim_types = {DocumentType.QUARTERLY_REPORT, DocumentType.SEMI_ANNUAL_REPORT}
     for d in sorted_docs:
         if d.document_type == DocumentType.ANNUAL_REPORT and annual is None:
             annual = d
-        elif d.document_type == DocumentType.QUARTERLY_REPORT and len(quarterlies) < n_quarters:
-            quarterlies.append(d)
-        if annual is not None and len(quarterlies) >= n_quarters:
+        elif d.document_type in interim_types and len(interims) < n_quarters:
+            interims.append(d)
+        if annual is not None and len(interims) >= n_quarters:
             break
 
     selected: list[DocumentMetadata] = []
     if annual is not None:
         selected.append(annual)
-    selected.extend(quarterlies)
+    selected.extend(interims)
     return selected
 
 
