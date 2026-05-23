@@ -3,10 +3,16 @@
 公式 API spec: <https://disclosure2.edinet-fsa.go.jp/weee0030.aspx>
 
 主要エンドポイント:
-- GET /api/v2/documents.json?date=YYYY-MM-DD&type=2&Subscription-Key=...
+- GET /api/v2/documents.json?date=YYYY-MM-DD&type=2
     その日に提出された全書類のメタデータ
-- GET /api/v2/documents/<docID>?type=<1-5>&Subscription-Key=...
+- GET /api/v2/documents/<docID>?type=<1-5>
     指定 docID の本体。 type: 1=提出本文書 + 添付, 2=PDF, 3=代替書面 / 添付, 4=英文ファイル, 5=CSV
+
+認証:
+- API key は **`Ocp-Apim-Subscription-Key` HTTP header** で渡す (Azure API
+  Management 標準)。 query parameter `?Subscription-Key=...` でも認証は通るが、
+  httpx の INFO log が URL を吐き出すため API key が log に漏れる。 本 client は
+  header 経由で漏洩を回避する。
 
 rate limit / retry:
 - per-instance の `min_interval_sec` (default 1.0) で連続リクエスト間隔を保つ
@@ -37,6 +43,11 @@ from .types import DocumentBody, DocumentMetadata, DocumentType
 logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.edinet-fsa.go.jp/api/v2"
+
+# Azure API Management 標準の認証ヘッダ名。 EDINET API v2 はこの header と
+# query parameter `Subscription-Key` の両方を受け付ける (header 優先)。 query
+# は httpx INFO log で漏れるため header を採用。
+_AUTH_HEADER = "Ocp-Apim-Subscription-Key"
 
 
 class _RetryableError(Exception):
@@ -79,8 +90,13 @@ class EdinetClient:
         self._last_request_at: float | None = None
 
     async def __aenter__(self) -> EdinetClient:
+        # API key は header で送る (httpx INFO log が URL を吐く際に query
+        # parameter として漏らさないため)。 詳細はモジュール docstring 参照。
         self._client = httpx.AsyncClient(
-            headers={"User-Agent": self._user_agent},
+            headers={
+                "User-Agent": self._user_agent,
+                _AUTH_HEADER: self._api_key,
+            },
             timeout=self._timeout_sec,
             follow_redirects=True,
         )
@@ -105,7 +121,6 @@ class EdinetClient:
         params = {
             "date": target.isoformat(),
             "type": "2",
-            "Subscription-Key": self._api_key,
         }
         payload = await self._get_json(f"{self._base_url}/documents.json", params=params)
         results = payload.get("results", []) or []
@@ -159,7 +174,7 @@ class EdinetClient:
             )
 
         type_code = _content_type_to_api_type(content_type)
-        params = {"type": type_code, "Subscription-Key": self._api_key}
+        params = {"type": type_code}
         url = f"{self._base_url}/documents/{document_id}"
         payload = await self._get_bytes(url, params=params)
         await self._cache.put(document_id, content_type, payload)
@@ -213,9 +228,9 @@ class EdinetClient:
         self, method: str, url: str, params: dict[str, str]
     ) -> httpx.Response:
         assert self._client is not None
-        # API key はログに残さない (params の "Subscription-Key" は logger.debug でも避ける)
-        safe_params = {k: ("***" if k == "Subscription-Key" else v) for k, v in params.items()}
-        logger.debug("EDINET %s %s params=%s", method, url, safe_params)
+        # API key は AsyncClient の default header に積んであり params に
+        # 含まれないので、 そのまま log してよい (httpx の INFO log でも漏れない)
+        logger.debug("EDINET %s %s params=%s", method, url, params)
         response = await self._client.request(method, url, params=params)
         if 500 <= response.status_code < 600:
             err = httpx.HTTPStatusError(
