@@ -55,9 +55,39 @@ async def init_db() -> None:
                 created_at TEXT DEFAULT (datetime('now'))
             );
 
+            -- proposal 0006 Phase 1e: EDINET 文書 INDEX
+            -- daily batch (rolling 7 日窓) で upsert される。 document_id を PK
+            -- とし、 status 系フィールドの遅延変更 (取下げ / 開示停止) を捕捉する。
+            CREATE TABLE IF NOT EXISTS edinet_documents (
+                document_id TEXT PRIMARY KEY,
+                edinet_code TEXT NOT NULL,
+                securities_code TEXT,
+                submitter_name TEXT NOT NULL,
+                document_type TEXT NOT NULL,
+                submit_date TEXT NOT NULL,        -- YYYY-MM-DD
+                period_end TEXT,                   -- YYYY-MM-DD or NULL
+                description TEXT DEFAULT '',
+                withdrawal_status INTEGER NOT NULL DEFAULT 0,
+                disclosure_status INTEGER NOT NULL DEFAULT 0,
+                doc_info_edit_status INTEGER NOT NULL DEFAULT 0,
+                xbrl_flag INTEGER NOT NULL DEFAULT 0,
+                pdf_flag INTEGER NOT NULL DEFAULT 0,
+                attach_doc_flag INTEGER NOT NULL DEFAULT 0,
+                cache_uri TEXT,                    -- NULL なら未 cache
+                cached_at TEXT,
+                first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_index_refreshed_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
             CREATE INDEX IF NOT EXISTS idx_ticker_dict_name ON ticker_dictionary(company_name);
             CREATE INDEX IF NOT EXISTS idx_price_cache_ticker ON price_cache(ticker, period);
             CREATE INDEX IF NOT EXISTS idx_reports_ticker ON reports(ticker);
+            CREATE INDEX IF NOT EXISTS idx_edinet_docs_sec_code_date
+                ON edinet_documents (securities_code, submit_date DESC);
+            CREATE INDEX IF NOT EXISTS idx_edinet_docs_edinet_code_date
+                ON edinet_documents (edinet_code, submit_date DESC);
+            CREATE INDEX IF NOT EXISTS idx_edinet_docs_type_date
+                ON edinet_documents (document_type, submit_date DESC);
         """)
 
         # Seed common Japanese/US stocks
