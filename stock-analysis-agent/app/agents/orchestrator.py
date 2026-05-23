@@ -23,7 +23,14 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-_INTER_MESSAGE_TIMEOUT = int(os.getenv("AGENT_MESSAGE_TIMEOUT_SECONDS", "120"))
+# Claude Agent SDK の `query()` 1 メッセージあたりの待機 timeout (秒)。
+#
+# EDINET 統合 (proposal 0006 Phase 1d+) が入る前は yfinance + Brave Search のみで
+# 30 秒以内に応答していたため 120 秒で十分だったが、 Phase 1d 以降の経路では
+# Claude が PDF を Read tool で複数ページ読みつつ最終レポートをまとめるため、
+# **個別メッセージ間で 100 秒級の沈黙が現実的に発生する** (diag3 で 108 秒の gap
+# を観測)。 default を 300 秒 (5 分) に引き上げ、 env で override 可能のままにする。
+_INTER_MESSAGE_TIMEOUT = int(os.getenv("AGENT_MESSAGE_TIMEOUT_SECONDS", "300"))
 
 
 def _build_analysis_prompt(
@@ -525,6 +532,18 @@ async def _run_analysis_inner(
                             report_text_parts.append(block.text)
 
                 yield {"type": msg_type, "data": str(item)}
+
+                # Claude Agent SDK の `ResultMessage` は **query の最終メッセージ**。
+                # 通常はその後 `async for msg in query()` の iterator が即終了して
+                # 生産者が sentinel を投入するが、 EDINET 経由の大型 prompt + 複数
+                # PDF read の context では SDK 側の subprocess cleanup が遅延し、
+                # iterator が closed されず生産者の `query()` が block する事例が
+                # 観測された (1 件目 285A.T は正常完了、 2 件目 9616.T 開始時に
+                # 顕在化)。 ResultMessage を消費した時点で生産者を撤収させて
+                # consumer 側の timeout を回避する。
+                if msg_type == "ResultMessage":
+                    task.cancel()
+                    break
 
         finally:
             if not task.done():
