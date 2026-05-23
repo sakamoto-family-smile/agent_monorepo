@@ -149,6 +149,11 @@ class TestHasSegmentDimension:
         f = _make_fact("X", 1, dimensions={"BusinessSegmentsAxis": "SegAMember"})
         assert _has_segment_dimension(f) is True
 
+    def test_operating_segments_axis_detected(self):
+        """Phase 2c: 9616 等の J-GAAP 企業は `OperatingSegmentsAxis` を使う。"""
+        f = _make_fact("X", 1, dimensions={"OperatingSegmentsAxis": "HotelsReportableSegmentsMember"})
+        assert _has_segment_dimension(f) is True
+
     def test_unrelated_axis_not_detected(self):
         f = _make_fact("X", 1, dimensions={"ConsolidatedOrNonConsolidatedAxis": "X"})
         assert _has_segment_dimension(f) is False
@@ -244,6 +249,15 @@ class TestExtractSegmentName:
         )
         assert _extract_segment_name(f) == "Electronics"
 
+    def test_strips_reportable_segments_member_suffix(self):
+        """Phase 2c: 9616 のような企業は `HotelsReportableSegmentsMember` 等を使う。"""
+        f = _make_fact(
+            "NetSales",
+            100,
+            dimensions={"OperatingSegmentsAxis": "HotelsReportableSegmentsMember"},
+        )
+        assert _extract_segment_name(f) == "Hotels"
+
     def test_ignores_eliminations(self):
         f = _make_fact(
             "NetSales",
@@ -252,9 +266,73 @@ class TestExtractSegmentName:
         )
         assert _extract_segment_name(f) is None
 
+    def test_ignores_reconciling_items(self):
+        f = _make_fact(
+            "NetSales", 100, dimensions={"OperatingSegmentsAxis": "ReconcilingItemsMember"}
+        )
+        assert _extract_segment_name(f) is None
+
+    def test_ignores_reportable_segments_total(self):
+        """集計行 `ReportableSegmentsMember` は除外。"""
+        f = _make_fact(
+            "NetSales", 100, dimensions={"OperatingSegmentsAxis": "ReportableSegmentsMember"}
+        )
+        assert _extract_segment_name(f) is None
+
+    def test_ignores_total_of_reportable_and_others(self):
+        f = _make_fact(
+            "NetSales",
+            100,
+            dimensions={"OperatingSegmentsAxis": "TotalOfReportableSegmentsAndOthersMember"},
+        )
+        assert _extract_segment_name(f) is None
+
+    def test_ignores_others_not_included(self):
+        f = _make_fact(
+            "NetSales",
+            100,
+            dimensions={
+                "OperatingSegmentsAxis": (
+                    "OperatingSegmentsNotIncludedInReportableSegmentsAndOtherRevenueGeneratingBusinessActivitiesMember"
+                )
+            },
+        )
+        assert _extract_segment_name(f) is None
+
     def test_returns_none_if_no_segment_axis(self):
         f = _make_fact("NetSales", 100, dimensions={"OtherAxis": "AMember"})
         assert _extract_segment_name(f) is None
+
+
+class TestMatchesPeriodEnd:
+    """Phase 2c: EDINET の exclusive end 慣行 (period_end +1 日) を許容。"""
+
+    def test_exact_match(self):
+        from edinet_client._xbrl_parser import _matches_period_end
+        f = _make_fact("X", 100, end=date(2025, 3, 31))
+        assert _matches_period_end(f, date(2025, 3, 31)) is True
+
+    def test_plus_one_day_match(self):
+        """EDINET XBRL の endDatetime=2025-04-01 でも 2025-03-31 と一致と見なす。"""
+        from edinet_client._xbrl_parser import _matches_period_end
+        f = _make_fact("X", 100, end=date(2025, 4, 1))
+        assert _matches_period_end(f, date(2025, 3, 31)) is True
+
+    def test_no_match(self):
+        from edinet_client._xbrl_parser import _matches_period_end
+        f = _make_fact("X", 100, end=date(2024, 3, 31))
+        assert _matches_period_end(f, date(2025, 3, 31)) is False
+
+    def test_no_context(self):
+        from dataclasses import dataclass
+
+        from edinet_client._xbrl_parser import _matches_period_end
+
+        @dataclass
+        class _FactNoCtx:
+            context: object = None
+
+        assert _matches_period_end(_FactNoCtx(), date(2025, 3, 31)) is False
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -366,6 +444,108 @@ class TestExtractFinancialsEmpty:
         result = _extract_financials(model)
         assert result.net_sales == 8_000_000_000
         assert result.raw_concept_hits["net_sales"] == "Revenue"
+
+
+class TestExtractFinancialsIFRSCompany:
+    """Phase 2c: 285A (キオクシア) 等の IFRS 採用企業向けで Tier 1 全項目が取れる。
+
+    EDINET XBRL の exclusive-end 慣行 (期末 +1 日) も合わせて検証する。
+    """
+
+    def test_ifrs_concepts_extracted(self):
+        # EDINET XBRL は endDatetime=fiscal_year_end + 1 day (exclusive)
+        xbrl_end = date(2025, 4, 1)
+        model = _FakeModelXbrl(
+            facts=[
+                _make_fact("CurrentFiscalYearEndDateDEI", "2025-03-31"),
+                _make_fact("DocumentTypeDEI", "jpcrp030000-asr-001"),
+                # IFRS suffix 付き concept のみ存在 (J-GAAP version は単体だけ)
+                _make_fact("RevenueIFRS", 1_706_460_000_000.0, end=xbrl_end),
+                _make_fact("OperatingProfitLossIFRS", 451_748_000_000.0, end=xbrl_end),
+                _make_fact("ProfitLossAttributableToOwnersOfParentIFRS", 272_315_000_000.0, end=xbrl_end),
+                _make_fact("AssetsIFRS", 2_919_679_000_000.0, end=xbrl_end),
+                _make_fact("EquityAttributableToOwnersOfParentIFRS", 737_565_000_000.0, end=xbrl_end),
+            ]
+        )
+        result = _extract_financials(model)
+        assert result.net_sales == 1_706_460_000_000.0
+        assert result.operating_profit == 451_748_000_000.0
+        assert result.net_profit == 272_315_000_000.0
+        assert result.total_assets == 2_919_679_000_000.0
+        assert result.net_assets == 737_565_000_000.0
+        # IFRS 採用企業に経常利益は存在しない (None で OK)
+        assert result.ordinary_profit is None
+        # 採用 concept name の記録
+        assert result.raw_concept_hits["net_sales"] == "RevenueIFRS"
+        assert result.raw_concept_hits["total_assets"] == "AssetsIFRS"
+        assert result.raw_concept_hits["net_assets"] == "EquityAttributableToOwnersOfParentIFRS"
+
+    def test_period_end_plus_one_day_tolerated(self):
+        """fiscal_year_end=2025-03-31 でも XBRL end=2025-04-01 を当期と認識。"""
+        model = _FakeModelXbrl(
+            facts=[
+                _make_fact("CurrentFiscalYearEndDateDEI", "2025-03-31"),
+                _make_fact("RevenueIFRS", 1_000_000_000.0, end=date(2025, 4, 1)),
+                _make_fact("RevenueIFRS", 800_000_000.0, end=date(2024, 4, 1)),  # 前期
+            ]
+        )
+        result = _extract_financials(model)
+        # 当期 (2025-04-01 = exclusive end of FY 2025-03) が選ばれる
+        assert result.net_sales == 1_000_000_000.0
+
+
+class TestExtractFinancialsSegmentsOperatingSegmentsAxis:
+    """Phase 2c: 9616 (共立メンテナンス) の `OperatingSegmentsAxis` セグメント抽出。
+
+    EDINET の J-GAAP 標準 axis + `*ReportableSegmentsMember` suffix の認識。
+    """
+
+    def test_operating_segments_axis_extracted(self):
+        # exclusive-end convention: fiscal_year_end 2025-03-31 → XBRL end 2025-04-01
+        xbrl_end = date(2025, 4, 1)
+        model = _FakeModelXbrl(
+            facts=[
+                _make_fact("CurrentFiscalYearEndDateDEI", "2025-03-31"),
+                # 全社合計値
+                _make_fact("NetSales", 228_933_000_000, end=xbrl_end),
+                _make_fact("OperatingIncome", 20_491_000_000, end=xbrl_end),
+                # セグメント別売上 (RevenuesFromExternalCustomers + OperatingSegmentsAxis)
+                _make_fact(
+                    "RevenuesFromExternalCustomers",
+                    54_570_000_000,
+                    end=xbrl_end,
+                    dimensions={"OperatingSegmentsAxis": "DormitoriesReportableSegmentsMember"},
+                ),
+                _make_fact(
+                    "RevenuesFromExternalCustomers",
+                    139_006_000_000,
+                    end=xbrl_end,
+                    dimensions={"OperatingSegmentsAxis": "HotelsReportableSegmentsMember"},
+                ),
+                # 集計行: 除外されるべき
+                _make_fact(
+                    "RevenuesFromExternalCustomers",
+                    99_999_000_000,
+                    end=xbrl_end,
+                    dimensions={"OperatingSegmentsAxis": "ReportableSegmentsMember"},
+                ),
+                _make_fact(
+                    "RevenuesFromExternalCustomers",
+                    9_999_999_000,
+                    end=xbrl_end,
+                    dimensions={"OperatingSegmentsAxis": "ReconcilingItemsMember"},
+                ),
+            ]
+        )
+        result = _extract_financials(model)
+        seg_map = {s.segment_name: s.net_sales for s in result.segments}
+        assert "Dormitories" in seg_map
+        assert "Hotels" in seg_map
+        assert seg_map["Dormitories"] == 54_570_000_000
+        assert seg_map["Hotels"] == 139_006_000_000
+        # 集計 / 調整行は除外されている
+        assert "ReportableSegments" not in seg_map
+        assert "ReconcilingItems" not in seg_map
 
 
 # ──────────────────────────────────────────────────────────────────────

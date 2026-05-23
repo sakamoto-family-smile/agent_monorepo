@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 # ── 抽出対象 concept QName 候補 (優先度順、 上が EDINET 公式 taxonomy 標準) ──
 # concept は localname のみで比較する (namespace は jpcrp_cor / jppfs_cor 等で揺れる)
+# IFRS suffix 付き concept は IFRS / US-GAAP 採用企業 (例: キオクシア / トヨタ) 対応
 _CONCEPT_CANDIDATES: dict[str, tuple[str, ...]] = {
     # 売上高 / 売上収益 / 営業収益
     "net_sales": (
@@ -44,6 +45,7 @@ _CONCEPT_CANDIDATES: dict[str, tuple[str, ...]] = {
         "OperatingRevenue1",
         "OperatingRevenue",
         "NetSalesSummaryOfBusinessResults",
+        "RevenueIFRSSummaryOfBusinessResults",
     ),
     # 営業利益
     "operating_profit": (
@@ -51,6 +53,7 @@ _CONCEPT_CANDIDATES: dict[str, tuple[str, ...]] = {
         "OperatingProfitLoss",
         "OperatingProfitLossIFRS",
         "OperatingIncomeSummaryOfBusinessResults",
+        "OperatingProfitLossIFRSSummaryOfBusinessResults",
     ),
     # 経常利益 (IFRS / US-GAAP 採用企業は欠落することがある)
     "ordinary_profit": (
@@ -59,29 +62,39 @@ _CONCEPT_CANDIDATES: dict[str, tuple[str, ...]] = {
     ),
     # 親会社株主に帰属する当期純利益
     "net_profit": (
+        "ProfitLossAttributableToOwnersOfParentIFRS",
         "ProfitLossAttributableToOwnersOfParent",
+        "ProfitLossIFRS",
         "NetIncomeLoss",
         "ProfitLoss",
         "NetIncomeLossAttributableToOwnersOfParentSummaryOfBusinessResults",
+        "ProfitLossAttributableToOwnersOfParentIFRSSummaryOfBusinessResults",
     ),
     # 総資産
     "total_assets": (
+        "AssetsIFRS",
         "Assets",
         "TotalAssetsSummaryOfBusinessResults",
+        "AssetsIFRSSummaryOfBusinessResults",
     ),
     # 純資産 / 自己資本
     "net_assets": (
+        "EquityAttributableToOwnersOfParentIFRS",
+        "EquityIFRS",
         "NetAssets",
         "Equity",
         "EquityAttributableToOwnersOfParent",
         "NetAssetsSummaryOfBusinessResults",
+        "EquityAttributableToOwnersOfParentIFRSSummaryOfBusinessResults",
     ),
 }
 
 # セグメント情報の concept (sales / op profit)
+# `RevenuesFromExternalCustomers` は EDINET の標準 (jpcrp_cor)、 多くの J-GAAP 企業が使う
 _SEGMENT_CONCEPTS: dict[str, tuple[str, ...]] = {
     "net_sales": (
         "NetSalesOfReportableSegments",
+        "RevenuesFromExternalCustomers",
         "RevenueFromExternalCustomers",
         "NetSales",
         "Revenue",
@@ -92,6 +105,28 @@ _SEGMENT_CONCEPTS: dict[str, tuple[str, ...]] = {
         "OperatingIncome",
     ),
 }
+
+# セグメント情報を表す軸 (EDINET の各 taxonomy で揺れる)
+_SEGMENT_AXIS_KEYWORDS: tuple[str, ...] = (
+    "OperatingSegmentsAxis",
+    "ReportableSegmentsAxis",
+    "BusinessSegmentsAxis",
+)
+
+# セグメント member の合計 / 調整 / 除外行 (Tier 2 表からは除外する)
+_SEGMENT_MEMBER_EXCLUDES: tuple[str, ...] = (
+    "ReportableSegmentsMember",          # 全 reportable 合計
+    "TotalOfReportableSegmentsAndOthersMember",  # その他含む合計
+    "EliminationsOrAdjustmentsMember",   # 連結調整
+    "ReconcilingItemsMember",            # 調整額
+    "OperatingSegmentsNotIncludedInReportableSegmentsAndOtherRevenueGeneratingBusinessActivitiesMember",  # 「その他」
+)
+
+# セグメント member 名の suffix (削って読みやすい名前にする、 長い順に試す)
+_SEGMENT_MEMBER_SUFFIXES: tuple[str, ...] = (
+    "ReportableSegmentsMember",
+    "Member",
+)
 
 
 class XbrlSegment(BaseModel):
@@ -373,13 +408,15 @@ def _has_segment_dimension(fact: Any) -> bool:
     """セグメント / 報告セグメント次元が付いているか?
 
     Tier 1 取得時は、 セグメント別の分解値ではなく **会社全体合計** を取りたい。
+    EDINET 標準では `OperatingSegmentsAxis` / `ReportableSegmentsAxis` /
+    `BusinessSegmentsAxis` のいずれかでセグメント分解される。
     """
     ctx = getattr(fact, "context", None)
     if ctx is None:
         return False
     for axis_qname in getattr(ctx, "qnameDims", {}):
         local = str(getattr(axis_qname, "localName", "") or "")
-        if "Segment" in local or "BusinessSegments" in local:
+        if local in _SEGMENT_AXIS_KEYWORDS:
             return True
     return False
 
@@ -390,7 +427,7 @@ def _pick_current_period_fact(
     """同じ concept の facts から **当期** に該当するものを 1 件選ぶ。
 
     優先順位:
-    1. `prefer_period_end` と一致する context
+    1. `prefer_period_end` と一致する context (EDINET の exclusive end 慣行で +1 日も許容)
     2. context.endDatetime が最も新しいもの
     3. それでも決まらなければ facts[0]
     """
@@ -399,8 +436,7 @@ def _pick_current_period_fact(
 
     if prefer_period_end:
         for fact in facts:
-            ctx_end = _context_end_date(fact)
-            if ctx_end == prefer_period_end:
+            if _matches_period_end(fact, prefer_period_end):
                 return fact
 
     dated = [(f, _context_end_date(f)) for f in facts]
@@ -410,6 +446,21 @@ def _pick_current_period_fact(
         return dated_valid[0][0]
 
     return facts[0]
+
+
+def _matches_period_end(fact: Any, period_end: date) -> bool:
+    """fact の context end が `period_end` と一致するか?
+
+    EDINET XBRL は **exclusive end** 慣行 (e.g., FY ending 2025-03-31 →
+    endDatetime=2025-04-01) を使うので、 `period_end == fact_end` だけでなく
+    `period_end + 1 day == fact_end` も合致と見なす。
+    """
+    from datetime import timedelta  # noqa: PLC0415 — 局所利用
+
+    ctx_end = _context_end_date(fact)
+    if ctx_end is None:
+        return False
+    return ctx_end == period_end or ctx_end == period_end + timedelta(days=1)
 
 
 def _context_end_date(fact: Any) -> date | None:
@@ -453,9 +504,12 @@ def _extract_segments(
 ) -> list[XbrlSegment]:
     """セグメント別の売上 / 営業利益を抽出する。
 
-    EDINET XBRL では 「ReportableSegmentsAxis」 / 「BusinessSegmentsAxis」 等の
-    axis に member が乗ったコンテキストでセグメント値が表現される。 軸 member の
-    localName をセグメント名として使う。
+    EDINET XBRL では `OperatingSegmentsAxis` / `ReportableSegmentsAxis` /
+    `BusinessSegmentsAxis` のいずれかの axis に member が乗ったコンテキストで
+    セグメント値が表現される。 軸 member の localName からセグメント名を取る。
+
+    集計 / 調整 member (`ReportableSegmentsMember` / `TotalOf...Member` /
+    `EliminationsOrAdjustmentsMember` / `ReconcilingItemsMember` 等) は除外。
     """
     sales_per_segment: dict[str, float] = {}
     profit_per_segment: dict[str, float] = {}
@@ -465,7 +519,7 @@ def _extract_segments(
             seg_name = _extract_segment_name(fact)
             if seg_name is None:
                 continue
-            if period_end and _context_end_date(fact) != period_end:
+            if period_end and not _matches_period_end(fact, period_end):
                 continue
             value = _parse_numeric_value(fact)
             if value is None:
@@ -477,7 +531,7 @@ def _extract_segments(
             seg_name = _extract_segment_name(fact)
             if seg_name is None:
                 continue
-            if period_end and _context_end_date(fact) != period_end:
+            if period_end and not _matches_period_end(fact, period_end):
                 continue
             value = _parse_numeric_value(fact)
             if value is None:
@@ -500,15 +554,18 @@ def _extract_segments(
 def _extract_segment_name(fact: Any) -> str | None:
     """fact の context dimensional axis から **セグメント名** を取り出す。
 
-    `*Member` で終わる localName は suffix を削って 「Member」 を外す。
-    `EliminationsOrAdjustments` 等の集計行は無視。
+    Recognized axes: `OperatingSegmentsAxis` / `ReportableSegmentsAxis` /
+    `BusinessSegmentsAxis` (`_SEGMENT_AXIS_KEYWORDS`)。
+
+    集計 / 調整 / 「その他」 系の member は `_SEGMENT_MEMBER_EXCLUDES` で除外。
+    名前末尾の `ReportableSegmentsMember` / `Member` suffix を削って読みやすく。
     """
     ctx = getattr(fact, "context", None)
     if ctx is None:
         return None
     for axis_qname, dim_value in getattr(ctx, "qnameDims", {}).items():
         axis_local = str(getattr(axis_qname, "localName", "") or "")
-        if "Segment" not in axis_local and "BusinessSegments" not in axis_local:
+        if axis_local not in _SEGMENT_AXIS_KEYWORDS:
             continue
         member_qname = getattr(dim_value, "memberQname", None)
         if member_qname is None:
@@ -516,12 +573,12 @@ def _extract_segment_name(fact: Any) -> str | None:
         local = str(member_qname.localName or "")
         if not local:
             continue
-        if local.startswith("EliminationsOrAdjustments") or local.startswith(
-            "ReportableSegments"
-        ):
+        if local in _SEGMENT_MEMBER_EXCLUDES:
             continue
-        if local.endswith("Member"):
-            local = local[: -len("Member")]
+        for suffix in _SEGMENT_MEMBER_SUFFIXES:
+            if local.endswith(suffix):
+                local = local[: -len(suffix)]
+                break
         return local
     return None
 
