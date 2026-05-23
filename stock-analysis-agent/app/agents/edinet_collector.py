@@ -33,6 +33,8 @@ from edinet_client import (
     EdinetCodeResolver,
     GcsCache,
     LocalCache,
+    XbrlFinancials,
+    parse_xbrl_zip,
 )
 
 from config import settings
@@ -43,10 +45,17 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class EdinetFilingResult:
-    """`collect_filings()` の戻り値。 metadata + 本体 PDF のペア。"""
+    """`collect_filings()` の戻り値。
+
+    - `metadata`: 書類メタデータ (DocumentType / submit_date / 期末 等)
+    - `body`: 本体 PDF (Claude が Read tool で読む)
+    - `financials`: XBRL から抽出した Tier 1+2 構造化数値 (Phase 2b 以降)。
+       XBRL が無い書類 / parse 失敗 / `edinet_enable_xbrl=false` のときは None
+    """
 
     metadata: DocumentMetadata
     body: DocumentBody
+    financials: XbrlFinancials | None = None
 
 
 async def collect_filings(ticker: str) -> list[EdinetFilingResult]:
@@ -119,7 +128,7 @@ async def collect_filings(ticker: str) -> list[EdinetFilingResult]:
         if not selected:
             return []
 
-        # 3) 本体 (PDF) を取得 (cache 経由)
+        # 3) 本体 (PDF + 任意で XBRL) を取得 (cache 経由)
         results: list[EdinetFilingResult] = []
         for meta in selected:
             try:
@@ -131,7 +140,10 @@ async def collect_filings(ticker: str) -> list[EdinetFilingResult]:
                     ticker,
                 )
                 continue
-            results.append(EdinetFilingResult(metadata=meta, body=body))
+            financials = await _fetch_and_parse_xbrl(client=client, meta=meta)
+            results.append(
+                EdinetFilingResult(metadata=meta, body=body, financials=financials)
+            )
 
     # 提出日 昇順 (古→新) で返す
     results.sort(key=lambda r: r.metadata.submit_date)
@@ -204,6 +216,63 @@ async def _gather_filings_for_edinet_code(
             if d.edinet_code == edinet_code and d.is_available:
                 matches.append(d)
     return matches
+
+
+async def _fetch_and_parse_xbrl(
+    *, client: EdinetClient, meta: DocumentMetadata
+) -> XbrlFinancials | None:
+    """XBRL zip を取得して Tier 1+2 数値を抽出する (proposal 0006 Phase 2b)。
+
+    XBRL を持たない書類 (xbrl_flag=False) や、 機能 off (`edinet_enable_xbrl=false`)
+    の場合は None を返して PDF 経路だけで進む。 1 件失敗で全体を落とさない。
+    """
+    if not settings.edinet_enable_xbrl:
+        return None
+    if not meta.xbrl_flag:
+        logger.debug(
+            "no XBRL available for document_id=%s (xbrl_flag=False)",
+            meta.document_id,
+        )
+        return None
+    try:
+        body = await client.download(meta.document_id, content_type="xbrl_zip")
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "failed to download XBRL for document_id=%s (PDF only)", meta.document_id
+        )
+        return None
+    try:
+        financials = parse_xbrl_zip(body.bytes_payload, document_id=meta.document_id)
+    except ImportError:
+        # [xbrl] extras が未導入の環境 (e.g., 軽量 deploy)。 警告のみで継続。
+        logger.warning(
+            "edinet-client[xbrl] extras not installed; "
+            "skipping XBRL parsing for document_id=%s. "
+            "Set EDINET_ENABLE_XBRL=false to suppress this warning",
+            meta.document_id,
+        )
+        return None
+    except Exception:  # noqa: BLE001 — XBRL parser の予期せぬ失敗を吸収
+        logger.exception(
+            "XBRL parsing failed for document_id=%s (continuing with PDF only)",
+            meta.document_id,
+        )
+        return None
+    if not financials.has_tier1_data:
+        logger.warning(
+            "XBRL parse returned no Tier 1 data for document_id=%s; "
+            "concept name mismatch likely. Continuing with PDF only.",
+            meta.document_id,
+        )
+        return None
+    logger.info(
+        "XBRL parsed for document_id=%s: net_sales=%s, operating_profit=%s, segments=%d",
+        meta.document_id,
+        financials.net_sales,
+        financials.operating_profit,
+        len(financials.segments),
+    )
+    return financials
 
 
 async def _select_filings_from_db(

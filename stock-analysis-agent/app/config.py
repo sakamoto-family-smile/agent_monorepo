@@ -98,6 +98,12 @@ class Settings:
     # を捕捉するため 7 日が default (proposal §4.1)
     edinet_daily_window_days: int = int(os.getenv("EDINET_DAILY_WINDOW_DAYS", "7"))
 
+    # XBRL parser を使って Tier 1+2 構造化数値を抽出するか (Phase 2b)。
+    # true のとき edinet_collector が PDF に加えて XBRL zip も DL し parse 結果を
+    # `EdinetFilingResult.financials` に格納する。 軽量 deploy で `[xbrl]` extras を
+    # 入れない場合は false にする (parse は警告ログだけ出して skip)。
+    edinet_enable_xbrl: bool = os.getenv("EDINET_ENABLE_XBRL", "true").lower() == "true"
+
     @property
     def cors_origins(self):
         if self.app_env == "local":

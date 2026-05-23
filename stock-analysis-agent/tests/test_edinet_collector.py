@@ -264,6 +264,289 @@ class TestCollectionFlow:
         assert results[0].metadata.document_id == "ANNUAL1"
 
 
+class TestXbrlIntegration:
+    """Phase 2b: collector が PDF + XBRL を両方取得して financials を埋める。"""
+
+    @pytest.mark.asyncio
+    async def test_xbrl_parsed_when_flag_true(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_settings(
+            monkeypatch,
+            edinet_quarterly_lookback=0,
+            edinet_search_window_days=3,
+            edinet_enable_xbrl=True,
+        )
+        from agents import edinet_collector
+        from edinet_client import XbrlFinancials
+
+        annual = DocumentMetadata(
+            document_id="ANNUAL_X",
+            edinet_code="E12345",
+            securities_code="285A0",
+            submitter_name="キオクシア",
+            document_type=DocumentType.ANNUAL_REPORT,
+            submit_date=date(2026, 5, 10),
+            xbrl_flag=True,  # XBRL あり
+            pdf_flag=True,
+        )
+
+        download_calls: list[tuple[str, str]] = []
+
+        class _FakeClient:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> "_FakeClient":
+                return self
+
+            async def __aexit__(self, *exc: Any) -> None:
+                return None
+
+            async def list_documents(self, target_date: date) -> list[DocumentMetadata]:
+                if target_date == date.today():
+                    return [annual]
+                return []
+
+            async def download(self, doc_id: str, *, content_type: str = "pdf") -> DocumentBody:
+                download_calls.append((doc_id, content_type))
+                return DocumentBody(
+                    document_id=doc_id,
+                    content_type=content_type,
+                    bytes_payload=b"fake-" + content_type.encode(),
+                    fetched_at=datetime.now(UTC),
+                    from_cache=False,
+                )
+
+        # XBRL parser を stub: 適当な financials を返す
+        fake_fin = XbrlFinancials(
+            fiscal_year_end=date(2026, 3, 31),
+            net_sales=1_000_000_000_000.0,
+            operating_profit=100_000_000_000.0,
+        )
+
+        def _fake_parse(zip_bytes: bytes, *, document_id: str | None = None):
+            return fake_fin
+
+        monkeypatch.setattr(edinet_collector, "EdinetClient", _FakeClient)
+        monkeypatch.setattr(edinet_collector, "parse_xbrl_zip", _fake_parse)
+
+        results = await edinet_collector.collect_filings("285A.T")
+        assert len(results) == 1
+        assert results[0].financials == fake_fin
+        # PDF と XBRL の両方が DL されたか
+        contents = sorted(ct for _, ct in download_calls)
+        assert contents == ["pdf", "xbrl_zip"]
+
+    @pytest.mark.asyncio
+    async def test_xbrl_skipped_when_flag_false(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_settings(
+            monkeypatch,
+            edinet_quarterly_lookback=0,
+            edinet_search_window_days=3,
+            edinet_enable_xbrl=True,
+        )
+        from agents import edinet_collector
+
+        annual = DocumentMetadata(
+            document_id="A_NO_XBRL",
+            edinet_code="E12345",
+            securities_code="285A0",
+            submitter_name="キオクシア",
+            document_type=DocumentType.ANNUAL_REPORT,
+            submit_date=date(2026, 5, 10),
+            xbrl_flag=False,
+            pdf_flag=True,
+        )
+
+        download_calls: list[tuple[str, str]] = []
+
+        class _FakeClient:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> "_FakeClient":
+                return self
+
+            async def __aexit__(self, *exc: Any) -> None:
+                return None
+
+            async def list_documents(self, target_date: date) -> list[DocumentMetadata]:
+                if target_date == date.today():
+                    return [annual]
+                return []
+
+            async def download(self, doc_id: str, *, content_type: str = "pdf") -> DocumentBody:
+                download_calls.append((doc_id, content_type))
+                return _make_body(doc_id)
+
+        monkeypatch.setattr(edinet_collector, "EdinetClient", _FakeClient)
+
+        results = await edinet_collector.collect_filings("285A.T")
+        assert len(results) == 1
+        assert results[0].financials is None
+        # xbrl_zip download は呼ばれていない
+        assert all(ct == "pdf" for _, ct in download_calls)
+
+    @pytest.mark.asyncio
+    async def test_xbrl_skipped_when_feature_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_settings(
+            monkeypatch,
+            edinet_quarterly_lookback=0,
+            edinet_search_window_days=3,
+            edinet_enable_xbrl=False,  # ← off
+        )
+        from agents import edinet_collector
+
+        annual = DocumentMetadata(
+            document_id="A_OFF",
+            edinet_code="E12345",
+            securities_code="285A0",
+            submitter_name="キオクシア",
+            document_type=DocumentType.ANNUAL_REPORT,
+            submit_date=date(2026, 5, 10),
+            xbrl_flag=True,  # XBRL あるが feature off
+            pdf_flag=True,
+        )
+
+        download_calls: list[tuple[str, str]] = []
+
+        class _FakeClient:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> "_FakeClient":
+                return self
+
+            async def __aexit__(self, *exc: Any) -> None:
+                return None
+
+            async def list_documents(self, target_date: date) -> list[DocumentMetadata]:
+                if target_date == date.today():
+                    return [annual]
+                return []
+
+            async def download(self, doc_id: str, *, content_type: str = "pdf") -> DocumentBody:
+                download_calls.append((doc_id, content_type))
+                return _make_body(doc_id)
+
+        monkeypatch.setattr(edinet_collector, "EdinetClient", _FakeClient)
+
+        results = await edinet_collector.collect_filings("285A.T")
+        assert len(results) == 1
+        assert results[0].financials is None
+        assert all(ct == "pdf" for _, ct in download_calls)
+
+    @pytest.mark.asyncio
+    async def test_xbrl_download_failure_keeps_pdf(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_settings(
+            monkeypatch,
+            edinet_quarterly_lookback=0,
+            edinet_search_window_days=3,
+            edinet_enable_xbrl=True,
+        )
+        from agents import edinet_collector
+
+        annual = DocumentMetadata(
+            document_id="A_XFAIL",
+            edinet_code="E12345",
+            securities_code="285A0",
+            submitter_name="キオクシア",
+            document_type=DocumentType.ANNUAL_REPORT,
+            submit_date=date(2026, 5, 10),
+            xbrl_flag=True,
+            pdf_flag=True,
+        )
+
+        class _FakeClient:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> "_FakeClient":
+                return self
+
+            async def __aexit__(self, *exc: Any) -> None:
+                return None
+
+            async def list_documents(self, target_date: date) -> list[DocumentMetadata]:
+                if target_date == date.today():
+                    return [annual]
+                return []
+
+            async def download(self, doc_id: str, *, content_type: str = "pdf") -> DocumentBody:
+                if content_type == "xbrl_zip":
+                    raise RuntimeError("xbrl 404")
+                return _make_body(doc_id)
+
+        monkeypatch.setattr(edinet_collector, "EdinetClient", _FakeClient)
+
+        results = await edinet_collector.collect_filings("285A.T")
+        # PDF 経路は維持される
+        assert len(results) == 1
+        assert results[0].financials is None
+
+    @pytest.mark.asyncio
+    async def test_xbrl_parse_with_no_tier1_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """parse_xbrl_zip が has_tier1_data=False を返したら financials は None。"""
+        _stub_settings(
+            monkeypatch,
+            edinet_quarterly_lookback=0,
+            edinet_search_window_days=3,
+            edinet_enable_xbrl=True,
+        )
+        from agents import edinet_collector
+        from edinet_client import XbrlFinancials
+
+        annual = DocumentMetadata(
+            document_id="A_EMPTY",
+            edinet_code="E12345",
+            securities_code="285A0",
+            submitter_name="キオクシア",
+            document_type=DocumentType.ANNUAL_REPORT,
+            submit_date=date(2026, 5, 10),
+            xbrl_flag=True,
+            pdf_flag=True,
+        )
+
+        class _FakeClient:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> "_FakeClient":
+                return self
+
+            async def __aexit__(self, *exc: Any) -> None:
+                return None
+
+            async def list_documents(self, target_date: date) -> list[DocumentMetadata]:
+                if target_date == date.today():
+                    return [annual]
+                return []
+
+            async def download(self, doc_id: str, *, content_type: str = "pdf") -> DocumentBody:
+                return _make_body(doc_id)
+
+        # 全 None で has_tier1_data=False
+        monkeypatch.setattr(edinet_collector, "EdinetClient", _FakeClient)
+        monkeypatch.setattr(
+            edinet_collector,
+            "parse_xbrl_zip",
+            lambda zip_bytes, *, document_id=None: XbrlFinancials(),
+        )
+
+        results = await edinet_collector.collect_filings("285A.T")
+        assert len(results) == 1
+        assert results[0].financials is None
+
+
 class TestResolverBuild:
     def test_csv_loaded_correctly(self, tmp_path: Path) -> None:
         """テスト fixture の CSV が EdinetCodeResolver でパースできることを確認。"""

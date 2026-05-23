@@ -29,11 +29,8 @@ from datetime import date, timedelta
 from edinet_client import EdinetClient, InMemoryCache
 
 from config import settings
+from services.database import init_db
 from services.edinet_index_repo import EdinetIndexRepo
-
-# init_db は database.py 全体 (DB_PATH constant の早期キャプチャ等) を引き連れる
-# ため、 module level の import を避けて main_async 内で遅延 import する。
-# これによりテスト isolation (他テストとの import 順依存) が壊れない。
 
 logger = logging.getLogger(__name__)
 
@@ -149,8 +146,6 @@ async def main_async(argv: list[str]) -> int:
         target_dates[0] if target_dates else "—",
         target_dates[-1] if target_dates else "—",
     )
-
-    from services.database import init_db  # noqa: PLC0415 — 遅延 import
 
     await init_db()  # 既存テーブルがなければ作る
     summary = await run(target_dates)

@@ -5,17 +5,29 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from config import settings
+import config  # NOTE: `from config import settings` だと importlib.reload 後の
+# 新 settings インスタンスを参照できず test isolation が壊れるので、 module
+# 自体を import して `config.settings.db_path` で毎回 lookup する。
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = settings.db_path
+
+def _db_path() -> str:
+    """`settings.db_path` を毎回 lookup する (test isolation 用)。
+
+    モジュール ロード時に `DB_PATH = settings.db_path` を constant 化したり
+    `from config import settings` で reference を捕まえると、 test fixture が
+    `importlib.reload(config)` で settings を作り直しても古い値が使われて
+    `sqlite3.OperationalError: no such table: ...` の test isolation 失敗を起こす。
+    毎回 `config.settings.db_path` を読み直すことで回避。
+    """
+    return config.settings.db_path
 
 
 async def init_db() -> None:
     """Initialize SQLite database with schema."""
-    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-    async with aiosqlite.connect(DB_PATH) as db:
+    Path(_db_path()).parent.mkdir(parents=True, exist_ok=True)
+    async with aiosqlite.connect(_db_path()) as db:
         await db.executescript("""
             CREATE TABLE IF NOT EXISTS ticker_dictionary (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,7 +105,7 @@ async def init_db() -> None:
         # Seed common Japanese/US stocks
         await _seed_ticker_dictionary(db)
         await db.commit()
-    logger.info("Database initialized at %s", DB_PATH)
+    logger.info("Database initialized at %s", _db_path())
 
 
 async def _seed_ticker_dictionary(db: aiosqlite.Connection) -> None:
@@ -139,7 +151,7 @@ async def _seed_ticker_dictionary(db: aiosqlite.Connection) -> None:
 
 async def lookup_ticker(company_name: str) -> Optional[Dict[str, Any]]:
     """Look up ticker by company name in database."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         # Exact match
         async with db.execute(
@@ -164,7 +176,7 @@ async def lookup_ticker(company_name: str) -> Optional[Dict[str, Any]]:
 
 async def get_cached_price(ticker: str, period: str) -> Optional[Dict]:
     """Get cached price data if not expired."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT data FROM price_cache
@@ -180,7 +192,7 @@ async def get_cached_price(ticker: str, period: str) -> Optional[Dict]:
 async def set_cached_price(ticker: str, period: str, data: Dict) -> None:
     """Cache price data."""
     expires_at = (datetime.now() + timedelta(hours=settings.price_cache_ttl_hours)).isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         await db.execute(
             """INSERT OR REPLACE INTO price_cache (ticker, period, data, expires_at)
                VALUES (?, ?, ?, ?)""",
@@ -191,7 +203,7 @@ async def set_cached_price(ticker: str, period: str, data: Dict) -> None:
 
 async def save_report(ticker: str, company_name: Optional[str], report_data: Dict) -> int:
     """Save analysis report and return report ID."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         cursor = await db.execute(
             "INSERT INTO reports (ticker, company_name, report_data) VALUES (?, ?, ?)",
             (ticker, company_name, json.dumps(report_data, ensure_ascii=False))
@@ -202,7 +214,7 @@ async def save_report(ticker: str, company_name: Optional[str], report_data: Dic
 
 async def get_reports(ticker: str, limit: int = 10) -> List[Dict]:
     """Get recent reports for a ticker."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM reports WHERE ticker = ? ORDER BY created_at DESC LIMIT ?",

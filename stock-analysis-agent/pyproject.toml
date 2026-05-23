@@ -18,15 +18,18 @@ dependencies = [
     # `[gcs]` extra で google-cloud-storage を入れる。
     # ANALYTICS_STORAGE_BACKEND=gcs のとき GCSPayloadWriter / GCSTransport が import される。
     "analytics-platform[gcs]",
-    # EDINET API client (proposal 0006 Phase 1d)。 EDINET_ENABLED=true のときに
-    # orchestrator が edinet_collector 経由で 有価証券報告書 / 四半期報告書を取得する。
-    "edinet-client",
+    # EDINET API client (proposal 0006 Phase 1d / 2b)。 EDINET_ENABLED=true の
+    # ときに orchestrator が edinet_collector 経由で 有価証券報告書 / 四半期報告書
+    # を取得し、 `[xbrl]` extras の Arelle で Tier 1+2 構造化数値を抽出する。
+    # 軽量 deploy で Arelle を入れたくない場合は EDINET_ENABLE_XBRL=false にして
+    # extras を `edinet-client` (extras なし) に差し替える。
+    "edinet-client[xbrl]",
 ]
 
 [project.optional-dependencies]
 # EDINET 書類本体を GCS に cache する場合に有効化 (Cloud Run 本番想定)。
 edinet-gcs = [
-    "edinet-client[gcs]",
+    "edinet-client[gcs,xbrl]",
 ]
 
 [tool.uv.sources]
