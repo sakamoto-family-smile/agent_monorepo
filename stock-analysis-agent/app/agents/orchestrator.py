@@ -37,8 +37,10 @@ def _build_analysis_prompt(
     name = company_name or ticker
     edinet_block = f"\n\n## EDINET 法定開示\n{edinet_section}" if edinet_section else ""
     edinet_instr = (
-        "\n6. **EDINET 法定開示の活用**: 上記の有価証券報告書 / 四半期報告書 PDF を Read tool で開き、 "
-        "セグメント別売上 / 中期経営計画 / 事業等のリスク 等の自然文を引用しつつ分析に反映してください"
+        "\n6. **EDINET 法定開示の活用**: 上記の有価証券報告書 / 四半期報告書を活用してください。 "
+        "**主要財務数値 (XBRL 抽出) は本 prompt に表として含まれている**ので、 YoY や "
+        "セグメント比較は表の数値を直接使い、 定性情報 (中期経営計画 / 事業等のリスク等) は "
+        "PDF を Read tool で開いて引用してください"
         if edinet_section
         else ""
     )
@@ -114,6 +116,9 @@ def _materialize_edinet_filings(
 ) -> str:
     """EDINET 書類 PDF を workspace に書き出して prompt に組み込む文字列を返す。
 
+    Phase 2b 以降は XBRL から抽出した Tier 1+2 構造化数値も markdown 表として
+    prompt に直接埋め込み、 Claude の数値計算 (YoY / セグメント比較等) を支援する。
+
     Claude Agent SDK には Read tool を渡しているため、 prompt に「この PDF を Read
     で開いて分析せよ」 と指示すれば Claude が自発的に読みに行く。
     """
@@ -121,11 +126,15 @@ def _materialize_edinet_filings(
     os.makedirs(edinet_dir, exist_ok=True)
 
     lines: list[str] = [
-        "以下の法定開示書類を Read tool で開いて分析に活用してください。",
-        "各 PDF は数十〜数百ページのため、 全文読まずに目次から関連セクション "
-        "(セグメント別売上 / 中期経営計画 / 事業等のリスク 等) を抽出してください。",
+        "以下の法定開示書類を分析に活用してください。",
+        "各 PDF (定性情報用) は数十〜数百ページのため、 Read tool で目次から "
+        "関連セクション (セグメント別売上 / 中期経営計画 / 事業等のリスク 等) を抽出。",
+        "**主要財務数値 (XBRL 抽出)** は本 prompt に直接掲載してあるので、 そのまま "
+        "計算 (YoY / セグメント比較等) に利用してください。",
         "",
     ]
+
+    # 書類リスト + financials
     for filing in filings:
         path = os.path.join(edinet_dir, f"{filing.metadata.document_id}.pdf")
         try:
@@ -143,7 +152,87 @@ def _materialize_edinet_filings(
             f"- 📄 `{path}` — **{type_label}** ({m.submit_date}、 "
             f"期末: {m.period_end or '—'}、 {m.description})"
         )
+
+    financials_section = _format_xbrl_financials_section(filings)
+    if financials_section:
+        lines.append("")
+        lines.append(financials_section)
+
     return "\n".join(lines)
+
+
+def _format_xbrl_financials_section(filings: list[EdinetFilingResult]) -> str:
+    """XBRL Tier 1 + Tier 2 数値を markdown 表として整形する。
+
+    全件 financials=None なら空文字を返す (Claude prompt に section を追加しない)。
+    """
+    enriched = [f for f in filings if f.financials is not None]
+    if not enriched:
+        return ""
+
+    out: list[str] = ["### 主要財務数値 (XBRL 抽出、 連結ベース、 円単位)"]
+
+    # Tier 1: 期末順 (古い順) の表
+    out.append("")
+    out.append("#### Tier 1: 連結 P/L / BS 主要項目")
+    out.append("")
+    out.append("| 期末 | 種別 | 売上 | 営業利益 | 経常利益 | 純利益 | 総資産 | 純資産 |")
+    out.append("|---|---|---:|---:|---:|---:|---:|---:|")
+    for f in enriched:
+        fin = f.financials
+        assert fin is not None
+        type_label = _document_type_label(str(f.metadata.document_type))
+        out.append(
+            f"| {fin.fiscal_year_end or f.metadata.period_end or '—'} "
+            f"| {type_label} "
+            f"| {_fmt_amount(fin.net_sales)} "
+            f"| {_fmt_amount(fin.operating_profit)} "
+            f"| {_fmt_amount(fin.ordinary_profit)} "
+            f"| {_fmt_amount(fin.net_profit)} "
+            f"| {_fmt_amount(fin.total_assets)} "
+            f"| {_fmt_amount(fin.net_assets)} |"
+        )
+
+    # Tier 2: セグメント情報 (最新の有報 1 件分のみ)
+    annual_with_segments = next(
+        (
+            f
+            for f in reversed(enriched)
+            if f.financials and f.financials.segments
+        ),
+        None,
+    )
+    if annual_with_segments and annual_with_segments.financials:
+        out.append("")
+        out.append(
+            f"#### Tier 2: セグメント別売上 / 営業利益 "
+            f"(期末 {annual_with_segments.financials.fiscal_year_end or '—'})"
+        )
+        out.append("")
+        out.append("| セグメント | 売上 | 営業利益 |")
+        out.append("|---|---:|---:|")
+        for seg in annual_with_segments.financials.segments:
+            out.append(
+                f"| {seg.segment_name} "
+                f"| {_fmt_amount(seg.net_sales)} "
+                f"| {_fmt_amount(seg.operating_profit)} |"
+            )
+
+    return "\n".join(out)
+
+
+def _fmt_amount(value: float | None) -> str:
+    """円単位 float を 「1,234 億円」 等の表記にする。 None は 「—」。"""
+    if value is None:
+        return "—"
+    abs_val = abs(value)
+    if abs_val >= 1e12:
+        return f"{value / 1e12:,.2f} 兆円"
+    if abs_val >= 1e8:
+        return f"{value / 1e8:,.0f} 億円"
+    if abs_val >= 1e6:
+        return f"{value / 1e6:,.0f} 百万円"
+    return f"{value:,.0f} 円"
 
 
 def _document_type_label(doc_type_code: str) -> str:
