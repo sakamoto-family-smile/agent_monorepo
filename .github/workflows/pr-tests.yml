@@ -518,7 +518,10 @@ jobs:
         run: uv python install
 
       - name: Install dependencies
-        run: uv sync --dev
+        # Phase 2a 以降: XBRL parser テスト (Arelle 実呼び出し) を含むため
+        # [xbrl] extras も必要。 [gcs] は GcsCache test が fake client で完結
+        # するので install 不要
+        run: uv sync --dev --extra xbrl
 
       - name: Run tests
         run: uv run pytest tests/ --tb=short -v --no-header

@@ -17,6 +17,7 @@ gcs = [
 
 # XBRL 構造化抽出 (Phase 2 で実装)
 xbrl = [
+    "arelle-release>=2.41.2",
     "lxml>=5.0.0",
 ]
 
