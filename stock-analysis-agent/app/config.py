@@ -72,6 +72,28 @@ class Settings:
     line_channel_secret: str = os.getenv("LINE_CHANNEL_SECRET", "")
     line_channel_access_token: str = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 
+    # ── EDINET 統合 (proposal 0006 Phase 1d) ──
+    # EDINET API v2 で有報・四半期報告書を取得し、 Claude 分析に投入する。
+    # false (既定) のとき EDINET 経路は完全に skip され、 既存の yfinance + Brave Search
+    # で完結する。
+    edinet_enabled: bool = os.getenv("EDINET_ENABLED", "false").lower() == "true"
+    # API key は disclosure2.edinet-fsa.go.jp で無料登録
+    edinet_api_key: str = os.getenv("EDINET_API_KEY", "")
+    # ticker → EDINET code 解決用 CSV (公式 Edinetcode.csv)。 未設定だと resolver
+    # 無しで起動するが、 collector は早期に skip する。
+    edinet_code_csv_path: str = os.getenv("EDINET_CODE_CSV_PATH", "")
+    # cache backend: "local" | "gcs"
+    edinet_cache_backend: str = os.getenv("EDINET_CACHE_BACKEND", "local").lower()
+    edinet_cache_root: str = os.getenv("EDINET_CACHE_ROOT", "./data/edinet")
+    edinet_cache_gcs_bucket: str = os.getenv("EDINET_CACHE_GCS_BUCKET", "")
+    edinet_cache_gcs_prefix: str = os.getenv("EDINET_CACHE_GCS_PREFIX", "edinet/")
+    # 1 銘柄あたり取得する直近四半期報告書の本数
+    edinet_quarterly_lookback: int = int(os.getenv("EDINET_QUARTERLY_LOOKBACK", "4"))
+    # EDINET API 連続 request の最小間隔 (秒)
+    edinet_min_interval_sec: float = float(os.getenv("EDINET_MIN_INTERVAL_SEC", "1.0"))
+    # 最新書類検索の窓 (日)。 1 年分の四半期 + 年次を拾えれば十分
+    edinet_search_window_days: int = int(os.getenv("EDINET_SEARCH_WINDOW_DAYS", "400"))
+
     @property
     def cors_origins(self):
         if self.app_env == "local":
