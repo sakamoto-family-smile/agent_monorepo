@@ -16,6 +16,7 @@ from agents.ticker_resolver import resolve_ticker
 from agents.data_collection import fetch_ohlcv, fetch_fundamentals
 from agents.technical_analysis import compute_indicators
 from agents.chart_generator import generate_chart
+from agents.edinet_collector import EdinetFilingResult, collect_filings
 from instrumentation import get_analytics_logger, get_content_router, get_tracer
 from services.database import save_report
 from config import settings
@@ -31,8 +32,16 @@ def _build_analysis_prompt(
     ohlcv_summary: str,
     technical_summary: str,
     fundamental_summary: str,
+    edinet_section: str = "",
 ) -> str:
     name = company_name or ticker
+    edinet_block = f"\n\n## EDINET 法定開示\n{edinet_section}" if edinet_section else ""
+    edinet_instr = (
+        "\n6. **EDINET 法定開示の活用**: 上記の有価証券報告書 / 四半期報告書 PDF を Read tool で開き、 "
+        "セグメント別売上 / 中期経営計画 / 事業等のリスク 等の自然文を引用しつつ分析に反映してください"
+        if edinet_section
+        else ""
+    )
     return f"""あなたは株式アナリストです。以下のデータを元に、{name}（{ticker}）の詳細な投資分析レポートを日本語で作成してください。
 
 ## 価格データ（直近）
@@ -42,14 +51,14 @@ def _build_analysis_prompt(
 {technical_summary}
 
 ## ファンダメンタルズ
-{fundamental_summary}
+{fundamental_summary}{edinet_block}
 
 ## 分析指示
 1. **テクニカル分析**: トレンド、サポート/レジスタンス、オシレーター（RSI, MACD）、ボリンジャーバンドの状態を分析してください
 2. **ファンダメンタル分析**: バリュエーション（PER, PBR）、収益性、財務健全性を評価してください
 3. **センチメント分析**: Brave Searchを使って最新ニュースを検索し、市場センチメントを分析してください（キーワード: "{name} 株価 ニュース"）
 4. **総合評価**: 強気/中立/弱気の判断と、その根拠を明確に示してください
-5. **リスク要因**: 主要なダウンサイドリスクを列挙してください
+5. **リスク要因**: 主要なダウンサイドリスクを列挙してください{edinet_instr}
 
 レポートは投資家が意思決定に使えるよう、具体的かつ客観的に記述してください。"""
 
@@ -98,6 +107,57 @@ def _format_fundamental_summary(fund) -> str:
     if fund.sector: lines.append(f"セクター: {fund.sector}")
     if fund.industry: lines.append(f"業種: {fund.industry}")
     return "\n".join(lines) or "データなし"
+
+
+def _materialize_edinet_filings(
+    filings: list[EdinetFilingResult], workspace_dir: str
+) -> str:
+    """EDINET 書類 PDF を workspace に書き出して prompt に組み込む文字列を返す。
+
+    Claude Agent SDK には Read tool を渡しているため、 prompt に「この PDF を Read
+    で開いて分析せよ」 と指示すれば Claude が自発的に読みに行く。
+    """
+    edinet_dir = os.path.join(workspace_dir, "edinet")
+    os.makedirs(edinet_dir, exist_ok=True)
+
+    lines: list[str] = [
+        "以下の法定開示書類を Read tool で開いて分析に活用してください。",
+        "各 PDF は数十〜数百ページのため、 全文読まずに目次から関連セクション "
+        "(セグメント別売上 / 中期経営計画 / 事業等のリスク 等) を抽出してください。",
+        "",
+    ]
+    for filing in filings:
+        path = os.path.join(edinet_dir, f"{filing.metadata.document_id}.pdf")
+        try:
+            with open(path, "wb") as f:
+                f.write(filing.body.bytes_payload)
+        except OSError:
+            logger.exception(
+                "failed to write EDINET PDF document_id=%s",
+                filing.metadata.document_id,
+            )
+            continue
+        m = filing.metadata
+        type_label = _document_type_label(str(m.document_type))
+        lines.append(
+            f"- 📄 `{path}` — **{type_label}** ({m.submit_date}、 "
+            f"期末: {m.period_end or '—'}、 {m.description})"
+        )
+    return "\n".join(lines)
+
+
+def _document_type_label(doc_type_code: str) -> str:
+    mapping = {
+        "120": "有価証券報告書",
+        "140": "四半期報告書",
+        "160": "半期報告書",
+        "180": "臨時報告書",
+        "130": "訂正届出書",
+        "350": "大量保有報告書",
+        "360": "変更報告書",
+        "490": "公開買付届出書",
+    }
+    return mapping.get(doc_type_code, f"書類 (code={doc_type_code})")
 
 
 def _write_mcp_config(workspace_dir: str, proxy_url: str) -> None:
@@ -279,12 +339,24 @@ async def _run_analysis_inner(
     os.makedirs(workspace_dir, exist_ok=True)
     _write_mcp_config(workspace_dir, settings.mcp_proxy_url)
 
+    # Step 6.5: EDINET 法定開示書類を取得 (proposal 0006 Phase 1d)。
+    # EDINET_ENABLED=false / 未上場 / 米国株 等の場合は空 list 返却で skip。
+    edinet_section = ""
+    try:
+        filings = await collect_filings(ticker)
+    except Exception:  # noqa: BLE001 — EDINET 経路の失敗で全体を落とさない
+        logger.exception("EDINET collection failed (continuing without EDINET data)")
+        filings = []
+    if filings:
+        edinet_section = _materialize_edinet_filings(filings, workspace_dir)
+
     prompt = _build_analysis_prompt(
         ticker=ticker,
         company_name=company_name,
         ohlcv_summary=_format_ohlcv_summary(ohlcv),
         technical_summary=_format_technical_summary(technical),
         fundamental_summary=_format_fundamental_summary(fundamentals),
+        edinet_section=edinet_section,
     )
 
     options = ClaudeAgentOptions(
