@@ -90,6 +90,100 @@ class TestListDocuments:
 
     @pytest.mark.asyncio
     @respx.mock
+    async def test_null_submit_date_items_skipped(self, cache: InMemoryCache) -> None:
+        """EDINET INDEX には匿名 / 取下げ済の全 null entry が混ざる。 これらで
+        全体の parse を fail させず、 残りの正常書類だけ返す (proposal 0006 Phase 2b
+        実動作検証で発見した bug の regression test)。
+        """
+        respx.get("https://api.edinet-fsa.go.jp/api/v2/documents.json").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        # 全 null の匿名エントリ (実 EDINET INDEX に日常的に混入)
+                        {
+                            "docID": None,
+                            "edinetCode": None,
+                            "submitDateTime": None,
+                            "docTypeCode": None,
+                        },
+                        # 正常な書類
+                        {
+                            "docID": "S100OK",
+                            "edinetCode": "E12345",
+                            "secCode": "12345",
+                            "filerName": "正常書類",
+                            "docTypeCode": "120",
+                            "submitDateTime": "2026-05-22 10:00",
+                            "docDescription": "有報",
+                            "withdrawalStatus": "0",
+                            "disclosureStatus": "0",
+                            "docInfoEditStatus": "0",
+                            "xbrlFlag": "1",
+                            "pdfFlag": "1",
+                            "attachDocFlag": "0",
+                        },
+                        # submitDateTime のみ null
+                        {
+                            "docID": "S100PARTIAL",
+                            "edinetCode": "E99999",
+                            "submitDateTime": None,
+                            "docTypeCode": "120",
+                        },
+                        # docID は null だが他は揃っている (これも skip 対象)
+                        {
+                            "docID": None,
+                            "edinetCode": "E88888",
+                            "submitDateTime": "2026-05-22 10:00",
+                        },
+                    ]
+                },
+            ),
+        )
+        async with EdinetClient(api_key="test-key", cache=cache, min_interval_sec=0.001) as client:
+            docs = await client.list_documents(date(2026, 5, 22))
+
+        # 正常な 1 件だけ残る
+        assert len(docs) == 1
+        assert docs[0].document_id == "S100OK"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_invalid_date_format_skipped(self, cache: InMemoryCache) -> None:
+        """submitDateTime が壊れた文字列 (`"invalid"`) でも例外伝播せず skip。"""
+        respx.get("https://api.edinet-fsa.go.jp/api/v2/documents.json").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "docID": "S100BAD",
+                            "edinetCode": "E11111",
+                            "submitDateTime": "not-a-date",
+                            "docTypeCode": "120",
+                        },
+                        {
+                            "docID": "S100OK",
+                            "edinetCode": "E12345",
+                            "submitDateTime": "2026-05-22 10:00",
+                            "docTypeCode": "120",
+                            "withdrawalStatus": "0",
+                            "disclosureStatus": "0",
+                            "docInfoEditStatus": "0",
+                            "xbrlFlag": "0",
+                            "pdfFlag": "0",
+                            "attachDocFlag": "0",
+                        },
+                    ]
+                },
+            ),
+        )
+        async with EdinetClient(api_key="test-key", cache=cache, min_interval_sec=0.001) as client:
+            docs = await client.list_documents(date(2026, 5, 22))
+        assert [d.document_id for d in docs] == ["S100OK"]
+
+    @pytest.mark.asyncio
+    @respx.mock
     async def test_unknown_doc_type_kept_as_str(self, cache: InMemoryCache) -> None:
         respx.get("https://api.edinet-fsa.go.jp/api/v2/documents.json").mock(
             return_value=httpx.Response(

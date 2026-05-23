@@ -96,7 +96,12 @@ class EdinetClient:
     # ─────────────────────────────────────────────────────────
 
     async def list_documents(self, target: date) -> list[DocumentMetadata]:
-        """指定日の文書 INDEX を取得 (`/api/v2/documents.json`、 type=2 で full metadata)。"""
+        """指定日の文書 INDEX を取得 (`/api/v2/documents.json`、 type=2 で full metadata)。
+
+        EDINET INDEX には submitDateTime=null の匿名 / 取下げエントリ (全フィールド
+        null) が日常的に混入する (1 日数十件程度)。 これらは parse できないので
+        debug log のみ吐いて skip し、 残りの正常な書類は確実に返す。
+        """
         params = {
             "date": target.isoformat(),
             "type": "2",
@@ -104,7 +109,22 @@ class EdinetClient:
         }
         payload = await self._get_json(f"{self._base_url}/documents.json", params=params)
         results = payload.get("results", []) or []
-        return [_to_document_metadata(item) for item in results]
+
+        parsed: list[DocumentMetadata] = []
+        skipped = 0
+        for item in results:
+            meta = _to_document_metadata(item)
+            if meta is None:
+                skipped += 1
+                continue
+            parsed.append(meta)
+        if skipped:
+            logger.debug(
+                "skipped %d incomplete EDINET INDEX entries for date=%s (e.g., null submitDateTime)",
+                skipped,
+                target,
+            )
+        return parsed
 
     def resolve_edinet_code(self, ticker: str) -> str | None:
         """ticker (e.g., "7203" / "7203.T") から EDINET code を返す。
@@ -237,10 +257,20 @@ def _content_type_to_api_type(content_type: ContentType) -> str:
     raise ValueError(f"unknown content_type: {content_type}")
 
 
-def _to_document_metadata(item: dict[str, Any]) -> DocumentMetadata:
-    """EDINET API レスポンス 1 件を `DocumentMetadata` に正規化。"""
+def _to_document_metadata(item: dict[str, Any]) -> DocumentMetadata | None:
+    """EDINET API レスポンス 1 件を `DocumentMetadata` に正規化。
+
+    EDINET INDEX には submitDateTime / docID / edinetCode が全 null の匿名
+    エントリが日常的に混入する (1 日 ~数十件)。 これらは正規化不能なので
+    `None` を返し、 caller (`list_documents`) で skip させる。
+    """
     submit_dt = item.get("submitDateTime") or item.get("submitDate") or ""
     submit_date = _parse_yyyymmdd(submit_dt[:10])
+    if submit_date is None:
+        return None
+    if not item.get("docID") or not item.get("edinetCode"):
+        return None
+
     period_end_str = item.get("periodEnd") or item.get("periodStart") or None
     period_end = _parse_yyyymmdd(period_end_str) if period_end_str else None
 
@@ -251,8 +281,8 @@ def _to_document_metadata(item: dict[str, Any]) -> DocumentMetadata:
         doc_type = doc_type_code  # 未知コードはそのまま str で保持
 
     return DocumentMetadata(
-        document_id=item.get("docID") or "",
-        edinet_code=item.get("edinetCode") or "",
+        document_id=item["docID"],
+        edinet_code=item["edinetCode"],
         securities_code=(item.get("secCode") or None),
         submitter_name=item.get("filerName") or "",
         document_type=doc_type,
@@ -268,11 +298,14 @@ def _to_document_metadata(item: dict[str, Any]) -> DocumentMetadata:
     )
 
 
-def _parse_yyyymmdd(value: str | None) -> date:
+def _parse_yyyymmdd(value: str | None) -> date | None:
+    """YYYY-MM-DD を `date` に変換。 None / 空文字 / 不正な文字列は None を返す。"""
     if not value:
-        raise ValueError("empty date value")
-    # EDINET は "2026-05-22" 形式
-    return date.fromisoformat(value)
+        return None
+    try:
+        return date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _to_int(value: Any, *, default: int = 0) -> int:
