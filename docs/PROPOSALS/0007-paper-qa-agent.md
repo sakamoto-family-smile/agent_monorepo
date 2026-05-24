@@ -17,7 +17,9 @@
 
 arxiv / Semantic Scholar 等を一次ソースとして、LINE Bot 経由で **論文検索 + 構造化要約 + 本文 Q&A (RAG)** を会話的に提供するエージェント `paper-qa-agent` を新設する。Phase 1 は ML / NLP に絞り、`Domain` インターフェースを通じて将来 bio / physics / 経済学等に拡張可能な設計とする。
 
-Phase 1 末で **既存 `kanie-lab-agent` の論文 search 機能を paper-platform 経由に統合** し、 重複ロジック解消と Cloud Run / Firestore 運用コスト削減を実現する。 kanie-lab の他機能 (研究テーマ設計 / 面接対策 / 研究計画レビュー) の LINE 移植は将来別 proposal とする。
+Phase 1 末で **既存 `kanie-lab-agent` の論文 search 機能を paper-platform 経由に統合** し、 重複ロジック解消と (将来の) Cloud Run / Firestore 運用コスト削減を実現する。 kanie-lab Web UI と他機能 (研究テーマ設計 / 面接対策 / 研究計画レビュー) は当面 **並存** (Phase 1 では archive しない)、 UX 検証と LINE 移植の判断は将来別 proposal とする。
+
+同時に **`tech-news-agent` の arxiv crawler も paper-platform に移管** する (Phase 1m、 別 PR で良い)。 cost 削減は小さい (日次バッチで quota 少) が、 重複ロジック解消とクロール rate-limit 集約の効果がある。
 
 データ取得層 (クロール / 各種 API クライアント / ID 正規化 / 重複排除 / 埋め込み / pgvector ストア / ランカ / PDF 抽出) は他エージェント (`tech-news-agent` の arxiv crawler、`kanie-lab-agent` の paper-search MCP ラッパ) からも再利用する想定で **`paper-platform`** として path dep ライブラリ化する (`fujisawa-platform` / `edinet-client` と同じ作法)。Cloud SQL は `driving-license-bot` 所有の共有 instance を `fujisawa-platform` と同じ data-source 方式で参照し、新規 instance を起こさない (instance 月額増分 ¥0)。
 
@@ -51,7 +53,8 @@ Phase 1 末で **既存 `kanie-lab-agent` の論文 search 機能を paper-platf
 - [ ] 各論文に 4 段構造の要約 (TL;DR / Method / Key Finding / Limitations) をワンタップで展開可能
 - [ ] Phase 1 で、選んだ論文に対し本文セクションを引いた **出典付き Q&A** を提供 (テストセット 30 問で `citation precision >= 0.9`) — 当初 Phase 2 で予定していたが、 LINE での paper QA の核心価値なので Phase 1 に取り込む (PR は細分化、 後述 §3.4)
 - [ ] arxiv + Semantic Scholar のクロール・正規化を `paper-platform` に切り出し、他エージェントから再利用可能にする
-- [ ] **`kanie-lab-agent` の論文 search 機能を Phase 1 末で paper-platform に統合** (Cloud Run / Firestore のコスト削減 + ロジック重複解消)。 他機能 (研究テーマ設計 / 面接対策 / 研究計画レビュー) の LINE 移植は将来別 proposal
+- [ ] **`kanie-lab-agent` の論文 search 機能を Phase 1k/1l で paper-platform に統合** (ロジック重複解消)。 Web UI と他機能 (研究テーマ設計 / 面接対策 / 研究計画レビュー) は当面並存、 LINE 移植は将来別 proposal
+- [ ] **`tech-news-agent` の arxiv crawler を Phase 1m で paper-platform に移管** (重複ロジック解消、 クロール rate-limit 集約)
 - [ ] Cloud SQL は `driving-license-bot` 共有 instance を流用し、月額増分 ¥0 (新規 DB / user のみ)
 - [ ] Phase 1 月額運用コスト目標: **¥10,000〜15,000/月** (20 検索 + 20 QA/day quota、 二段 LLM ranking。 §5.4 で内訳)
 
@@ -64,6 +67,7 @@ Phase 1 末で **既存 `kanie-lab-agent` の論文 search 機能を paper-platf
 - **本番デプロイの GCP 以外への展開**: AWS / Azure ポータビリティは目指さない (Vertex AI Claude 依存を許容)
 - **論文の自動レビュー / 査読**: 「この論文は良いか悪いか」の価値判断は LLM に出させない (hallucination + 倫理リスク)
 - **Phase 1 での `kanie-lab-agent` 他機能 (テーマ設計 / 面接対策 / 研究計画レビュー) の取り込み**: 論文 search のみ統合。 他機能は別 proposal で LINE 移植を検討
+- **Phase 1 での kanie-lab Web UI の archive / Cloud Run 停止**: paper-platform 統合は内部実装のみ、 Web UI と単独 Cloud Run 運用は当面並存。 archive 可否は別 proposal で LINE 移植可否と一緒に判断
 
 ---
 
@@ -127,8 +131,8 @@ Phase 1 末で **既存 `kanie-lab-agent` の論文 search 機能を paper-platf
 - **Hallucination ガード**: QA Agent は pgvector の retrieve score が閾値以下のセクションをコンテキストに含めない。コンテキスト 0 件なら「この論文に該当記述なし」と明示
 - **個人運営の rate cap**: per LINE userId で `daily_searches <= 30`、`daily_qa_calls <= 50` を Firestore で管理。超過時は silent throttle (「明日また」とだけ返信)
 - **共有 Cloud SQL のオーナーシップ**: `driving-license-bot` が instance を所有しているため、tier 変更・PG バージョン上げ等の **共有部分の変更は driving-license-bot 側で実施**。consumer 側 (本案) は `data source` 参照のみ
-- **`kanie-lab-agent` の paper-search 移管**: 本 proposal **Phase 1k / 1l** で実施 (上記 §3.4)。 kanie-lab の Web UI から `Claude Agent SDK` 経由で叩いている paper-search MCP を `paper-platform` 経由に置き換える。 これにより重複ロジック解消 + kanie-lab 単独運用時のクロール rate-limit 圧迫が消える。 kanie-lab の他機能 (研究テーマ設計 / 面接対策 / 研究計画レビュー) は別 proposal で LINE 移植検討
-- **`tech-news-agent` の paper-platform 移管**: 別 proposal で実施 (本 proposal scope 外)。 tech-news の arxiv crawler を `paper-platform.sources.arxiv` に置き換える。 移管前提は本 proposal で **固定しない** — 当該タイミングで owner と利用状況を改めて確認
+- **`kanie-lab-agent` の paper-search 移管**: 本 proposal **Phase 1k / 1l** で実施 (上記 §3.4)。 kanie-lab の Web UI から `Claude Agent SDK` 経由で叩いている paper-search MCP を `paper-platform` 経由に置き換える。 Web UI 自体は **archive しない** (並存)、 LINE 移植可否は別 proposal で正式判断
+- **`tech-news-agent` の arxiv crawler 移管**: 本 proposal **Phase 1m** で実施 (上記 §3.4、 別 PR でも良い)。 tech-news の `arxiv crawler` (cs.DB / cs.DC / cs.IR の日次クロール) を `paper-platform.sources.arxiv` に置き換える。 LINE 配信ロジック / scheduling は tech-news 側に残し、 データ取得層のみ統一
 
 ### 3.3 Risks and Mitigations
 
@@ -146,7 +150,7 @@ Phase 1 末で **既存 `kanie-lab-agent` の論文 search 機能を paper-platf
 
 ### 3.4 Phase 分割 (PR ロードマップ)
 
-Phase 1 は **本文 RAG QA を含む完全 MVP** を目指すが、 レビューしやすさを優先して **小粒な PR** に分割する (EDINET proposal 0006 の Phase 1a-1e + 2a-2c 方式を踏襲、 12 PR 想定)。
+Phase 1 は **本文 RAG QA を含む完全 MVP + 既存エージェント統合** を目指すが、 レビューしやすさを優先して **小粒な PR** に分割する (EDINET proposal 0006 の Phase 1a-1e + 2a-2c 方式を踏襲、 13 PR 想定)。
 
 | Phase | スコープ | 想定工数 |
 |---|---|---|
@@ -160,11 +164,12 @@ Phase 1 は **本文 RAG QA を含む完全 MVP** を目指すが、 レビュ�
 | **1h** | section retrieval + QA Agent (Sonnet) + citation 引用 | 1日 |
 | **1i** | terraform (Cloud Run + Cloud Tasks + Cloud SQL `paper_qa_db` data source) + Secret Manager 統合 | 1日 |
 | **1j** | eval harness (`recall@5 >= 0.8` + `citation precision >= 0.9` の testset) | 半日 |
-| **1k** | `kanie-lab-agent` の paper-search 機能を `paper-platform` 経由に置き換え (kanie-lab 側 PR) | 半日 |
-| **1l** | kanie-lab の Web UI で paper-search を呼ぶ箇所を確認し、 paper-platform 経由に統一 + 旧 MCP 呼出 path を削除。 paper QA / 要約は LINE のみで提供 (kanie-lab Web UI からは外す) | 1日 |
-| **Phase 2** | kanie-lab 他機能 (テーマ設計 / 面接対策 / 研究計画レビュー) の LINE 移植 (別 proposal で起票) | 別途 |
+| **1k** | `kanie-lab-agent` の paper-search 機能を `paper-platform` 経由に置き換え (kanie-lab 側 PR、 Web UI は並存維持) | 半日 |
+| **1l** | kanie-lab の Web UI で paper-search を呼ぶ箇所を確認し、 paper-platform 経由に統一 + 旧 MCP 呼出 path を削除。 動作確認 (Web UI から論文検索が正常動作)。 paper QA / 要約は LINE のみで提供 (Web UI には出さない) | 半日 |
+| **1m** | `tech-news-agent` の arxiv crawler を `paper-platform.sources.arxiv` に置き換え (tech-news 側 PR、 日次バッチの crawler のみ paper-platform 経由化、 LINE 配信ロジックは変更なし) | 半日 |
+| **Phase 2** | kanie-lab 他機能 (テーマ設計 / 面接対策 / 研究計画レビュー) の LINE 移植 + Web UI archive 可否判断 (別 proposal で起票) | 別途 |
 
-**合計工数 (Phase 1)**: 8〜10 日 (個人運営、 週末作業前提で 8〜10 週)。 EDINET proposal 0006 が 10 PR / 1 日で完走できた前例があるため、 paper-qa は若干重め (PDF 抽出 + RAG 含む) と見積もる。
+**合計工数 (Phase 1)**: 9〜11 日 (個人運営、 週末作業前提で 9〜11 週)。 EDINET proposal 0006 が 10 PR / 1 日で完走できた前例があるため、 paper-qa は若干重め (PDF 抽出 + RAG + 既存エージェント 2 件統合) と見積もる。 Phase 1f (PDF なし MVP) 段階で価値出るので、 必要に応じて段階リリース可能。
 
 ---
 
@@ -617,16 +622,17 @@ quota: **検索 20/day + QA 20/day** (個人運営なので 50/day から削減�
 - ストレージ: 共有 Cloud SQL に 1GB 程度 (Phase 1 初期)、 PDF + section embedding 投入後で 5〜10GB
 - Cloud Run: agent-service `min=1` で月額 ¥2,500、 line-bot `min=0` で ~¥100
 - Cloud Tasks / Firestore / GCS: 合計 ¥500/月
-- **kanie-lab 統合後の削減**: kanie-lab の Cloud Run + Firestore + 関連 API quota が不要に。 **約 ¥3,000〜5,000/月の純減**
+- **kanie-lab 統合後の削減**: Phase 1k/1l では Web UI を **並存維持**するため、 kanie-lab の Cloud Run / Firestore コストは残る。 paper-platform 経由化による削減は **クロール rate-limit 圧迫の軽減** (二重 fetch 解消) と **ロジック重複の解消** のみ。 純コスト削減はほぼ ¥0
+- **tech-news-agent 統合後の削減**: 同様に日次バッチが paper-platform 経由化されるだけで、 tech-news の Cloud Run Job / Cloud Scheduler コストは残る。 純コスト削減 ¥0
 
-##### 月額合計シナリオ (20 検索/日 想定)
+##### 月額合計シナリオ (20 検索/日 想定、 paper-qa-agent 単独の追加コスト)
 
 | ranking 構成 | QA 込み (Opus) | QA Sonnet fallback | search only |
 |---|---:|---:|---:|
 | 二段 (Sonnet 粗 + Opus 精) | **¥63,000〜90,000** | **¥18,000〜25,000** | **¥15,000〜18,000** |
 | Sonnet 単段 (`PAPER_QA_RANKING_USE_OPUS=false`) | **¥51,000〜78,000** | **¥6,000〜10,000** | **¥3,000〜5,000** |
 
-> **判断**: Phase 1 の MVP は **「Sonnet 単段 ranking + QA Sonnet fallback」** で **¥6,000〜10,000/月** を目標とする。 実運用で QA 精度・recall を観測して、 必要なら段階的に Opus を有効化する (`PAPER_QA_QA_MODEL=opus-4-7` / `PAPER_QA_RANKING_USE_OPUS=true`)。 kanie-lab 統合で別途 ¥3-5k/月の削減があるので、 トータル運用コスト純増は **¥3,000〜7,000/月** 想定。
+> **判断**: Phase 1 の MVP は **「Sonnet 単段 ranking + QA Sonnet fallback」** default で **¥6,000〜10,000/月** を目標とする (paper-qa-agent 単独の純増分)。 実運用で QA 精度・recall を観測して、 必要なら段階的に Opus を有効化する。 kanie-lab / tech-news の Web UI と日次バッチは並存維持のためコスト削減効果は無いが、 Phase 2 で kanie-lab 他機能の LINE 移植 → Web UI archive を別 proposal で判断する際の検討素材になる。
 
 #### プライバシー / データ保持
 - PII 扱い: LINE userId は Firestore に保持。会話履歴 (`query` text) は analytics-platform に emit する際に raw のまま含める (個人運営のため自身のクエリのみ、家族共有 mode は Phase 5+)
@@ -648,7 +654,7 @@ quota: **検索 20/day + QA 20/day** (個人運営なので 50/day から削減�
 ## 6. Drawbacks
 
 - **既存 `kanie-lab-agent` との機能重複**: kanie-lab も arxiv / Semantic Scholar 検索を持つ。ただし用途が異なる (kanie-lab = 入試準備の研究計画壁打ち / Web UI、本案 = LINE で会話的 paper Q&A)。Phase 4 で kanie-lab を `paper-platform` に移管する予定なので長期的な重複は解消される
-- **Phase 1 が 8〜10 週と長い**: 12 PR 分割で着実に進めるが、 個人運営の週末作業前提だと 2 ヶ月超かかる。 途中 Phase 1f 段階 (PDF なし MVP) でも価値はあるので、 必要に応じて段階リリース
+- **Phase 1 が 9〜11 週と長い**: 13 PR 分割で着実に進めるが、 個人運営の週末作業前提だと 2 ヶ月半かかる。 途中 Phase 1f 段階 (PDF なし MVP) でも価値はあるので、 必要に応じて段階リリース
 - **共有 Cloud SQL の SPOF 化**: `driving-license-bot` + `fujisawa-platform` + `paper-qa-agent` が同じ instance に乗ると、instance 障害時の影響範囲が広がる。Phase 4 で `paper-platform` への instance 切り出しを検討
 - **個人運営の rate limit が将来のスケール時に重荷**: マルチユーザー化 (Phase 5) する際は Firestore rate_limits の集計コストが上がる。BigQuery 集計に切替が必要かも
 
@@ -656,7 +662,7 @@ quota: **検索 20/day + QA 20/day** (個人運営なので 50/day から削減�
 
 ### 案 A: 既存 `kanie-lab-agent` を完全に置き換える (LINE Bot 単独化)
 - 概要: kanie-lab の Next.js Web UI を廃止し、 paper-qa-agent (LINE Bot) で論文 search + 研究テーマ設計 + 面接対策 + 研究計画レビュー の全機能を提供
-- 検討結果 (本 proposal): **段階採用**。 Phase 1 では論文 search のみ統合 (1k/1l 参照)、 他機能 (テーマ設計 etc.) は別 proposal で LINE 移植検討。 Web UI 廃止 vs 並存も別 proposal で決定。 採用理由: 一度に全置換は scope 大、 LINE で長文対話 (面接対策 / 計画レビュー) の UX 設計検証も必要
+- 検討結果 (本 proposal): **段階採用 (内部実装のみ統合、 Web UI 並存)**。 Phase 1k/1l で論文 search を paper-platform 経由に統合、 Web UI と他機能 (テーマ設計 etc.) は当面 archive せず並存。 採用理由: 一度に全置換は scope 大、 LINE で長文対話 (面接対策 / 計画レビュー) の UX 設計検証が必要、 Web UI を当面残すことで kanie-lab 既存ユーザの体験を維持。 archive 可否は別 proposal で正式判断
 
 ### 案 B: `tech-news-agent` を会話 mode に拡張
 - 概要: 既に arxiv crawler + LINE 配信を持つので push 型を pull 型に拡張する
