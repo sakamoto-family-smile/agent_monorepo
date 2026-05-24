@@ -1,4 +1,4 @@
-# PROPOSAL-0006: 論文検索 QA エージェント `paper-qa-agent` と共通基盤 `paper-platform`
+# PROPOSAL-0007: 論文検索 QA エージェント `paper-qa-agent` と共通基盤 `paper-platform`
 
 | | |
 |---|---|
@@ -29,8 +29,9 @@ arxiv / Semantic Scholar 等を一次ソースとして、LINE Bot 経由で **�
 |---|---|---|
 | `kanie-lab-agent` | 入試準備の論文サーベイ (Web UI) | arxiv / Semantic Scholar / paper-search MCP を `Claude Agent SDK` 経由で個別呼出 |
 | `tech-news-agent` | 日次論文ダイジェスト LINE 配信 | 独自の arxiv crawler (`cs.DB` / `cs.DC` / `cs.IR`) |
+| (参考) `stock-analysis-agent` | 株価分析 LINE Bot + 法定開示書類分析 | EDINET API → XBRL (proposal 0006、 別ドメインだが LINE + Cloud Run + agent service の構造は同型) |
 
-両者とも arxiv / Semantic Scholar への rate-limit 遵守クロール、ID 正規化、重複排除、関連度スコアリングのロジックを **重複** して持っている。さらにユーザ視点で見ると、以下の体験は現状どのシステムでも提供されていない:
+両者 (kanie-lab / tech-news) とも arxiv / Semantic Scholar への rate-limit 遵守クロール、ID 正規化、重複排除、関連度スコアリングのロジックを **重複** して持っている。 stock-analysis-agent は別ドメイン (金融) なので paper-platform の対象外だが、 LINE Bot + Cloud Tasks + agent service + Cloud SQL 共有という同型の構造を持ち、 共通部品 (LINE handler / Cloud Tasks dispatcher / observability) の cross-agent 抽出余地は将来別 proposal で検討する。さらにユーザ視点で見ると、以下の体験は現状どのシステムでも提供されていない:
 
 1. LINE で **会話的** に論文検索 (例: 「最近の RLHF で人間ラベル減らすやつ」)
 2. 各論文の **構造化要約** (3 行 TL;DR + 手法 + 結果 + Limitations)
@@ -49,7 +50,7 @@ arxiv / Semantic Scholar 等を一次ソースとして、LINE Bot 経由で **�
 - [ ] Phase 2 で、選んだ論文に対し本文セクションを引いた出典付き Q&A を提供 (テストセット 30 問で `citation precision >= 0.9`)
 - [ ] arxiv + Semantic Scholar のクロール・正規化を `paper-platform` に切り出し、他エージェントから再利用可能にする
 - [ ] Cloud SQL は `driving-license-bot` 共有 instance を流用し、月額増分 ¥0 (新規 DB / user のみ)
-- [ ] Phase 1 月額運用コストを ¥6,500 以下に収める (個人運営想定、50 検索/日)
+- [ ] Phase 1 月額運用コストの目標は §5.4 コスト節で再見積もり中 (初期目標 ¥6,500 は LLM コスト過小評価のため修正)。 50 検索/日 × 二段 LLM ranking で ~¥33,000/月、 Sonnet 単段に下げれば ¥10,000〜13,000/月 まで圧縮可能。 Approval 前に **個人運営として許容するコスト水準を確定する** 必要あり
 
 ### 2.2 Non-Goals
 
@@ -123,7 +124,7 @@ arxiv / Semantic Scholar 等を一次ソースとして、LINE Bot 経由で **�
 - **Hallucination ガード**: QA Agent は pgvector の retrieve score が閾値以下のセクションをコンテキストに含めない。コンテキスト 0 件なら「この論文に該当記述なし」と明示
 - **個人運営の rate cap**: per LINE userId で `daily_searches <= 30`、`daily_qa_calls <= 50` を Firestore で管理。超過時は silent throttle (「明日また」とだけ返信)
 - **共有 Cloud SQL のオーナーシップ**: `driving-license-bot` が instance を所有しているため、tier 変更・PG バージョン上げ等の **共有部分の変更は driving-license-bot 側で実施**。consumer 側 (本案) は `data source` 参照のみ
-- **`tech-news-agent` / `kanie-lab-agent` の paper-platform 移管**: Phase 4 で別 proposal として実施。本 proposal では新規系統だけ作り、既存は変更しない
+- **`tech-news-agent` / `kanie-lab-agent` の paper-platform 移管**: Phase 4 で別 proposal として実施。本 proposal では新規系統だけ作り、既存は変更しない。 移管前提は本 proposal で **固定しない** — Phase 4 開始時に当該エージェントの owner と現状の利用状況を改めて確認したうえで、 移管 vs 並存 vs 廃止のいずれかを再判断する
 
 ### 3.3 Risks and Mitigations
 
@@ -575,11 +576,19 @@ class PaperSummary(BaseModel):
 - 計算量: pgvector ivfflat top-k 検索は 100k 行で 100ms 以下
 
 #### コスト (Cost)
-- LLM 呼出: 1 検索 = Sonnet ~3k input / 1k output tokens + Opus 4.7 (cross-check) ~5k / 500 tokens ≈ ¥30〜50 / 検索
-- QA (Phase 2+): Opus 4.7 ~10k input / 1k output ≈ ¥80〜120 / 質問
+- LLM 呼出 (per 1 検索):
+    - Sonnet 4.6 (query refinement + 粗 ranking + summarization): ~5k input / 1.5k output tokens 合計 → 約 ¥4〜5
+    - Opus 4.7 (精 ranking): ~5k input / 500 output → 約 ¥17
+    - **1 検索あたり LLM ¥21〜25** (出展: Anthropic 公式 Vertex AI pricing、 概算)
+- LLM 月額 (50 検索/日 × 30 日 = 1,500 検索 / 月): **¥30,000〜40,000**
+- QA (Phase 2+): Opus 4.7 ~10k input / 1k output ≈ ¥80〜120 / 質問。 50 QA/日想定で **¥120,000〜180,000/月** (Phase 2 で再評価、 必要なら Sonnet fallback)
 - ストレージ: 共有 Cloud SQL に 1GB 程度追加 (Phase 1)、Phase 2+ で PDF + section embedding = 5〜10GB
-- Cloud Run: agent-service `min=1` で月額 ¥2,500
-- **月額合計 (Phase 1, 50 検索/日 想定)**: ¥5,500〜6,500
+- Cloud Run: agent-service `min=1` で月額 ¥2,500、 line-bot `min=0` で ~¥100
+- Cloud Tasks / Firestore / GCS: 合計 ¥500/月
+- **月額合計 (Phase 1, 50 検索/日 想定)**: **¥33,000〜43,000** (LLM が支配的、 90% 占有)
+- **コスト圧縮 lever** (`PAPER_QA_RANKING_USE_OPUS=false` で 単段 ranking): Opus 抜きで ¥10,000〜13,000/月に削減可能 (recall 低下とのトレードオフ)
+
+> **要再評価**: 当初提案の月額 ¥5,500〜6,500 は LLM コストの集約を誤っていた (per-検索 ¥30-50 × 1500 = 大幅超過) ため上記に修正。 Phase 1 個人運営として ¥33k/月が許容範囲か、 検索 quota 削減 / Sonnet 単段への切替が必要かを Approval 前に判断。
 
 #### プライバシー / データ保持
 - PII 扱い: LINE userId は Firestore に保持。会話履歴 (`query` text) は analytics-platform に emit する際に raw のまま含める (個人運営のため自身のクエリのみ、家族共有 mode は Phase 5+)

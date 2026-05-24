@@ -69,6 +69,8 @@ docs/PROPOSALS/NNNN-short-kebab-title.md
 | [0003](0003-fujisawa-platform-shared-base.md) | 藤沢市データ共通基盤 fujisawa-platform | cross-agent (新規) | Draft |
 | [0004](0004-fujisawa-info-bot.md) | 藤沢市情報 LINE Bot | fujisawa-info-bot (新規) | Draft |
 | [0005](0005-fujisawa-hokatsu-agent.md) | 藤沢市保活エージェント | fujisawa-hokatsu-agent (新規) | Draft |
+| [0006](0006-edinet-integration.md) | EDINET 統合 (金融庁開示書類で stock-analysis-agent を強化) | stock-analysis-agent + edinet-client (新規) | Implemented |
+| [0007](0007-paper-qa-agent.md) | 論文検索 QA エージェント + 共通基盤 paper-platform | paper-qa-agent (新規) + paper-platform (新規 cross-agent) | Draft |
 
 新しい提案を作るたびに上記表に 1 行追加する (forget-me-not)。
 
