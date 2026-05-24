@@ -191,7 +191,9 @@ async def get_cached_price(ticker: str, period: str) -> Optional[Dict]:
 
 async def set_cached_price(ticker: str, period: str, data: Dict) -> None:
     """Cache price data."""
-    expires_at = (datetime.now() + timedelta(hours=settings.price_cache_ttl_hours)).isoformat()
+    expires_at = (
+        datetime.now() + timedelta(hours=config.settings.price_cache_ttl_hours)
+    ).isoformat()
     async with aiosqlite.connect(_db_path()) as db:
         await db.execute(
             """INSERT OR REPLACE INTO price_cache (ticker, period, data, expires_at)
