@@ -23,6 +23,7 @@ jobs:
       fujisawa_platform:    ${{ steps.detect.outputs.fujisawa_platform }}
       fujisawa_info_bot:    ${{ steps.detect.outputs.fujisawa_info_bot }}
       edinet_client:        ${{ steps.detect.outputs.edinet_client }}
+      llm_security_lab:     ${{ steps.detect.outputs.llm_security_lab }}
     steps:
       - uses: actions/checkout@v4
         with:
