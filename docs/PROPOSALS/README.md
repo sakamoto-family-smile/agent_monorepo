@@ -71,6 +71,7 @@ docs/PROPOSALS/NNNN-short-kebab-title.md
 | [0005](0005-fujisawa-hokatsu-agent.md) | 藤沢市保活エージェント | fujisawa-hokatsu-agent (新規) | Draft |
 | [0006](0006-edinet-integration.md) | EDINET 統合 (金融庁開示書類で stock-analysis-agent を強化) | stock-analysis-agent + edinet-client (新規) | Implemented |
 | [0007](0007-paper-qa-agent.md) | 論文検索 QA エージェント + 共通基盤 paper-platform | paper-qa-agent (新規) + paper-platform (新規 cross-agent) | Draft |
+| [0008](0008-llm-security-lab.md) | OWASP LLM Top 10 体験学習ラボ llm-security-lab | llm-security-lab (新規教材) | Draft |
 
 新しい提案を作るたびに上記表に 1 行追加する (forget-me-not)。
 

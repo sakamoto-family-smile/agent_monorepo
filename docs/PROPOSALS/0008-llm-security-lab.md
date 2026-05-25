@@ -15,7 +15,7 @@
 
 ## 1. Summary
 
-OWASP LLM Top 10 (2025) の 10 種類の脆弱性について、**「攻撃を体感し、防御の効果を定量的に測る」** ハンズオン教材を monorepo 内 `llm-security-lab/` に整備する。各脆弱性で **意図的に脆弱な FastAPI アプリ + 攻撃シナリオ + 段階的防御 (v1〜v3) + Jupyter notebook** を提供し、`make attack-01 / make defend-01` 形式で学習者がローカルで完結して体験できる構成にする。
+OWASP LLM Top 10 (2025) の 10 種類の脆弱性について、**「攻撃を体感し、防御の効果を定量的に測る」** ハンズオン教材を monorepo 内 `llm-security-lab/` に整備する。各脆弱性で **意図的に脆弱な FastAPI アプリ (v0=防御なし baseline) + 攻撃シナリオ + 段階的防御 (v1〜v3) + Jupyter notebook** を提供し、`make attack-01 / make defend-01` 形式で学習者がローカルで完結して体験できる構成にする。
 
 LLM ランタイムは **Ollama (既定、ローカル完結) + Vertex AI Claude (比較用、optional)**、Red Team ツールは **DeepTeam (主軸) + PyRIT (multi-turn 攻撃専用に併用)**、Notebook 環境は **JupyterLab**。
 
@@ -40,7 +40,7 @@ monorepo は production agent システムが 6 つあり、`security-platform/`
 
 ### 2.1 Goals
 
-- [ ] OWASP LLM Top 10 (2025) 全 10 項目それぞれに「vulnerable app + attack + defense (v1〜v3) + notebook」を整備
+- [ ] OWASP LLM Top 10 (2025) 全 10 項目それぞれに「vulnerable app (v0 baseline) + attack + defense (v1〜v3) + notebook」を整備
 - [ ] 各章で **攻撃成功率の段階的低下** が定量化される (例: v0 80% → v1 60% → v2 25% → v3 5%)
 - [ ] 学習者が `git clone` + `docker compose up` + `jupyter lab` で 5 分以内に動かせる
 - [ ] **LLM ランタイムは Ollama 既定でクラウドコストゼロ** (Vertex 切替は optional)
@@ -216,9 +216,13 @@ jupyter lab notebooks/NN_<name>.ipynb
 
 ### 3.7 Phase ロードマップ (PR 分割)
 
+レビューしやすさを優先して **PR は小粒**に保つ (PROPOSAL-0006 EDINET 統合 / PROPOSAL-0007 paper-qa-agent と同じ細分化方針)。
+
 | Phase | PR | 内容 | 工数目安 |
 |---|---|---|---|
-| **Phase 0** | PR-A | 共通基盤: `shared/` / `docker-compose.yml` / `Makefile` / `README.md` / DeepTeam runner / PyRIT runner / Ollama client / eval harness | 1〜2 週 |
+| **Phase 0a** | PR-A1 | ディレクトリ骨格 + `pyproject.toml` (uv workspace) + `docker-compose.yml` 雛形 + `Makefile` 雛形 + ルート `README.md` | 半日〜1日 |
+| **Phase 0b** | PR-A2 | `shared/llm_runtime/` (Ollama + Vertex + `LLM_RUNTIME` 切替) + `llm-client` 統合 | 半日〜1日 |
+| **Phase 0c** | PR-A3 | `shared/attacks/` (DeepTeam runner + PyRIT runner) + `shared/defenses/` 雛形 + `shared/eval/` (attack_success_rate + reporter) | 1〜2日 |
 | **Phase 1** | PR-1 | 01_prompt_injection (最重要、他章の参照実装) | 1〜2 週 |
 | **Phase 2** | PR-2 | 02_sensitive_information_disclosure | 1 週 |
 | **Phase 3** | PR-3 | 03_supply_chain (静的解析中心、軽量) | 0.5 週 |
@@ -231,10 +235,20 @@ jupyter lab notebooks/NN_<name>.ipynb
 | **Phase 10** | PR-10 | 10_unbounded_consumption | 1 週 |
 | **Phase 11** | PR-X | (optional) `security-platform` への持ち込み別 proposal 起票 | — |
 
-各 Phase は独立しており、Phase 0 完了後は **任意の順序で並行進行可能**。優先度ベースで Phase 1 → 7 → 6 → 9 → 02 → 10 → 05 → 04 → 08 → 03 の順を推奨 (production agent への影響度順)。
+各章 Phase 1-10 は Phase 0c 完了後 **任意の順序で並行進行可能**。 推奨順は **production agent への影響度順** で:
+
+```
+Phase 1 (Prompt Injection) → Phase 2 (Sensitive Info) → Phase 7 (System Prompt Leakage)
+  → Phase 6 (Excessive Agency) → Phase 10 (Unbounded Consumption)
+  → Phase 5 (Output Handling) → Phase 9 (Misinformation) → Phase 4 (Poisoning)
+  → Phase 8 (Vector Weakness) → Phase 3 (Supply Chain)
+```
+
+理由: LLM01/02 は monorepo 全エージェント (LINE Bot 系) の即時リスク、 LLM07 は paper-qa-agent / driving-license-bot の System Prompt 設計に直結、 LLM06/10 は agent SDK + Cloud Run の運用設計に直結する順序。 LLM03 は静的解析中心で他章と独立なので最後でも問題なし。
 
 ### 3.8 Notes / Constraints / Caveats
 
+- **PROPOSAL-0002 (Promptfoo → DeepTeam 移行) との関係**: 0002 は `security-platform` の red team を Promptfoo から DeepTeam に置き換える提案で、 現時点では Draft。 本 proposal (0008) は **0002 の status に依存しない**。 むしろ Phase 0c で DeepTeam runner を本ラボ側で先行検証することで、 0002 の Implementing 着手前に DeepTeam の使い勝手 / 制約 / 統合パターンを実証できる ⇒ 0008 → 0002 の順で進めるのが安全。 DeepTeam の API / version pinning は本ラボの `uv.lock` を 0002 で参照すれば drift を抑えられる
 - **`security-platform` と意図的に独立**: 同じ防御パターン (rate limit / input filter / output validator) を別実装する。学習教材としての readability を優先し、production 都合の複雑さを持ち込まない
 - **promptme の参照範囲**: アイデア・攻撃シナリオの構成は参考にするが、コードは独自実装 (Flask → FastAPI、pip → uv、Python 3.10 → 3.12)。各 README で「参考にした promptme challenge」を出典明記
 - **Notebook のセル数を抑える**: 1 notebook = 15〜20 cell を上限。長いものは複数に分割
@@ -254,6 +268,8 @@ jupyter lab notebooks/NN_<name>.ipynb
 | OWASP 公式の改訂に追従できない | Low | カタログ部分は §3.4 のみに集約、年次レビューを Implementation History に記載 |
 | DeepTeam / PyRIT の breaking change | Medium | `uv.lock` で version pinning、CI で週次互換性チェック |
 | 学習者が悪用する | Medium | README 冒頭に「**個人ローカル環境での学習目的のみ**、他者システムへの無断試行は禁止」を明示。OSS 公開はしない |
+| **本ラボの攻撃 runner から誤って production endpoint を叩く** | High | (1) `shared/attacks/_target_guard.py` で attack target を `localhost` / `vulnerable-app-*` Docker service 名のみ allowlist、 production の `cloud-run.app` 等のドメインは ValueError で reject。 (2) `LAB_ALLOW_EXTERNAL_TARGET=true` を明示的に立てない限り外部接続不可。 (3) DeepTeam / PyRIT runner にも同じ guard を通す |
+| **JupyterLab token が弱い (`localdev`)** | Medium | (1) docker-compose の jupyter port を `127.0.0.1:8888:8888` で host 側 localhost にバインド (外部 expose しない)。 (2) `.env.example` に `JUPYTER_TOKEN` を 32 文字以上のランダム値で生成する手順記載。 (3) `JUPYTER_TOKEN=localdev` 残置時に起動ログで警告を出す |
 | Ollama モデル容量で disk 圧迫 | Low | mistral (4GB) / llama3 (4.7GB) / llama-guard (4.7GB) の合計 ~15GB。README に明記、`make clean-models` 用意 |
 | `security-platform` との重複コードが drift する | Medium | コードは drift して OK (学習用なので)。**設計の drift は Phase 11 で別 proposal で吸収** |
 | 月額コストが見えにくい | Low | `make eval-all RUNTIME=vertex` 実行前にコスト見積もりを表示 |
@@ -453,7 +469,10 @@ clean-models:
 - **Manual / E2E**:
     - 各章の notebook を JupyterLab で順に実行、全 cell が成功すること
     - `README.md` の手順だけで learning experience が完結すること
-    - 攻撃成功率の数値が ±20% 以内で再現すること (3 回試行の中央値)
+    - 攻撃成功率の数値が再現すること:
+        - **regression mode** (`seed` 固定 + `temperature=0`): **±5%** 以内 (CI 回帰テストの判定基準)
+        - **stochastic mode** (production 想定の温度設定): **±20%** 以内、 3 回試行の中央値 (体感用)
+    - regression mode で v1 と v2 の数値差 (例: 60% → 25%) が tolerance を超えて重なる場合は防御設計を見直す
 
 ### 4.7 Migration / Rollback
 
