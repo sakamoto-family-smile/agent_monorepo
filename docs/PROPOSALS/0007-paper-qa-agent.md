@@ -123,6 +123,7 @@ Phase 1 末で **既存 `kanie-lab-agent` の論文 search 機能を paper-platf
 
 ### 3.2 Notes / Constraints / Caveats
 
+- **アーキテクチャパターンは固定フロー型 + intent dispatch**: `driving-license-bot` / `fujisawa-info-bot` の **supervisor (LangGraph) パターン** は採用せず、 Cloud Tasks payload に intent (`search` / `summarize` / `qa` / `follow_up`) を明示し、 orchestrator は intent に応じて関数呼出で flow を回す。 各段階の LLM 呼出 (Sonnet / Opus) は独立した `claude_agent_sdk.query()` で実行。 採用理由: (1) paper-qa は intent が明確 (LINE Flex button / 軽量 intent 分類 1 call で確定可能)、 (2) 各段階の LLM 呼出回数・モデル・予算が事前計算可能 (§5.4 コスト試算が成立)、 (3) latency 予測が容易 (§5.4 10 秒目標)。 supervisor / 協調型 (CrewAI / AutoGen) は Phase 1 で over-engineering、 必要になったら Phase 2+ で乗り換え可能
 - **LINE 1 ターン = 1 メッセージ制約**: 重い処理は webhook 内で完結させず、Cloud Tasks 経由で agent-service にディスパッチ、Push API で結果通知する非同期パターン (`driving-license-bot` Phase 1 設計と同方針)。webhook は 1 秒以内に 200 OK を返す
 - **Cloud Run cold start**: agent-service は `min-instances=1` 必須。line-bot-service は webhook 受信だけなので `min=0` で OK
 - **ドメイン拡張インターフェース**: Phase 1 では `Domain` interface 自体を実装するが、その実装は `ml_nlp` のみ。新ドメイン追加時は `paper-qa-agent` 本体に手を入れず、`paper-platform/domains/<name>.py` + YAML 1 ブロック追加で済むようにする
@@ -205,7 +206,9 @@ LINE Platform
 │   │     ・RRF (Reciprocal Rank Fusion) で合成        │
 │   ├── Ranking (Sonnet → top 10 → Opus 4.7 → top 5)   │
 │   ├── Summarization (Sonnet, Pydantic schema)        │
-│   └── QA Agent (Opus 4.7, Phase 2+)                  │
+│   └── QA Agent (Sonnet/Opus、 Phase 1h+)              │
+│         (active_paper の section embeddings を pgvector│
+│          で類似検索 → top-K section content を context)│
 │                                                       │
 │  全 MCP 呼出 → security-platform MCP Proxy 経由        │
 └──┬───────────────────────────────────────────────────┘
@@ -389,6 +392,8 @@ paper-platform/
 
 ##### `Domain` Protocol
 
+**用途**: 将来 bio / physics / 経済学 等のドメイン追加時に paper-qa-agent 本体を変更せずに済むための **型契約 (interface)**。 Phase 1 (ml_nlp) では YAML だけで完結し、 **Python class 実装は 0 行** (YAML → Protocol-typed dataclass を `registry.py` が生成)。
+
 ```python
 # paper_platform/domains/base.py
 from typing import Protocol
@@ -403,6 +408,12 @@ class Domain(Protocol):
     vocabulary_hints: list[str]        # query refinement の domain prior
     embedding_model: str               # 既定 text-embedding-004 を上書き可
 ```
+
+**Source-of-truth の整理**:
+- declarative な値 (categories / weights / half-life / vocabulary) → **YAML が source-of-truth**
+- 特殊ロジックメソッド (例: bio で PubMed ID 正規化) → Python class (該当ドメインのみ実装、 Phase 1 では未使用)
+
+つまり Protocol は 「YAML 読み込み後の Python 表現の型契約」。 「インターフェース vs YAML config の二重管理」 ではなく、 YAML → Protocol-typed dataclass の単方向変換。 Phase 5+ で bio 等を追加するときに特殊ロジックが必要なら Python class 実装を上書きする (registry に登録)。
 
 ##### domain YAML 設定
 
@@ -467,6 +478,51 @@ paper-qa-agent/
 └── tests/
 ```
 
+##### Orchestrator (固定フロー型) と intent dispatch
+
+`paper-qa-agent/app/agent/orchestrator.py` は intent (`search` / `summarize` / `qa` / `follow_up`) を Cloud Tasks payload から受け取り、 対応する関数呼出で flow を回す:
+
+```python
+async def process_request(intent: str, payload: dict) -> None:
+    match intent:
+        case "search":
+            refined  = await query_refinement(payload["query"])
+            results  = await retrieval(refined)            # arxiv + S2 並列 + RRF
+            ranked   = await ranking(results)              # Sonnet 粗→ (opt) Opus 精
+            summary  = await summarization(ranked[:5])      # Pydantic schema
+            await push_flex(summary)
+        case "summarize":
+            paper = await load_paper(payload["paper_id"])
+            summary = await summarization([paper])
+            await push_summary(summary)
+        case "qa":
+            sections = await section_retrieval(
+                active_paper=payload["active_paper_id"],
+                question=payload["question"],
+            )                                              # pgvector で top-K
+            answer = await qa_answer(payload["question"], sections)
+            await push_answer(answer)
+        case "follow_up":
+            ...  # 直前の active_paper context を維持して qa を再呼出
+```
+
+LLM 呼出は段階ごとに `claude_agent_sdk.query()` を独立に実行。 supervisor / 協調型 (LangGraph / CrewAI) は採用しない (上記 §3.2 参照)。
+
+##### QA Agent のデータフロー (Phase 1h+)
+
+```
+user_question (LINE text)
+  ↓ embed (text-embedding-004 768d)
+  ↓ pgvector cosine similarity search
+      filter: paper_id = session.active_paper_id, kind = 'section'
+  ↓ top-K sections (K=3〜5, score >= 0.7)
+  ↓ if 0 件 → 「該当記述なし」 (hallucination 回避)
+  ↓ else → top-K sections の paper_sections.content を context に
+          Sonnet/Opus で回答 + 出典 (§番号)
+```
+
+横断 RAG (全 paper の section から検索) は Phase 1 では実装しない (active_paper にスコープを限定)。 Phase 5+ で 「research mode」 として検討候補。
+
 ##### モデル選定 routing
 
 ```python
@@ -474,11 +530,12 @@ paper-qa-agent/
 from enum import Enum
 
 class Stage(str, Enum):
-    QUERY_REFINEMENT = "claude-sonnet-4-6"   # 軽い分類なので Sonnet
+    INTENT_CLASSIFY  = "claude-sonnet-4-6"   # 自然文 → intent 4 種 (~100 tokens)
+    QUERY_REFINEMENT = "claude-sonnet-4-6"   # domain vocab inject
     RANKING_COARSE   = "claude-sonnet-4-6"   # batch 10 件 × 5 並列
-    RANKING_FINE     = "claude-opus-4-7"     # top 10 → top 5
+    RANKING_FINE     = "claude-opus-4-7"     # top 10 → top 5 (flag で skip)
     SUMMARIZATION    = "claude-sonnet-4-6"   # 構造化要約、schema validated
-    QA               = "claude-opus-4-7"     # 精度優先 (Phase 2+)
+    QA               = "claude-sonnet-4-6"   # default cost優先、flag で Opus に切替
 ```
 
 ##### Summarization の構造化出力
