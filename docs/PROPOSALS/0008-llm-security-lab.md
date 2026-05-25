@@ -46,13 +46,13 @@ monorepo は production agent システムが 6 つあり、`security-platform/`
 - [ ] **LLM ランタイムは Ollama 既定でクラウドコストゼロ** (Vertex 切替は optional)
 - [ ] 各章の README で **攻撃概要 / 攻撃方法 / 防御策** を OWASP 公式定義 + 実例 + 自分の言葉で記述
 - [ ] DeepTeam の YAML / PyRIT の Python script として **再利用可能な攻撃資産** を蓄積
-- [ ] 全章完了後、`security-platform` 側へ「持ち込む価値のある防御パターン」を別 proposal として起票
+- [ ] 各章で実証された防御の **production agent への持ち込み判断**: §3.10 で定義する客観基準 (攻撃成功率改善 ≥ 50pp、 false positive < 5%、 latency overhead < +500ms 等) を満たした章は **章 × agent ごとに 1 proposal** で起票 (例: paper-qa への LLM01 持ち込み)、 `security-platform` 集約は別 proposal
 
 ### 2.2 Non-Goals
 
 - **production への直接導入**: `llm-security-lab/` は学習教材であり、`security-platform` のような production 防御層は別物。将来の持ち込みは別 proposal で
 - **`security-platform` への直接依存**: 意図的にコード重複を許容し、独立して動く構成にする。学習材料としての readability 優先
-- **OSS リポジトリとしての公開**: monorepo 内に閉じる。promptme のような独立 OSS は目指さない (ただし内部資料として完成度は高く保つ)
+- **独立 OSS リポジトリとしての切り出し / 宣伝**: 本 monorepo (`sakamoto-family-smile/agent_monorepo`) は **public repo** のため、 ここに置く時点で実質 OSS として公開される。 ただし `llm-security-lab/` を独立 repo に切り出して promote する (例: `awesome-llm-security` への登録 / blog post / OWASP コミュニティ寄稿) のは Phase 11 以降の検討事項とし、 Phase 1-10 中は monorepo 内に閉じて完成度を高めることに集中する
 - **全 OWASP 項目を 1 PR で実装**: 10 PR に分割。共通基盤を Phase 0 で先に PR、各項目を Phase 1〜10 で 1 PR ずつ
 - **Training-time attack の実演**: LLM04 (Data Poisoning) は **RAG 経由 (inference-time) の poisoning のみ実演**、training 攻撃は対象外と明示
 - **モデル fine-tuning / RLHF レベルの防御**: Llama Guard / 入出力フィルタ / system prompt hardening 等の **application 層の防御のみ**
@@ -197,11 +197,14 @@ jupyter lab notebooks/NN_<name>.ipynb
 
 ### 3.5 Red Team ツール選定
 
-| ツール | 担当章 | 理由 |
+| ツール / データソース | 担当章 | 理由 |
 |---|---|---|
 | **DeepTeam** | 01, 02, 05, 06, 09, 10 (主軸) | Python ネイティブ、OWASP マッピング公式、PROPOSAL-0002 とも整合 |
 | **PyRIT** | 01 (Crescendo), 07 (System Prompt Leakage 多段抽出) | Multi-turn 攻撃が本家、「複数ターンで段階的に jailbreak する怖さ」を体感させる |
-| **手書き Python script** | 04 (RAG poisoning), 08 (embedding inversion) | 既存ツールに該当 probe がない / 自前実装の方が教材として明快 |
+| **PoisonedRAG dataset** (NeurIPS 2024) + adapter script | 04 (RAG poisoning) | 公開 dataset で再現性を確保 (自前 corpus 生成より検証可能性が高い)。 adapter は本ラボの vulnerable app の RAG store に poison サンプルを差し込む薄い wrapper |
+| **vec2text (NeurIPS 2023 公式実装) + RAG-Truth サンプル** | 08 (Vector Weakness: embedding inversion) | 公開モデル / dataset を使い、 「埋め込みから原文を復元できる」 ことを学習者が再現可能。 自前実装は脱落 |
+| **Giskard (補助)** | 05 (Output Handling), 09 (Misinformation) で評価部分 | scanner として output schema / hallucination 検出を組み合わせ評価 (§7 案 H 参照、 補助利用) |
+| **Inspect AI (補助)** | 09 (Misinformation) で TruthfulQA タスク定義 | UK AISI の評価フレームワーク、 task 定義を本ラボの notebook から呼ぶ (§7 案 I 参照、 補助利用) |
 | **静的解析 (Snyk / gitleaks)** | 03 (Supply Chain) | red team ツールの対象外領域 |
 
 ### 3.6 LLM ランタイム
@@ -233,7 +236,7 @@ jupyter lab notebooks/NN_<name>.ipynb
 | **Phase 8** | PR-8 | 08_vector_and_embedding_weaknesses | 1.5 週 |
 | **Phase 9** | PR-9 | 09_misinformation (CoVe 実装) | 1.5 週 |
 | **Phase 10** | PR-10 | 10_unbounded_consumption | 1 週 |
-| **Phase 11** | PR-X | (optional) `security-platform` への持ち込み別 proposal 起票 | — |
+| **Phase 11** | PR-X | (optional) §3.10 の基準を満たした章を **章 × agent ごとに 1 proposal** で持ち込み起票 (例: paper-qa への LLM01)、 横断防御は `security-platform` 集約 proposal | — |
 
 各章 Phase 1-10 は Phase 0c 完了後 **任意の順序で並行進行可能**。 推奨順は **production agent への影響度順** で:
 
@@ -273,6 +276,44 @@ Phase 1 (Prompt Injection) → Phase 2 (Sensitive Info) → Phase 7 (System Prom
 | Ollama モデル容量で disk 圧迫 | Low | mistral (4GB) / llama3 (4.7GB) / llama-guard (4.7GB) の合計 ~15GB。README に明記、`make clean-models` 用意 |
 | `security-platform` との重複コードが drift する | Medium | コードは drift して OK (学習用なので)。**設計の drift は Phase 11 で別 proposal で吸収** |
 | 月額コストが見えにくい | Low | `make eval-all RUNTIME=vertex` 実行前にコスト見積もりを表示 |
+
+### 3.10 production agent への持ち込み判断基準
+
+本ラボの各章で実証された防御は、 monorepo の他エージェント (paper-qa / driving-license / stock-analysis / fujisawa-info / lifeplanner / piyolog 等) や `security-platform` への持ち込みを検討する。 「持ち込む / 持ち込まない」 を **客観基準** で判断するため、 章ごとに以下を測る。
+
+#### 3.10.1 採用判定基準 (持ち込み判断のチェックリスト)
+
+| 基準 | 閾値 | 測定方法 |
+|---|---|---|
+| **防御効果**: v0 → v3 (or 最も良い defense version) の攻撃成功率改善 | **≥ 50pp 低減** (例: 80% → 30%) | `make eval-all` の `results/<chapter>/v3.json` で算出 |
+| **false positive**: 防御による正常リクエスト阻害率 | **< 5%** | 各章 `tests/test_defenses.py` に正常 prompt 100 件の suite 必置 |
+| **latency overhead**: defense version 適用時の p95 increase | **< +500ms** | shared/eval/reporter.py で latency を測定 |
+| **monorepo 統合性**: `llm-client` / `analytics-platform` / `security-platform` の既存 API で完結 | 必須 | 防御コードのレビュー時に確認 |
+| **運用 cost**: token / disk / 外部 API 課金 | agent 別 budget 内 | 各 agent の per-system cost 表で確認 |
+| **再現性**: regression mode (§4.6) で ±5% 以内 | 必須 | `make eval-NN VER=v3 SEED=42 TEMPERATURE=0` |
+
+5/6 以上を満たせば持ち込み推奨、 3-4 個なら個別判断、 2 個以下なら持ち込まず本ラボ内で参考実装に留める。
+
+#### 3.10.2 章 × production agent 想定マッピング
+
+各章を最初に持ち込む候補 (Phase 11 別 proposal で個別検証):
+
+| 章 | OWASP | 主な持ち込み候補 agent | 理由 |
+|---|---|---|---|
+| 01 | Prompt Injection | **全 LINE Bot 系** (paper-qa, driving-license, fujisawa-info, fujisawa-hokatsu, lifeplanner, piyolog) | LINE webhook = ユーザ入力経路で全エージェント該当 |
+| 02 | Sensitive Info Disclosure | **paper-qa, lifeplanner, piyolog** | PII (会話履歴 / 家族情報 / 子情報) を扱う agent |
+| 03 | Supply Chain | **monorepo 全体** (cross-agent) | dependency pinning / SBOM は monorepo 横断で運用、 個別 agent ではなく root CI に組み込む |
+| 04 | Data and Model Poisoning | **paper-qa, fujisawa-info-bot** | RAG (pgvector) を使う agent。 corpus 整合性 hash と参照元 trust score を入れる |
+| 05 | Improper Output Handling | **全 agent** | LLM output を user に返す手前で schema validation / HTML sanitize |
+| 06 | Excessive Agency | **driving-license-bot, stock-analysis-agent, paper-qa-agent** | Tool calling + Claude Agent SDK を使う agent。 tool whitelisting + approval gate |
+| 07 | System Prompt Leakage | **paper-qa, driving-license-bot** | System prompt に専門ドメイン知識 / 振る舞いルールを含む agent、 漏洩で意図された制限が外れるリスク |
+| 08 | Vector Weakness | **paper-qa, fujisawa-info-bot** | pgvector 利用、 embedding signing と provenance check |
+| 09 | Misinformation | **driving-license-bot, fujisawa-info-bot, fujisawa-hokatsu-agent** | 法令 / 制度 / 公的情報を返す agent。 CoVe + retrieval 必須化 |
+| 10 | Unbounded Consumption | **全 production agent** | rate limit / token budget / max iterations は LINE Bot 共通要件 |
+
+#### 3.10.3 持ち込み proposal の起票単位
+
+「全 10 章まとめて 1 proposal」 ではなく、 **章 × agent ごとに 1 proposal**を起票 (例: `PROPOSAL-NNNN: paper-qa-agent への LLM01 Prompt Injection 対策持ち込み`)。 これにより各持ち込みの可否を独立に judge でき、 持ち込みコストの妥当性を agent オーナーが判断しやすくなる。
 
 ---
 
@@ -566,7 +607,7 @@ clean-models:
 - **「教材 = ベストプラクティス」と誤解されるリスク**: 各 README で「これは toy 実装、production は別」を明示する必要
 - **disk 圧迫**: Ollama 3 モデルで 15GB、CI 環境では mock LLM での smoke test に限定する必要
 - **個人運営で全 10 章を維持する負担**: Phase 単位で進めても 10 PR、トータル 12〜15 週相当。途中で陳腐化する章が出る可能性
-- **OSS 公開しない判断のもったいなさ**: 教材として完成度を高めても公開しないので外部からの貢献は受けられない
+- **独立 OSS リポジトリ化を後回しにする**: 本 monorepo は public なので置いた時点で実質公開 OSS だが、 `llm-security-lab/` を独立 repo に切り出して外部から見つけてもらう動線 (README badge / OWASP 紹介 / blog 等) は Phase 11 以降。 その間は 「探されない OSS」 状態で外部貢献を受けにくい状態が続く
 
 ## 7. Alternatives
 
@@ -593,6 +634,31 @@ clean-models:
 ### 案 F: ローカル LLM (Ollama) ではなく Vertex AI Claude を既定にする
 - 概要: ローカルモデル不要、API key だけで動く
 - 却下理由: (1) 月額コストが学習者に発生、(2) 「ローカル完結 = 安全に試せる」というラボの設計思想と矛盾、(3) Vertex の rate limit に学習者が引っかかる懸念
+
+### 案 G: Garak (NVIDIA) を主軸採用 (DeepTeam の代替)
+- 概要: NVIDIA 製の LLM vulnerability scanner `garak`。 OWASP LLM Top 10 (2025) マッピングが公式ドキュメントに整備され、 probe 種類数は DeepTeam を上回る。 active development + NVIDIA backing
+- 却下理由:
+  - (1) **CLI-first で Python API は薄い**: notebook 統合では `subprocess.run(["garak", ...])` 越しになり、 attack 結果の dataclass / Pydantic 化が困難。 本ラボの `shared/eval/AttackResult` 抽象が活きない
+  - (2) **multi-turn 攻撃が弱い**: Garak は single-turn probe が中心で、 LLM07 (System Prompt Leakage) で必要な Crescendo 攻撃には PyRIT 併用が結局必要
+  - (3) **カスタム probe 拡張が DeepTeam より複雑**: probe を Python class で書く規約が proprietary、 monorepo の `llm-client` との統合に boilerplate が増える
+  - (4) **PROPOSAL-0002 (DeepTeam 移行) との二重採用回避**: 本ラボで Garak、 production で DeepTeam とすると monorepo 内に 2 種の red team フレームワークが並存し設計判断の根拠が分散する
+- ただし将来 OWASP 公式 conformance テストが Garak に偏った場合は再評価対象とする
+
+### 案 H: Giskard を主軸採用
+- 概要: ML / LLM の compliance / quality scanner。 RAG eval が強い、 LLM evaluation harness としての完成度高い
+- 却下理由:
+  - (1) **red team ツールではなく LLM scanner**: 攻撃シナリオ実行ではなく LLM 品質 / compliance 評価が主目的、 「攻撃を体感する」 本ラボのコンセプトと方向性がずれる
+  - (2) **OWASP マッピング非対応**: OWASP LLM Top 10 (2025) との対応が公式ドキュメント上で取られていない。 本ラボの §3.4 マッピングが Giskard 機能だけでは埋まらない
+  - (3) **multi-turn 不対応**: LLM01 Crescendo / LLM07 多段抽出が実演できない
+- LLM09 (Misinformation) / LLM05 (Improper Output Handling) の評価部分だけ Giskard を補助的に利用するのは選択肢。 §3.5 ツール選定で 「補助利用」 として再考の余地は残す
+
+### 案 I: Inspect AI (UK AISI) を主軸採用
+- 概要: 英国 AI Safety Institute 製の評価フレームワーク。 reproducibility と eval harness の完成度が高い
+- 却下理由:
+  - (1) **red team specific ではなく一般 LLM eval フレームワーク**: TruthfulQA / MMLU 等の評価向けで、 OWASP LLM Top 10 攻撃シナリオの probe ライブラリが付属しない
+  - (2) **OWASP マッピング欠落**: 案 H と同じ理由
+  - (3) **学習教材として overhead**: eval task の定義が agency-flavor (英国 AISI 公式評価向け) で個人学習用途には抽象度が高すぎる
+- ただし LLM09 (Misinformation) で TruthfulQA を回す部分は Inspect AI の task 定義が活用できる可能性あり (§3.5 で補助検討)
 
 ---
 
