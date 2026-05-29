@@ -1,5 +1,30 @@
 # Claude Code ローカル状態 (セッション・権限許可・ロック)
-.claude/
+# 既定では .claude/ 配下を全て ignore し、ECC project config のみ
+# whitelist で commit する。`.claude/*` (ディレクトリそのものは ignore しない)
+# 形式にすることで git が再帰し、`!` ルールが効くようにしている。
+.claude/*
+
+# ECC (Everything Claude Code) project config は commit する
+# https://github.com/affaan-m/ECC — MIT licensed (Copyright (c) 2026 Affaan Mustafa)
+# scripts/setup-ecc.sh で再現可能、詳細は .claude/NOTICE.md 参照
+!.claude/AGENTS.md
+!.claude/PLUGIN_SCHEMA_NOTES.md
+!.claude/README.md
+!.claude/LICENSE
+!.claude/NOTICE.md
+!.claude/agents/
+!.claude/commands/
+!.claude/ecc/
+!.claude/hooks/
+!.claude/marketplace.json
+!.claude/mcp-configs/
+!.claude/plugin.json
+!.claude/rules/
+!.claude/scripts/
+!.claude/skills/
+!.claude/the-security-guide.md
+# install-state.json は絶対パスを含むため commit せず、再 install で再生成
+.claude/ecc/install-state.json
 
 # OS
 .DS_Store

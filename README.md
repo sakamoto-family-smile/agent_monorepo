@@ -289,6 +289,22 @@ Cloud Run: agent-service (Claude Agent SDK + Vertex AI)
 
 ---
 
+## Claude Code 開発環境 (ECC)
+
+本リポジトリは [ECC (Everything Claude Code)](https://github.com/affaan-m/ECC) を `--target claude-project --profile full` で `.claude/` 配下に project-level install しています。Claude Code で本 monorepo を開くと、63 agents + 249 skills + 言語別 rules / commands / hooks / MCP configs が自動的に利用可能になります。
+
+```bash
+# 新規 clone 後 or アップグレード時
+scripts/setup-ecc.sh           # 初回 setup (install-state.json 再生成)
+scripts/setup-ecc.sh --upgrade # upstream 最新を反映
+```
+
+- **License**: ECC は MIT licensed (`Copyright (c) 2026 Affaan Mustafa`)、`.claude/LICENSE` 同梱
+- **詳細**: [`.claude/NOTICE.md`](./.claude/NOTICE.md) (出典 / 再現方法 / アップグレード手順)
+- **重複インストール注意**: `~/.claude/` (user-level) で ECC を別途 install している場合、ECC docs の "Do not stack install methods" に従い user-level / project-level のどちらか一方に統一してください
+
+---
+
 ## ライセンス
 
 [LICENSE](./LICENSE) 参照。
