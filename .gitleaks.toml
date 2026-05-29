@@ -48,6 +48,12 @@ paths = [
     # Agent-system skills and docs include prompt-injection sample payloads.
     '''agent-system-[12]/skills/.*''',
     '''agent-system-[12]/docs/.*''',
+
+    # ECC (Everything Claude Code) は MIT licensed の外部 vendored content。
+    # SKILL.md 等に X-API-Key 例 (`sk_live_abc123` 等) や HTTP header の
+    # placeholder が大量に含まれるが実 secret ではない。upstream は
+    # https://github.com/affaan-m/ECC で管理。詳細は .claude/NOTICE.md
+    '''(^|/)\.claude/.*''',
 ]
 
 # Strings that should never be treated as leaks, regardless of file.

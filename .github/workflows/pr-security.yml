@@ -80,12 +80,16 @@ jobs:
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
         run: |
-          # Exclude test directories — assert statements and fixtures routinely
-          # trip bandit's B101/B105 checks without indicating real risk.
+          # Exclude:
+          #  - test directories: assert statements and fixtures routinely trip
+          #    bandit's B101/B105 checks without indicating real risk.
+          #  - .claude/: ECC (Everything Claude Code) is MIT-licensed vendored
+          #    third-party content. Treating it as first-party would create
+          #    ongoing noise on every ECC upgrade. See .claude/NOTICE.md.
           git diff --name-only --diff-filter=ACMR \
             "origin/${GITHUB_BASE_REF}...HEAD" \
             | grep -E '\.py$' \
-            | grep -Ev '(^|/)(tests?|test_[^/]+)/' \
+            | grep -Ev '(^|/)(tests?|test_[^/]+|\.claude)/' \
             > changed.txt || true
 
           if [ -s changed.txt ]; then
