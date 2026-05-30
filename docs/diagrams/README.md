@@ -37,7 +37,45 @@ node docs/diagrams/render-preview.mjs # 静的プレビューを再生成
 `build-icons.mjs` が fill をインライン化し、id を除去して 1 ドキュメント内で
 衝突しない `<symbol id="gcp-...">` に変換しています。
 
+## システム別構成図（`systems/`）
+
+各エージェントシステムのローカル版 / GCP版 構成図を `systems/<name>/` に置きます。
+1 つの **spec ファイル（データ）** から、静的 SVG・PNG・React コンポーネントを生成します。
+
+```text
+systems/driving-license-bot/
+├── spec.local.mjs                 # データ: ローカル開発構成
+├── spec.gcp.mjs                   # データ: GCP 本番構成
+├── local.svg / local.png          # 生成物
+├── gcp.svg   / gcp.png            # 生成物
+├── DrivingLicenseBotDiagram.tsx   # 生成物（埋め込みSVG・依存ゼロ）
+└── README.md
+```
+
+共有エンジン（`lib/`）:
+
+| ファイル | 役割 |
+|---|---|
+| `lib/render.mjs` | spec（`nodes`/`edges`/`groups`）→ SVG 文字列のデータ駆動レンダラ |
+| `lib/icons.mjs` | 公式 GCP スプライト + 追加アイコン（`extra-icons-src.svg`）を結合 |
+| `extra-icons-src.svg` | 非 GCP / ローカル用アイコン（Docker, Postgres, LINE, ngrok 等、`x-*`） |
+| `build-system.mjs` | `systems/<dir>` の spec を SVG + TSX に変換 |
+| `rasterize.py` | SVG → PNG（PNG出力時のみ CJK フォントに差し替え） |
+
+### 新しいシステムを追加
+
+```bash
+cd docs/diagrams
+mkdir -p systems/<name>
+# spec.local.mjs / spec.gcp.mjs を作成（既存を参考に）
+node build-system.mjs systems/<name>
+python3 rasterize.py systems/<name>/local.svg systems/<name>/gcp.svg
+```
+
+アイコン id は GCP 公式が `gcp-*`、追加分が `x-*`。spec の `icon` にこの id を指定します。
+
 ## アイコンの出典
 
 Google Cloud 公式アーキテクチャアイコン（<https://cloud.google.com/icons>）。
 ブランド/アイコンの利用は Google のガイドラインに従ってください。
+ローカル用の `x-*` アイコンは本リポジトリで作成した簡易フラットアイコンです。
