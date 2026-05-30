@@ -1,0 +1,52 @@
+<!--
+  Extra (non-Google-Cloud) icons for local/dev architecture diagrams.
+  Hand-drawn in a neutral flat style at 24x24 to match the official GCP
+  sprite. Each is a <symbol id="x-..."> so it never collides with gcp-*.
+  Consumed by lib/icons.mjs alongside gcp-icon-defs.partial.svg.
+-->
+<symbol id="x-docker" viewBox="0 0 24 24">
+  <path d="M4 11h2.4v2.2H4zM6.7 11h2.4v2.2H6.7zM9.4 11h2.4v2.2H9.4zM12.1 11h2.4v2.2h-2.4zM6.7 8.4h2.4v2.2H6.7zM9.4 8.4h2.4v2.2H9.4zM12.1 8.4h2.4v2.2h-2.4zM12.1 5.8h2.4V8h-2.4z" fill="#2496ed"/>
+  <path d="M21.8 10.4c-.5-.34-1.7-.46-2.6-.3-.12-.86-.6-1.6-1.42-2.27l-.5-.33-.33.5c-.42.64-.6 1.55-.36 2.4.1.36.34.98.8 1.5-.46.27-1.36.63-2.55.63H2.3c-.5 2.66.5 6.1 4.34 6.1 4.86 0 8.46-2.24 10.14-6.33 1.1.02 2.66-.42 3.45-1.9z" fill="#2496ed"/>
+</symbol>
+<symbol id="x-postgres" viewBox="0 0 24 24">
+  <ellipse cx="12" cy="6" rx="8" ry="3" fill="#336791"/>
+  <path d="M4 6v12c0 1.66 3.58 3 8 3s8-1.34 8-3V6c0 1.66-3.58 3-8 3S4 7.66 4 6z" fill="#336791"/>
+  <ellipse cx="12" cy="6" rx="8" ry="3" fill="none" stroke="#dfeaf2" stroke-width="0.7"/>
+  <path d="M4 11c0 1.66 3.58 3 8 3s8-1.34 8-3M4 16c0 1.66 3.58 3 8 3s8-1.34 8-3" fill="none" stroke="#dfeaf2" stroke-width="0.7"/>
+</symbol>
+<symbol id="x-line" viewBox="0 0 24 24">
+  <rect x="2" y="2" width="20" height="20" rx="5" fill="#06c755"/>
+  <path d="M12 5.4c-4 0-7.2 2.62-7.2 5.85 0 2.9 2.55 5.32 6 5.78.23.05.55.15.63.35.07.18.05.46.02.64l-.1.6c-.03.18-.14.71.62.39.77-.32 4.13-2.43 5.64-4.17 1.04-1.14 1.54-2.3 1.54-3.58 0-3.23-3.23-5.85-7.2-5.85z" fill="#fff"/>
+  <path d="M9.9 9.7v3.05M9.9 9.7H8.6c-.2 0-.36.16-.36.36v2.33M14.9 9.7v3.05l-1.95-2.7v2.7M11.5 9.7v3.05M16.6 9.7h-1.3v3.05h1.3M15.3 11.2h1.1" stroke="#06c755" stroke-width="0.75" fill="none" stroke-linecap="round"/>
+</symbol>
+<symbol id="x-fastapi" viewBox="0 0 24 24">
+  <circle cx="12" cy="12" r="9.5" fill="#059669"/>
+  <path d="M12.7 4.5 7 12.6h4.1l-.8 6.9 6-8.6h-4.2z" fill="#fff"/>
+</symbol>
+<symbol id="x-laptop" viewBox="0 0 24 24">
+  <rect x="4.5" y="5" width="15" height="9.5" rx="1.2" fill="#475569"/>
+  <rect x="6" y="6.4" width="12" height="6.7" rx="0.6" fill="#cbd5e1"/>
+  <path d="M2.5 16.5h19l-1.2 1.7c-.2.3-.5.5-.9.5H4.6c-.4 0-.7-.2-.9-.5z" fill="#64748b"/>
+</symbol>
+<symbol id="x-ngrok" viewBox="0 0 24 24">
+  <rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="#1f2937"/>
+  <path d="M8 16V9.2c0-.4.5-.6.8-.3l6 5.6c.3.3.8.1.8-.3V8" fill="none" stroke="#34d399" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+</symbol>
+<symbol id="x-python" viewBox="0 0 24 24">
+  <path d="M11.9 2.5c-2 0-3.7.7-3.7 2.5v1.8h4v.5H6.3C4.5 7.8 3.6 9 3.6 11.2s.9 3.4 2.7 3.4h1.3v-2c0-1.6 1.4-3 3.1-3h3.6c1.5 0 2.7-1.2 2.7-2.7V5c0-1.4-1.2-2.5-3.4-2.5zM9.6 4.2c.4 0 .7.3.7.7s-.3.7-.7.7-.7-.3-.7-.7.3-.7.7-.7z" fill="#3b82f6"/>
+  <path d="M12.1 21.5c2 0 3.7-.7 3.7-2.5v-1.8h-4v-.5h5.9c1.8 0 2.7-1.2 2.7-3.4s-.9-3.4-2.7-3.4h-1.3v2c0 1.6-1.4 3-3.1 3H9.6c-1.5 0-2.7 1.2-2.7 2.7V19c0 1.4 1.2 2.5 3.4 2.5zm2.3-1.7c-.4 0-.7-.3-.7-.7s.3-.7.7-.7.7.3.7.7-.3.7-.7.7z" fill="#fbbf24"/>
+</symbol>
+<symbol id="x-globe" viewBox="0 0 24 24">
+  <circle cx="12" cy="12" r="9" fill="#0ea5e9"/>
+  <path d="M3 12h18M12 3c2.5 2.4 2.5 15.6 0 18M12 3c-2.5 2.4-2.5 15.6 0 18M4.5 7.5c4.6 2.2 10.4 2.2 15 0M4.5 16.5c4.6-2.2 10.4-2.2 15 0" fill="none" stroke="#e0f2fe" stroke-width="0.8"/>
+</symbol>
+<symbol id="x-bigquery" viewBox="0 0 24 24">
+  <circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="#4285f4" stroke-width="2"/>
+  <path d="M15 15l4.5 4.5" stroke="#4285f4" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M8 10.5h5M10.5 8v5" stroke="#669df6" stroke-width="1.4" stroke-linecap="round"/>
+</symbol>
+<symbol id="x-cloudtasks" viewBox="0 0 24 24">
+  <rect x="3" y="5" width="18" height="3.4" rx="1.2" fill="#4285f4"/>
+  <rect x="3" y="10.3" width="18" height="3.4" rx="1.2" fill="#669df6"/>
+  <rect x="3" y="15.6" width="18" height="3.4" rx="1.2" fill="#aecbfa"/>
+</symbol>
