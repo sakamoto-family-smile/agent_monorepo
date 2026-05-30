@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 712" width="1240" height="712" font-family="Inter, system-ui, sans-serif">
+<defs>
+<pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M 32 0 L 0 0 0 32" fill="none" stroke="rgba(148,163,184,0.08)" stroke-width="1"/></pattern>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/></marker>
+</defs>
+<rect width="1240" height="712" fill="#0b1220"/>
+<rect width="1240" height="712" fill="url(#grid)"/>
+<rect x="252" y="210" width="764" height="342" rx="20" fill="rgba(66,133,244,0.06)" stroke="rgba(66,133,244,0.35)" stroke-width="1.5" stroke-dasharray="3 6"/>
+<text x="272" y="236" fill="rgba(66,133,244,0.35)" font-size="12.5" font-weight="700" letter-spacing="1">VPC — asia-northeast1</text><path d="M 620 88 Q 620 88 620 110 T 620 132" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><text x="620" y="104" fill="#94a3b8" font-size="11" text-anchor="middle" paint-order="stroke" stroke="#0b1220" stroke-width="4">HTTPS</text><path d="M 563.6190476190476 196 Q 509 196 509 227 T 454.3809523809524 258" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M 676.3809523809524 196 Q 731 196 731 227 T 785.6190476190476 258" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M 496 290 Q 620 290 620 290 T 744 290" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><text x="620" y="284" fill="#94a3b8" font-size="11" text-anchor="middle" paint-order="stroke" stroke="#0b1220" stroke-width="4">REST / SSE</text><path d="M 940 290 Q 964 290 964 290 T 988 290" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><text x="964" y="284" fill="#94a3b8" font-size="11" text-anchor="middle" paint-order="stroke" stroke="#0b1220" stroke-width="4">inference</text><path d="M 780.2260869565217 322 Q 620 322 620 405 T 459.7739130434783 488" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M 811.1130434782609 322 Q 731 322 731 405 T 650.8869565217391 488" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M 842 322 Q 842 322 842 405 T 842 488" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M 842 322 Q 842 322 842 347 T 842 372" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><text x="842" y="341" fill="#94a3b8" font-size="11" text-anchor="middle" paint-order="stroke" stroke="#0b1220" stroke-width="4">publish</text><path d="M 940 404 Q 964 404 964 404 T 988 404" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M 1018.6896551724138 436 Q 964 436 964 462 T 909.3103448275862 488" fill="none" stroke="#64748b" stroke-width="1.5" stroke-dasharray="6 6" marker-end="url(#arrow)"/><path d="M 1086 372 Q 1086 372 1086 347 T 1086 322" fill="none" stroke="#64748b" stroke-width="1.5" stroke-dasharray="6 6" marker-end="url(#arrow)"/><path d="M 496 644 Q 509 644 509 644 T 522 644" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M 599.9322033898305 612 Q 509 612 509 467 T 418.06779661016947 322" fill="none" stroke="#64748b" stroke-width="1.5" stroke-dasharray="6 6" marker-end="url(#arrow)"/><text x="509" y="461" fill="#94a3b8" font-size="11" text-anchor="middle" paint-order="stroke" stroke="#0b1220" stroke-width="4">deploy</text><path d="M 640.0677966101695 612 Q 731 612 731 467 T 821.9322033898305 322" fill="none" stroke="#64748b" stroke-width="1.5" stroke-dasharray="6 6" marker-end="url(#arrow)"/><text x="731" y="461" fill="#94a3b8" font-size="11" text-anchor="middle" paint-order="stroke" stroke="#0b1220" stroke-width="4">deploy</text><g transform="translate(522,24)">
+<rect width="196" height="64" rx="14" fill="#1f2937" stroke="#94a3b8" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#94a3b8"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">👥</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Users</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">Web / Mobile</text>
+</g><g transform="translate(522,132)">
+<rect width="196" height="64" rx="14" fill="#1f3a8a" stroke="#4285F4" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#4285F4"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">🌐</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Cloud Load Balancing</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">Global HTTPS LB</text>
+</g><g transform="translate(300,258)">
+<rect width="196" height="64" rx="14" fill="#0f3d2e" stroke="#34A853" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#34A853"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">🖥️</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Cloud Run — Frontend</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">Next.js 15</text>
+</g><g transform="translate(744,258)">
+<rect width="196" height="64" rx="14" fill="#0f3d2e" stroke="#34A853" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#34A853"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">⚙️</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Cloud Run — Agent API</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">FastAPI / LLM</text>
+</g><g transform="translate(988,258)">
+<rect width="196" height="64" rx="14" fill="#3a1620" stroke="#EA4335" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#EA4335"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">✨</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Vertex AI</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">Gemini models</text>
+</g><g transform="translate(744,372)">
+<rect width="196" height="64" rx="14" fill="#3b2a06" stroke="#FBBC04" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#FBBC04"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">📨</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Pub/Sub</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">Async jobs</text>
+</g><g transform="translate(988,372)">
+<rect width="196" height="64" rx="14" fill="#0f3d2e" stroke="#34A853" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#34A853"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">λ</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Cloud Functions</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">Worker</text>
+</g><g transform="translate(300,488)">
+<rect width="196" height="64" rx="14" fill="#3b2a06" stroke="#FBBC04" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#FBBC04"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">🔥</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Firestore</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">Sessions / chat</text>
+</g><g transform="translate(522,488)">
+<rect width="196" height="64" rx="14" fill="#3b2a06" stroke="#FBBC04" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#FBBC04"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">🗄️</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Cloud SQL</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">PostgreSQL</text>
+</g><g transform="translate(744,488)">
+<rect width="196" height="64" rx="14" fill="#3b2a06" stroke="#FBBC04" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#FBBC04"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">🪣</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Cloud Storage</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">Artifacts / files</text>
+</g><g transform="translate(48,258)">
+<rect width="172" height="64" rx="14" fill="#1f2937" stroke="#94a3b8" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#94a3b8"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">🔐</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Secret Manager</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">Keys / tokens</text>
+</g><g transform="translate(48,350)">
+<rect width="172" height="64" rx="14" fill="#1f2937" stroke="#94a3b8" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#94a3b8"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">🛡️</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">IAM</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">Identities / roles</text>
+</g><g transform="translate(48,442)">
+<rect width="172" height="64" rx="14" fill="#1f2937" stroke="#94a3b8" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#94a3b8"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">📊</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Cloud Logging</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">Logs / Monitoring</text>
+</g><g transform="translate(300,612)">
+<rect width="196" height="64" rx="14" fill="#1f2937" stroke="#94a3b8" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#94a3b8"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">🏗️</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Cloud Build</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">CI pipeline</text>
+</g><g transform="translate(522,612)">
+<rect width="196" height="64" rx="14" fill="#1f2937" stroke="#94a3b8" stroke-width="1.25"/>
+<rect width="5" height="64" rx="2.5" fill="#94a3b8"/>
+<text x="20" y="28" font-size="20" dominant-baseline="middle">📦</text>
+<text x="48" y="23" fill="#e2e8f0" font-size="14" font-weight="650">Artifact Registry</text>
+<text x="48" y="43" fill="#94a3b8" font-size="11.5">Container images</text>
+</g></svg>
