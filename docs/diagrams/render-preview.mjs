@@ -1,6 +1,12 @@
 // Standalone renderer: produces a static SVG matching GcpArchitecture.tsx
-// so the diagram can be viewed without a React build.
-import { writeFileSync } from "node:fs";
+// (now using the official Google Cloud icon sprite) so the diagram can be
+// viewed without a React build.
+import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ICON_DEFS = readFileSync(join(HERE, "gcp-icon-defs.partial.svg"), "utf8");
 
 const TOKENS = {
   bg: "#0b1220", grid: "rgba(148,163,184,0.08)", edge: "#64748b",
@@ -16,21 +22,21 @@ const CAT = {
 };
 const NW = 196, NH = 64;
 const NODES = [
-  { id: "users", label: "Users", sub: "Web / Mobile", icon: "👥", x: 522, y: 24, cat: "ops" },
-  { id: "lb", label: "Cloud Load Balancing", sub: "Global HTTPS LB", icon: "🌐", x: 522, y: 132, cat: "network" },
-  { id: "fe", label: "Cloud Run — Frontend", sub: "Next.js 15", icon: "🖥️", x: 300, y: 258, cat: "compute" },
-  { id: "api", label: "Cloud Run — Agent API", sub: "FastAPI / LLM", icon: "⚙️", x: 744, y: 258, cat: "compute" },
-  { id: "vertex", label: "Vertex AI", sub: "Gemini models", icon: "✨", x: 988, y: 258, cat: "ai" },
-  { id: "pubsub", label: "Pub/Sub", sub: "Async jobs", icon: "📨", x: 744, y: 372, cat: "data" },
-  { id: "fn", label: "Cloud Functions", sub: "Worker", icon: "λ", x: 988, y: 372, cat: "compute" },
-  { id: "firestore", label: "Firestore", sub: "Sessions / chat", icon: "🔥", x: 300, y: 488, cat: "data" },
-  { id: "sql", label: "Cloud SQL", sub: "PostgreSQL", icon: "🗄️", x: 522, y: 488, cat: "data" },
-  { id: "gcs", label: "Cloud Storage", sub: "Artifacts / files", icon: "🪣", x: 744, y: 488, cat: "data" },
-  { id: "secret", label: "Secret Manager", sub: "Keys / tokens", icon: "🔐", x: 48, y: 258, w: 172, cat: "ops" },
-  { id: "iam", label: "IAM", sub: "Identities / roles", icon: "🛡️", x: 48, y: 350, w: 172, cat: "ops" },
-  { id: "obs", label: "Cloud Logging", sub: "Logs / Monitoring", icon: "📊", x: 48, y: 442, w: 172, cat: "ops" },
-  { id: "build", label: "Cloud Build", sub: "CI pipeline", icon: "🏗️", x: 300, y: 612, cat: "ops" },
-  { id: "ar", label: "Artifact Registry", sub: "Container images", icon: "📦", x: 522, y: 612, cat: "ops" },
+  { id: "users", label: "Users", sub: "Web / Mobile", icon: "users", x: 522, y: 24, cat: "ops" },
+  { id: "lb", label: "Cloud Load Balancing", sub: "Global HTTPS LB", icon: "cloud_load_balancing", x: 522, y: 132, cat: "network" },
+  { id: "fe", label: "Cloud Run — Frontend", sub: "Next.js 15", icon: "cloud_run", x: 300, y: 258, cat: "compute" },
+  { id: "api", label: "Cloud Run — API", sub: "FastAPI / LLM", icon: "cloud_run", x: 744, y: 258, cat: "compute" },
+  { id: "vertex", label: "Vertex AI", sub: "Gemini models", icon: "vertexai", x: 988, y: 258, cat: "ai" },
+  { id: "pubsub", label: "Pub/Sub", sub: "Async jobs", icon: "pubsub", x: 744, y: 372, cat: "data" },
+  { id: "fn", label: "Cloud Functions", sub: "Worker", icon: "cloud_functions", x: 988, y: 372, cat: "compute" },
+  { id: "firestore", label: "Firestore", sub: "Sessions / chat", icon: "firestore", x: 300, y: 488, cat: "data" },
+  { id: "sql", label: "Cloud SQL", sub: "PostgreSQL", icon: "cloud_sql", x: 522, y: 488, cat: "data" },
+  { id: "gcs", label: "Cloud Storage", sub: "Artifacts / files", icon: "cloud_storage", x: 744, y: 488, cat: "data" },
+  { id: "secret", label: "Secret Manager", sub: "Keys / tokens", icon: "secret_manager", x: 48, y: 258, w: 172, cat: "ops" },
+  { id: "iam", label: "IAM", sub: "Identities / roles", icon: "identity_and_access_management", x: 48, y: 350, w: 172, cat: "ops" },
+  { id: "obs", label: "Cloud Logging", sub: "Logs / Monitoring", icon: "cloud_logging", x: 48, y: 442, w: 172, cat: "ops" },
+  { id: "build", label: "Cloud Build", sub: "CI pipeline", icon: "cloud_build", x: 300, y: 612, cat: "ops" },
+  { id: "ar", label: "Artifact Registry", sub: "Container images", icon: "artifact_registry", x: 522, y: 612, cat: "ops" },
 ];
 const EDGES = [
   { from: "users", to: "lb", label: "HTTPS" }, { from: "lb", to: "fe" }, { from: "lb", to: "api" },
@@ -61,6 +67,7 @@ let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 712" width="1
 <defs>
 <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M 32 0 L 0 0 0 32" fill="none" stroke="${TOKENS.grid}" stroke-width="1"/></pattern>
 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="${TOKENS.edge}"/></marker>
+${ICON_DEFS}
 </defs>
 <rect width="1240" height="712" fill="${TOKENS.bg}"/>
 <rect width="1240" height="712" fill="url(#grid)"/>
@@ -74,15 +81,16 @@ for (const e of EDGES) {
   if (e.label) s += `<text x="${mx}" y="${my - 6}" fill="${TOKENS.textMuted}" font-size="11" text-anchor="middle" paint-order="stroke" stroke="${TOKENS.bg}" stroke-width="4">${esc(e.label)}</text>`;
 }
 for (const n of NODES) {
-  const c = CAT[n.cat], w = n.w ?? NW, h = n.h ?? NH;
+  const c = CAT[n.cat], w = n.w ?? NW, h = n.h ?? NH, cy = (h - 34) / 2;
   s += `<g transform="translate(${n.x},${n.y})">
 <rect width="${w}" height="${h}" rx="${TOKENS.radius}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1.25"/>
 <rect width="5" height="${h}" rx="2.5" fill="${c.stroke}"/>
-<text x="20" y="${h / 2 - 4}" font-size="20" dominant-baseline="middle">${n.icon}</text>
-<text x="48" y="${h / 2 - 9}" fill="${TOKENS.text}" font-size="14" font-weight="650">${esc(n.label)}</text>
-<text x="48" y="${h / 2 + 11}" fill="${TOKENS.textMuted}" font-size="11.5">${esc(n.sub)}</text>
+<rect x="14" y="${cy}" width="34" height="34" rx="9" fill="#f1f5f9"/>
+<use href="#gcp-${n.icon}" x="17" y="${cy + 3}" width="28" height="28"/>
+<text x="60" y="${h / 2 - 9}" fill="${TOKENS.text}" font-size="13" font-weight="650">${esc(n.label)}</text>
+<text x="60" y="${h / 2 + 11}" fill="${TOKENS.textMuted}" font-size="11.5">${esc(n.sub)}</text>
 </g>`;
 }
 s += `</svg>`;
-writeFileSync(new URL("./gcp-architecture.svg", import.meta.url), s);
+writeFileSync(join(HERE, "gcp-architecture.svg"), s);
 console.log("wrote gcp-architecture.svg");

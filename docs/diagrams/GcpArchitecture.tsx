@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { GCP_ICON_DEFS } from "./gcpIconDefs";
 
 /**
  * GcpArchitecture
@@ -63,29 +64,30 @@ const NODE_W = 196;
 const NODE_H = 64;
 
 // ── Architecture data ─────────────────────────────────────────────────────
+// `icon` is the official Google Cloud icon key → <use href="#gcp-{icon}">
 const NODES: NodeDef[] = [
-  { id: "users", label: "Users", sub: "Web / Mobile", icon: "👥", x: 522, y: 24, cat: "ops" },
-  { id: "lb", label: "Cloud Load Balancing", sub: "Global HTTPS LB", icon: "🌐", x: 522, y: 132, cat: "network" },
+  { id: "users", label: "Users", sub: "Web / Mobile", icon: "users", x: 522, y: 24, cat: "ops" },
+  { id: "lb", label: "Cloud Load Balancing", sub: "Global HTTPS LB", icon: "cloud_load_balancing", x: 522, y: 132, cat: "network" },
 
-  { id: "fe", label: "Cloud Run — Frontend", sub: "Next.js 15", icon: "🖥️", x: 300, y: 258, cat: "compute" },
-  { id: "api", label: "Cloud Run — Agent API", sub: "FastAPI / LLM", icon: "⚙️", x: 744, y: 258, cat: "compute" },
-  { id: "vertex", label: "Vertex AI", sub: "Gemini models", icon: "✨", x: 988, y: 258, cat: "ai" },
+  { id: "fe", label: "Cloud Run — Frontend", sub: "Next.js 15", icon: "cloud_run", x: 300, y: 258, cat: "compute" },
+  { id: "api", label: "Cloud Run — API", sub: "FastAPI / LLM", icon: "cloud_run", x: 744, y: 258, cat: "compute" },
+  { id: "vertex", label: "Vertex AI", sub: "Gemini models", icon: "vertexai", x: 988, y: 258, cat: "ai" },
 
-  { id: "pubsub", label: "Pub/Sub", sub: "Async jobs", icon: "📨", x: 744, y: 372, cat: "data" },
-  { id: "fn", label: "Cloud Functions", sub: "Worker", icon: "λ", x: 988, y: 372, cat: "compute" },
+  { id: "pubsub", label: "Pub/Sub", sub: "Async jobs", icon: "pubsub", x: 744, y: 372, cat: "data" },
+  { id: "fn", label: "Cloud Functions", sub: "Worker", icon: "cloud_functions", x: 988, y: 372, cat: "compute" },
 
-  { id: "firestore", label: "Firestore", sub: "Sessions / chat", icon: "🔥", x: 300, y: 488, cat: "data" },
-  { id: "sql", label: "Cloud SQL", sub: "PostgreSQL", icon: "🗄️", x: 522, y: 488, cat: "data" },
-  { id: "gcs", label: "Cloud Storage", sub: "Artifacts / files", icon: "🪣", x: 744, y: 488, cat: "data" },
+  { id: "firestore", label: "Firestore", sub: "Sessions / chat", icon: "firestore", x: 300, y: 488, cat: "data" },
+  { id: "sql", label: "Cloud SQL", sub: "PostgreSQL", icon: "cloud_sql", x: 522, y: 488, cat: "data" },
+  { id: "gcs", label: "Cloud Storage", sub: "Artifacts / files", icon: "cloud_storage", x: 744, y: 488, cat: "data" },
 
   // ops / security column (left)
-  { id: "secret", label: "Secret Manager", sub: "Keys / tokens", icon: "🔐", x: 48, y: 258, w: 172, cat: "ops" },
-  { id: "iam", label: "IAM", sub: "Identities / roles", icon: "🛡️", x: 48, y: 350, w: 172, cat: "ops" },
-  { id: "obs", label: "Cloud Logging", sub: "Logs / Monitoring", icon: "📊", x: 48, y: 442, w: 172, cat: "ops" },
+  { id: "secret", label: "Secret Manager", sub: "Keys / tokens", icon: "secret_manager", x: 48, y: 258, w: 172, cat: "ops" },
+  { id: "iam", label: "IAM", sub: "Identities / roles", icon: "identity_and_access_management", x: 48, y: 350, w: 172, cat: "ops" },
+  { id: "obs", label: "Cloud Logging", sub: "Logs / Monitoring", icon: "cloud_logging", x: 48, y: 442, w: 172, cat: "ops" },
 
   // CI/CD (bottom)
-  { id: "build", label: "Cloud Build", sub: "CI pipeline", icon: "🏗️", x: 300, y: 612, cat: "ops" },
-  { id: "ar", label: "Artifact Registry", sub: "Container images", icon: "📦", x: 522, y: 612, cat: "ops" },
+  { id: "build", label: "Cloud Build", sub: "CI pipeline", icon: "cloud_build", x: 300, y: 612, cat: "ops" },
+  { id: "ar", label: "Artifact Registry", sub: "Container images", icon: "artifact_registry", x: 522, y: 612, cat: "ops" },
 ];
 
 const EDGES: EdgeDef[] = [
@@ -180,20 +182,20 @@ function GcpNode({
       />
       {/* 左端のカテゴリアクセントバー */}
       <rect width={5} height={h} rx={2.5} fill={c.stroke} />
-      <text x={20} y={h / 2 - 4} fontSize={20} dominantBaseline="middle">
-        {node.icon}
-      </text>
+      {/* 公式アイコンを乗せる明色チップ（どのノード色でも視認性を確保） */}
+      <rect x={14} y={(h - 34) / 2} width={34} height={34} rx={9} fill="#f1f5f9" />
+      <use href={`#gcp-${node.icon}`} x={17} y={(h - 34) / 2 + 3} width={28} height={28} />
       <text
-        x={48}
+        x={60}
         y={h / 2 - 9}
         fill={TOKENS.text}
-        fontSize={14}
+        fontSize={13}
         fontWeight={650}
         fontFamily={TOKENS.font}
       >
         {node.label}
       </text>
-      <text x={48} y={h / 2 + 11} fill={TOKENS.textMuted} fontSize={11.5} fontFamily={TOKENS.font}>
+      <text x={60} y={h / 2 + 11} fill={TOKENS.textMuted} fontSize={11.5} fontFamily={TOKENS.font}>
         {node.sub}
       </text>
     </g>
@@ -265,6 +267,9 @@ export default function GcpArchitecture() {
           AI、Firestore、Cloud SQL、Cloud Storage、Pub/Sub、Cloud Functions と連携する構成。
         </desc>
 
+        {/* Official Google Cloud icon sprite. Trusted, build-time-generated
+            static markup (not user input) — see build-icons.mjs. */}
+        <defs dangerouslySetInnerHTML={{ __html: GCP_ICON_DEFS }} />
         <defs>
           <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
             <path d="M 32 0 L 0 0 0 32" fill="none" stroke={TOKENS.grid} strokeWidth="1" />
