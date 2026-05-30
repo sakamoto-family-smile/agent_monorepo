@@ -40,6 +40,7 @@ node docs/diagrams/render-preview.mjs # 静的プレビューを再生成
 ## システム別構成図（`systems/`）
 
 各エージェントシステムのローカル版 / GCP版 構成図を `systems/<name>/` に置きます。
+モノレポ全体を俯瞰する GCP 全体構成図は [`systems/_overview/`](./systems/_overview/README.md)。
 1 つの **spec ファイル（データ）** から、静的 SVG・PNG・React コンポーネントを生成します。
 
 ```text
