@@ -66,13 +66,34 @@ Cloud SQL** であり、現在 **2 インスタンス**（`driving-license-bot-p
 | # | 施策 | 効果（概算） | 労力 | リスク | 依存 |
 |---|---|---|---|---|---|
 | P1 | **Cloud SQL 集約**（`piyolog` → 共有インスタンス） | 〜$10/月（micro 1台分）+ IPv4 $3/月 | 中 | 中 | — |
-| P2 | **Cloud SQL public IPv4 廃止**（Private IP / Auth Proxy） | $3/月 × 残存台数 + 攻撃面減 | 中 | 中 | P1 後が楽 |
+| P2 | **Cloud SQL public IP 廃止**（Private IP）または **public IP のハードニング** | IPv4 $3/月 × 台。ただし VPC Connector 採用時はそれを上回る場合あり | 中 | 中 | P1 後が楽 |
 | P3 | **Artifact Registry cleanup policy**（untagged 削除 / 最新 N 世代保持） | ストレージ漸減 | 小 | 低 | — |
 | P4 | **analytics-platform を asia-northeast1 へ寄せる** | cross-region egress 削減 + レイテンシ | 中 | 中 | — |
 | P5 | **Vertex AI 最適化**（cross-check サンプリング / Gemini Flash ルーティング） | 変動費（最大インパクト） | 小〜中 | 低〜中 | — |
 | P6 | **`line_bot_min_instances` 見直し**（1 → 0 の是非） | idle Cloud Run 1台分 | 小 | 中（UX） | — |
 
 > P1〜P4 が固定費、P5〜P6 が変動費/トレードオフ系。**P3 が最も低リスク**なので着手しやすい。
+
+#### P2 補足：public → private IP のリスクとトレードオフ
+
+レビュー指摘（"public から private にするリスクは？"）への回答。**P2 は単純な改善ではなく、
+コスト最適化の文脈ではむしろ慎重に判断すべき施策**である。
+
+- **接続経路が変わる（最大のリスク）**: Cloud Run / Cloud Run Jobs から private-IP の Cloud SQL に
+  到達するには **Serverless VPC Access Connector** または **Direct VPC egress** が必要になる。現在使っている
+  Cloud SQL connector（`--add-cloudsql-instances` / unix socket）は **public IP 経由なら VPC 不要**で動くため、
+  private 化すると全 Cloud Run / Job の接続構成変更が必須。
+- **コストが逆効果になり得る**: 削減できるのは IPv4 アドレス課金（**~$3/月/台**）のみ。一方 **VPC Connector は
+  常時起動インスタンスを持ち、$3/月を上回ることがある**。Direct VPC egress なら connector 費は不要だが、
+  サブネット/firewall 設計が増える。**コスト目的だけなら P2 は割に合わない可能性が高い**。
+- **ローカル開発・運用の到達性**: private-only にすると、手元から `psql` / Cloud SQL Auth Proxy で直接つなぐのに
+  VPC 内（踏み台 / IAP / VPN）が必要になり、移行・バックアップ・障害対応のオペが重くなる。
+- **public IP は "無防備" ではない**: Cloud SQL Auth Proxy + IAM 認証 + SSL/TLS 強制 + authorized networks に
+  `0.0.0.0/0` を置かない、を満たせば public IP でも実質的な攻撃面は小さい。private 化の上積み効果は限定的。
+
+**結論 / 推奨**: P2 は「private IP 化」を必須とせず、まず **public IP のハードニング**（authorized networks 全廃 =
+Auth Proxy 経由のみ許可、SSL 必須化、IAM DB 認証）で大半の安全性を**ほぼ無償**で確保する。private IP 化は
+セキュリティ要件が上がった将来フェーズで、VPC コストと天秤にかけて判断する（**コスト削減の主役は P1/P3/P4**）。
 
 ### 3.1 User Stories
 
@@ -103,7 +124,9 @@ Cloud SQL** であり、現在 **2 インスタンス**（`driving-license-bot-p
 | 集約後 RAM/接続不足で全系が遅延・接続エラー | High | 集約と同時に `db-g1-small` 以上へ right-size、`max_connections` 調整、アプリ側 asyncpg プール上限の見直し |
 | 1 インスタンス障害で全系停止（blast radius 拡大） | High | 自動バックアップ + PITR 有効化、export bucket 継続、`deletion_protection=true` |
 | 移行中のデータ消失 | High | 旧インスタンスは即削除せず一定期間 stop で保持、`pg_dump`/`gcloud sql export` でフルバックアップ後に切替 |
-| Private IP 化で Cloud Run から到達不可 | Medium | Serverless VPC Connector or Cloud SQL Auth Proxy（unix socket）経由を事前検証、`fujisawa` の Job は既に socket 接続 |
+| Private IP 化で Cloud Run から到達不可 | Medium | Serverless VPC Connector or Direct VPC egress を事前検証。現行の public 経由 socket 接続が動かなくなる点に注意 |
+| Private IP 化の VPC Connector 費が IPv4 削減分を相殺 | Medium | コスト目的なら private 化を見送り、public IP のハードニング（authorized networks 全廃 + SSL + IAM DB 認証）で代替（3.1 P2 補足参照） |
+| Private IP 化でローカル/運用の DB 到達性が低下 | Medium | 踏み台 / IAP / Auth Proxy 経由の手順を整備、移行・バックアップ運用への影響を事前確認 |
 | AR cleanup で必要イメージを誤削除 | Medium | `keep` 条件（最新 N 世代 + tagged 保持）優先、初回は `dry-run` 相当で対象確認 |
 | LLM cross-check 削減で品質低下 | Medium | 難易度/サンプリングでゲート、品質 KPI（analytics-platform イベント）で監視しながら段階適用 |
 | リージョン移設での egress 一時増 | Low | 移行は低トラフィック時間帯、移行後に旧リソース削除 |
@@ -261,3 +284,4 @@ After（Cloud SQL 1 台に集約 + Private IP）
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-05-30 | Draft | 初稿（Terraform 実構成の調査に基づくコスト削減提案） |
+| 2026-05-30 | Review | レビュー指摘を反映：P2 を「private IP 必須」から「public IP ハードニング優先 / private は任意」に緩和。VPC Connector コスト・到達性リスクを追記 |
