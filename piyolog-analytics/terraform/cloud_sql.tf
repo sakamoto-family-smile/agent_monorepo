@@ -61,6 +61,10 @@ resource "google_sql_database_instance" "piyolog" {
       private_network = null
     }
 
+    # NOTE: この max_connections は専用モード (cloud_sql_use_shared_instance=false)
+    # のときだけ有効。共有モードではこの instance 自体が作られない (count=0) ため、
+    # 実効上限は共有先インスタンス (driving-license-bot の cloudsql_max_connections)
+    # で決まる。PROPOSAL-0009 P1 / terraform/README.md「Cloud SQL 集約」参照。
     database_flags {
       name  = "max_connections"
       value = "50"

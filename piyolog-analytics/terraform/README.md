@@ -242,8 +242,11 @@ piyolog 専用 Cloud SQL インスタンスを廃止し、既存の共有イン�
 # tfvars
 cloud_sql_use_shared_instance = true
 shared_cloudsql_instance_name = "driving-license-bot-pg"  # 相乗り先の既存 instance 名
-# 集約に合わせて共有インスタンス側 (driving-license-bot/terraform) の tier を
-# db-f1-micro -> db-g1-small 等へ right-size しておく (pgvector + 複数アプリのため)
+# 集約に合わせて共有インスタンス側 (driving-license-bot/terraform) で:
+#   - tier を db-f1-micro -> db-g1-small 等へ right-size (pgvector + 複数アプリ)
+#   - cloudsql_max_connections を同居アプリ合計に合わせて設定 (既定 100)
+#     目安: 各 Cloud Run の asyncpg プール上限 × 想定インスタンス数の合計
+#           + Cloud SQL システム予約。変更は instance 再起動を伴う。
 ```
 
 ### 移行手順

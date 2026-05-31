@@ -108,6 +108,12 @@ variable "cloudsql_disk_size_gb" {
   default     = 10
 }
 
+variable "cloudsql_max_connections" {
+  type        = number
+  description = "Cloud SQL の max_connections。共有インスタンス (PROPOSAL-0009 P1) として driving-license-bot + fujisawa + piyolog が同居しうるため、tier 既定値ではなく明示設定する。db-g1-small への right-size とセットで調整。変更時は instance 再起動を伴う。"
+  default     = 100
+}
+
 variable "cloudsql_deletion_protection" {
   type        = bool
   description = "Cloud SQL instance の deletion_protection。dev/PoC では false で teardown を容易に。"
