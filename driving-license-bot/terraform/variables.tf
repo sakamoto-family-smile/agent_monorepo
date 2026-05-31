@@ -98,8 +98,8 @@ variable "deletion_protection" {
 
 variable "cloudsql_tier" {
   type        = string
-  description = "Cloud SQL machine tier。PoC 既定の db-f1-micro は ~\\$10/月。本番は db-custom-1-3840 等に上げる。"
-  default     = "db-f1-micro"
+  description = "Cloud SQL machine tier。この instance は共有 (PROPOSAL-0009 P1: driving-license-bot + fujisawa_kb_db + piyolog が同居)。pgvector + 複数アプリのため db-g1-small (1.7GB) を既定とする。単独運用に戻すなら db-f1-micro でも可。本番増強は db-custom-* へ。"
+  default     = "db-g1-small"
 }
 
 variable "cloudsql_disk_size_gb" {
