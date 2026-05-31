@@ -24,6 +24,11 @@ resource "random_password" "cloud_sql_db_password" {
   override_special = "!#$%^&*()-_=+[]{};,.<>?"
 }
 
+# TODO(PROPOSAL-0009 P1): 移行完了後は共有インスタンス前提に簡約する。
+#   - この data source の count ゲートを外して常時参照に
+#   - 下の google_sql_database_instance.piyolog (専用インスタンス) を丸ごと削除
+#   - var.cloud_sql_use_shared_instance を撤去 (locals.tf / variables.tf も同様)
+
 # 相乗り先の既存インスタンス (cloud_sql_use_shared_instance=true のときだけ参照)。
 data "google_sql_database_instance" "shared" {
   count   = var.cloud_sql_use_shared_instance ? 1 : 0
@@ -32,6 +37,7 @@ data "google_sql_database_instance" "shared" {
 }
 
 # 専用インスタンス (cloud_sql_use_shared_instance=false のときだけ作成)。
+# TODO(PROPOSAL-0009 P1): 移行完了後にこのリソースごと削除する。
 resource "google_sql_database_instance" "piyolog" {
   count = var.cloud_sql_use_shared_instance ? 0 : 1
 

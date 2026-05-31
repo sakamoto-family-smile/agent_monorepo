@@ -4,6 +4,13 @@ locals {
   sa_piyolog_id           = "sa-${var.name_prefix}"
   sa_piyolog_email        = google_service_account.piyolog.email
 
+  # TODO(PROPOSAL-0009 P1): 共有インスタンスへの移行が完了したら、
+  #   var.cloud_sql_use_shared_instance フラグと専用インスタンス側の分岐
+  #   (google_sql_database_instance.piyolog / 下記三項の `:` 側) を削除し、
+  #   共有インスタンス前提 (data source 直参照) に簡約する。
+  #   対象: 下記 3 つの local + cloud_sql.tf (count ゲート / data source)
+  #         + variables.tf (フラグ変数)。
+
   # 専用 / 共有モードで実際にアタッチするインスタンスを解決する (PROPOSAL-0009 P1)。
   # one(<splat>) は count=0 で null、count=1 で要素を返すため、count 切替時の
   # index out-of-range を避けられる (conditional の非選択側でもエラーにならない)。
