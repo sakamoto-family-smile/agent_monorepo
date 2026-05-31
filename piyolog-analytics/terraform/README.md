@@ -230,6 +230,64 @@ terraform import google_service_account.piyolog \
 
 ---
 
+## Cloud SQL 集約 (PROPOSAL-0009 P1)
+
+piyolog 専用 Cloud SQL インスタンスを廃止し、既存の共有インスタンス
+(`driving-license-bot-pg` 等。`fujisawa_kb_db` も相乗り済み) に piyolog DB / user を
+同居させてコストを下げる手順。**データ移行を伴う**ため計画メンテ時間に実施する。
+
+切替フラグ:
+
+```hcl
+# tfvars
+cloud_sql_use_shared_instance = true
+shared_cloudsql_instance_name = "driving-license-bot-pg"  # 相乗り先の既存 instance 名
+# 集約に合わせて共有インスタンス側 (driving-license-bot/terraform) で:
+#   - tier を db-f1-micro -> db-g1-small 等へ right-size (pgvector + 複数アプリ)
+#   - cloudsql_max_connections を同居アプリ合計に合わせて設定 (既定 100)
+#     目安: 各 Cloud Run の asyncpg プール上限 × 想定インスタンス数の合計
+#           + Cloud SQL システム予約。変更は instance 再起動を伴う。
+```
+
+### 移行手順
+
+```bash
+# 0. 事前バックアップ (旧 piyolog インスタンスのフルダンプ)
+gcloud sql export sql piyolog gs://<backup-bucket>/migrate/piyolog_$(date +%Y%m%d).sql \
+  --database=piyolog --project=$PROJECT
+
+# 1. count 化に伴う state アドレス移動 (専用インスタンスを残したまま add する場合)
+#    フラグ false のままでも resource アドレスが piyolog -> piyolog[0] に変わるため必須。
+terraform state mv 'google_sql_database_instance.piyolog' 'google_sql_database_instance.piyolog[0]'
+
+# 2. フラグを true にして apply
+#    → 共有インスタンスに piyolog DB / user を作成し、専用インスタンスを destroy 対象にする。
+#    まずは plan で「piyolog[0] が destroy / shared に database.user が create」を必ず目視確認。
+terraform plan   # 内容確認 (特に専用インスタンスの destroy)
+terraform apply
+
+# 3. ダンプを共有インスタンスの piyolog DB へ restore
+gcloud sql import sql driving-license-bot-pg \
+  gs://<backup-bucket>/migrate/piyolog_YYYYMMDD.sql --database=piyolog --project=$PROJECT
+
+# 4. Cloud Run を再デプロイ (DATABASE_URL / connection name が共有インスタンス向けに更新済)
+make tf-output env_for_deploy   # PIYOLOG_CLOUD_SQL_INSTANCE が共有 instance を指すことを確認
+# scripts/deploy_cloud_run.sh で再 deploy
+
+# 5. 動作確認後、旧 piyolog インスタンスは即削除せず一定期間 stop で保持 (ロールバック余地)
+```
+
+### ロールバック
+
+`cloud_sql_use_shared_instance = false` に戻して `terraform apply` → 旧インスタンスを start。
+切替直後であれば手順 0 のダンプから restore する。
+
+> **注意**: 共有インスタンス上の DB / user は `deletion_policy = "ABANDON"` を付けてあるため、
+> フラグを戻しても terraform が共有インスタンス上のデータを delete API で消すことはない
+> (誤削除防止)。不要になった `piyolog` DB は psql で手動 DROP する。
+
+---
+
 ## 破壊的変更
 
 - **Cloud SQL**: `cloud_sql_deletion_protection = true` (default) で `terraform destroy` 時にエラーになる。dev では tfvars で false にする
