@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | Implementing |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-05-30 |
-| **Updated** | 2026-05-30 |
+| **Updated** | 2026-05-31 |
 | **Target** | cross-agent (GCP インフラ全体) |
-| **Related PRs** | (none yet) |
+| **Related PRs** | P1: piyolog Cloud SQL 集約 (本ブランチ) |
 | **Supersedes** | — |
 | **Superseded by** | — |
 
@@ -285,3 +285,4 @@ After（Cloud SQL 1 台に集約 + Private IP）
 |---|---|---|
 | 2026-05-30 | Draft | 初稿（Terraform 実構成の調査に基づくコスト削減提案） |
 | 2026-05-30 | Review | レビュー指摘を反映：P2 を「private IP 必須」から「public IP ハードニング優先 / private は任意」に緩和。VPC Connector コスト・到達性リスクを追記 |
+| 2026-05-31 | Implementing (P1) | piyolog Cloud SQL を共有インスタンスへ集約。`cloud_sql_use_shared_instance` フラグで両モード切替（既定 false=後方互換）、移行手順を piyolog-analytics/terraform/README.md に追記 |

@@ -7,6 +7,14 @@
 #     network ingress は閉じている (Cloud SQL Auth Proxy / connector のみ)。
 #   - DB password は random_password で TF が生成 → Secret Manager に流す。
 #   - 削除保護は本番想定で default true。dev は tfvars で false に上書き。
+#
+# PROPOSAL-0009 P1 (コスト集約):
+#   - cloud_sql_use_shared_instance=true で専用インスタンスを作らず、既存の共有
+#     インスタンス (driving-license-bot-pg 等) に piyolog DB / user を相乗りさせる
+#     (fujisawa-platform / fujisawa-info-bot と同じ data 参照パターン)。
+#   - DB / user は deletion_policy=ABANDON。共有インスタンス上のデータを terraform の
+#     delete API で消さず、instance destroy 時に巻き取らせる (誤削除防止)。
+#   - 移行手順 (dump → restore / state mv) は terraform/README.md 参照。
 ################################################################################
 
 resource "random_password" "cloud_sql_db_password" {
@@ -16,7 +24,17 @@ resource "random_password" "cloud_sql_db_password" {
   override_special = "!#$%^&*()-_=+[]{};,.<>?"
 }
 
+# 相乗り先の既存インスタンス (cloud_sql_use_shared_instance=true のときだけ参照)。
+data "google_sql_database_instance" "shared" {
+  count   = var.cloud_sql_use_shared_instance ? 1 : 0
+  project = var.project_id
+  name    = var.shared_cloudsql_instance_name
+}
+
+# 専用インスタンス (cloud_sql_use_shared_instance=false のときだけ作成)。
 resource "google_sql_database_instance" "piyolog" {
+  count = var.cloud_sql_use_shared_instance ? 0 : 1
+
   project          = var.project_id
   name             = local.cloud_sql_instance_name
   region           = var.region
@@ -56,13 +74,18 @@ resource "google_sql_database_instance" "piyolog" {
 
 resource "google_sql_database" "piyolog" {
   project  = var.project_id
-  instance = google_sql_database_instance.piyolog.name
+  instance = local.cloud_sql_instance_ref
   name     = var.cloud_sql_db_name
+
+  # 共有インスタンス上で誤って DB を消さない (instance destroy で巻き取り)。
+  deletion_policy = "ABANDON"
 }
 
 resource "google_sql_user" "piyolog" {
   project  = var.project_id
-  instance = google_sql_database_instance.piyolog.name
+  instance = local.cloud_sql_instance_ref
   name     = var.cloud_sql_db_user
   password = random_password.cloud_sql_db_password.result
+
+  deletion_policy = "ABANDON"
 }

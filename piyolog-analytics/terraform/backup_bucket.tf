@@ -57,8 +57,10 @@ resource "google_storage_bucket" "backups" {
 
 # Cloud SQL instance service account に bucket への objectAdmin。
 # export/import 時に Cloud SQL 側がこの SA で bucket を read/write する。
+# 専用 / 共有モードのどちらでも、実際に使うインスタンスの SA を解決する
+# (PROPOSAL-0009 P1)。
 resource "google_storage_bucket_iam_member" "cloudsql_export_writer" {
   bucket = google_storage_bucket.backups.name
   role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_sql_database_instance.piyolog.service_account_email_address}"
+  member = "serviceAccount:${local.cloud_sql_service_account_email}"
 }

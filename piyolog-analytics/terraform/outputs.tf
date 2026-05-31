@@ -1,11 +1,11 @@
 output "cloud_sql_instance_name" {
-  description = "Cloud SQL instance name."
-  value       = google_sql_database_instance.piyolog.name
+  description = "Cloud SQL instance name (専用 or 共有)。"
+  value       = local.cloud_sql_instance_ref
 }
 
 output "cloud_sql_connection_name" {
   description = "Cloud SQL connection name (project:region:instance). Used by --add-cloudsql-instances."
-  value       = google_sql_database_instance.piyolog.connection_name
+  value       = local.cloud_sql_connection_name
 }
 
 output "cloud_sql_db_name" {
@@ -64,7 +64,7 @@ output "env_for_deploy" {
     PIYOLOG_AR_LOCATION        = var.region
     PIYOLOG_AR_REPO            = google_artifact_registry_repository.piyolog.repository_id
     PIYOLOG_REGION             = var.region
-    PIYOLOG_CLOUD_SQL_INSTANCE = google_sql_database_instance.piyolog.connection_name
+    PIYOLOG_CLOUD_SQL_INSTANCE = local.cloud_sql_connection_name
     PIYOLOG_CLOUD_RUN_SA       = google_service_account.piyolog.email
   }
 }
