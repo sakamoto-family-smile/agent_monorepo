@@ -1,0 +1,60 @@
+name: Claude PR Review
+
+# PR 作成・更新時に Claude が差分をレビューしてコメントする。
+# monorepo なので paths でコード変更時のみ起動し、変更モジュールに集中させる。
+#
+# 必要な設定（Settings > Secrets and variables > Actions > Secrets）:
+#   CLAUDE_CODE_OAUTH_TOKEN
+#     ローカル CLI で `claude setup-token` を実行して取得したトークン。
+#     Pro/Max サブスクリプション枠（2026-06-15 以降は Agent SDK 月次クレジット枠）で動作する。
+#
+# 注意（public repo）:
+#   fork からの PR には Secret が渡らないためレビューは走らない（情報漏洩防止の安全な既定動作）。
+#   同一リポジトリの feat/* ブランチからの PR では正常に動作する。
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - "**/*.py"
+      - "**/pyproject.toml"
+      - "**/uv.lock"
+
+# 追従 push が連続しても最新分のみレビューする（コスト抑制）。
+concurrency:
+  group: claude-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Claude review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write # レビューコメント投稿に必要
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 差分算出のため履歴を全取得
+
+      - name: Claude Code review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            この Pull Request の差分をレビューしてください。
+            monorepo なので、変更されたモジュールに集中して確認します。
+
+            観点:
+            - ロジック / エッジケースのバグ
+            - 入力検証・セキュリティ（外部入力、認証、シークレット混入）
+            - テストカバレッジの不足
+            - 各モジュールの規約・docs（存在すれば CLAUDE.md / README / DESIGN.md）への準拠
+
+            指摘は PR レビューコメントとして日本語で投稿してください。
+            重大度（CRITICAL / HIGH / MEDIUM / LOW）を付け、該当ファイル・行を示してください。
+            問題がなければ、その旨を簡潔にコメントしてください。
+          claude_args: "--max-turns 5 --model claude-sonnet-4-6"
