@@ -1,7 +1,13 @@
 # Phase 2-A1: Cloud SQL Postgres + pgvector の重複検査基盤。
 #
+# PROPOSAL-0009 P1 (コスト集約): この instance はモノレポの **共有 Cloud SQL**。
+#   driving-license-bot 本体 (question_bank) に加え、fujisawa_kb_db (ETL/consumer)、
+#   piyolog (cloud_sql_use_shared_instance=true 時) が同居する。複数アプリ + pgvector の
+#   ため tier 既定を db-g1-small (1.7GB) に引き上げ、max_connections を明示設定している。
+#   tier / max_connections 変更は instance 再起動 (短時間の接続断) を伴う。
+#
 # 設計方針:
-# - PoC: db-f1-micro (shared CPU, 0.6GB RAM)。月 ~$10。本番化時は db-custom-* に。
+# - tier=db-g1-small (共有用)。単独運用に戻すなら db-f1-micro でも可 (cloudsql_tier で変更)。
 # - PUBLIC IP + Cloud SQL Auth Proxy 接続。VPC Connector / Private IP は Phase 3+ に
 #   先送り（INFRASTRUCTURE.md §5）。authorized_networks は既定で空（IP 直接公開はしない）。
 # - SSL `ENCRYPTED_ONLY` で平文接続を拒否。Auth Proxy は内部で TLS を張る。
