@@ -19,7 +19,7 @@ variable "name_prefix" {
 
 # PROPOSAL-0009 P1: Cloud SQL 集約。
 # true にすると piyolog 専用インスタンスを作らず、既存の共有インスタンス
-# (driving-license-bot-pg 等) に piyolog DB / user を相乗りさせる。
+# (共有インスタンス shared-pg) に piyolog DB / user を相乗りさせる。
 # false (既定) は従来どおり専用インスタンスを作成 = 後方互換。
 # 切替はデータ移行 (dump → restore) を伴う。terraform/README.md の移行手順参照。
 # TODO(PROPOSAL-0009 P1): 全環境が共有インスタンスへ移行したら、このフラグと
@@ -33,7 +33,7 @@ variable "cloud_sql_use_shared_instance" {
 
 variable "shared_cloudsql_instance_name" {
   type        = string
-  description = "相乗り先の既存 Cloud SQL instance 名 (例: driving-license-bot-pg)。cloud_sql_use_shared_instance=true のとき必須。"
+  description = "相乗り先の既存 Cloud SQL instance 名 (PROPOSAL-0009 P1: shared-pg)。cloud_sql_use_shared_instance=true のとき必須。"
   default     = ""
 }
 

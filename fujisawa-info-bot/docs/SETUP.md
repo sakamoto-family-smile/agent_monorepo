@@ -14,7 +14,7 @@ Cloud Run Service + LINE Messaging API Channel の **本番デプロイ手順**�
 | docker | (任意) | 直接 build しない場合は不要、 Cloud Build で代替可能 |
 
 - GCP project: `sakamomo-family-agent` (or 任意)
-- fujisawa-platform が同 project にデプロイ済 (Cloud SQL `driving-license-bot-pg` 上の `fujisawa_kb_db` に `pages` テーブルが存在する状態)
+- fujisawa-platform が同 project にデプロイ済 (共有 Cloud SQL `shared-pg` 上の `fujisawa_kb_db` に `pages` テーブルが存在する状態)
 - weekly_crawl が 1 回以上完走済 (pages に row が入っている状態)
 
 ---
@@ -52,7 +52,7 @@ terraform は user を作るだけで、 `GRANT` は別途 psql で流す (propo
 
 ```bash
 # Cloud SQL Auth Proxy 経由で接続
-cloud-sql-proxy sakamomo-family-agent:asia-northeast1:driving-license-bot-pg &
+cloud-sql-proxy sakamomo-family-agent:asia-northeast1:shared-pg &
 
 # pages テーブルに SELECT 権限を付与
 psql "host=127.0.0.1 user=postgres dbname=fujisawa_kb_db" \

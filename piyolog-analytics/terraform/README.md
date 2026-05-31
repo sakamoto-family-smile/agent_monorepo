@@ -233,7 +233,7 @@ terraform import google_service_account.piyolog \
 ## Cloud SQL 集約 (PROPOSAL-0009 P1)
 
 piyolog 専用 Cloud SQL インスタンスを廃止し、既存の共有インスタンス
-(`driving-license-bot-pg` 等。`fujisawa_kb_db` も相乗り済み) に piyolog DB / user を
+(共有インスタンス `shared-pg`。`fujisawa_kb_db` も相乗り済み) に piyolog DB / user を
 同居させてコストを下げる手順。**データ移行を伴う**ため計画メンテ時間に実施する。
 
 切替フラグ:
@@ -241,7 +241,7 @@ piyolog 専用 Cloud SQL インスタンスを廃止し、既存の共有イン�
 ```hcl
 # tfvars
 cloud_sql_use_shared_instance = true
-shared_cloudsql_instance_name = "driving-license-bot-pg"  # 相乗り先の既存 instance 名
+shared_cloudsql_instance_name = "shared-pg"  # 相乗り先の共有 instance 名
 # 集約に合わせて共有インスタンス側 (driving-license-bot/terraform) で:
 #   - tier を db-f1-micro -> db-g1-small 等へ right-size (pgvector + 複数アプリ)
 #   - cloudsql_max_connections を同居アプリ合計に合わせて設定 (既定 100)
@@ -267,7 +267,7 @@ terraform plan   # 内容確認 (特に専用インスタンスの destroy)
 terraform apply
 
 # 3. ダンプを共有インスタンスの piyolog DB へ restore
-gcloud sql import sql driving-license-bot-pg \
+gcloud sql import sql shared-pg \
   gs://<backup-bucket>/migrate/piyolog_YYYYMMDD.sql --database=piyolog --project=$PROJECT
 
 # 4. Cloud Run を再デプロイ (DATABASE_URL / connection name が共有インスタンス向けに更新済)

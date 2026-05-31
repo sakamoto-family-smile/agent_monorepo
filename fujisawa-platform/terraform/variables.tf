@@ -21,7 +21,7 @@ variable "name_prefix" {
 
 variable "shared_cloudsql_instance_name" {
   type        = string
-  description = "既存の Cloud SQL Postgres instance 名 (driving-license-bot の例: driving-license-bot-pg)。fujisawa_kb_db DB はこの instance に追加される。"
+  description = "既存の共有 Cloud SQL Postgres instance 名 (PROPOSAL-0009 P1: shared-pg)。fujisawa_kb_db DB はこの instance に追加される。"
 }
 
 variable "shared_cloudsql_instance_connection_name" {

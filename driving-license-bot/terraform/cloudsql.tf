@@ -18,7 +18,7 @@
 #   Secret Manager に手動投入 + lifecycle で random を切り離す運用に変更。
 #
 # 接続情報（apply 後）:
-#   instance_connection_name = "${PROJECT}:${REGION}:${var.name_prefix}-pg"
+#   instance_connection_name = "${PROJECT}:${REGION}:${var.cloudsql_instance_name}"  # 既定 shared-pg
 #   database = "question_bank"
 #   user     = "app"
 #   password = `gcloud secrets versions access latest --secret=driving-license-bot-cloudsql-password`
