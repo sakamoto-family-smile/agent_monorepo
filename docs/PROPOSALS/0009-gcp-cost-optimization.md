@@ -95,6 +95,50 @@ Cloud SQL** であり、現在 **2 インスタンス**（`driving-license-bot-p
 Auth Proxy 経由のみ許可、SSL 必須化、IAM DB 認証）で大半の安全性を**ほぼ無償**で確保する。private IP 化は
 セキュリティ要件が上がった将来フェーズで、VPC コストと天秤にかけて判断する（**コスト削減の主役は P1/P3/P4**）。
 
+#### P1 補足：共有インスタンスの命名（`driving-license-bot-pg` → `shared-pg`）
+
+**決定（2026-05-31）**: 共有 Cloud SQL のインスタンス名を `driving-license-bot-pg` から **`shared-pg`** に変更する。
+
+- **理由**: 現状の共有先は歴史的経緯で driving-license-bot 由来の名前だが、実態は
+  driving_license / fujisawa_kb_db / piyolog が同居する **モノレポ横断の共有インスタンス**。
+  名前と役割が一致しないため、中立的な `shared-pg` に改名する。
+- **connection name**: `<project>:asia-northeast1:shared-pg` になる。
+
+**重要 — これは「リネーム」ではなく「インスタンス再生成（作り直し）」**:
+
+Cloud SQL のインスタンス `name` は **作成後に変更不可**。Terraform で `name` を変えると
+プランは **旧インスタンス destroy → 新名称で create** になる（in-place rename は存在しない）。
+したがって本変更は実質「新インスタンス作成 + 全 DB 移行 + 切替 + 旧インスタンス削除」であり、
+**P1 の piyolog 集約（dump→restore）を、3 つの DB をまとめて新インスタンスへ行う形**になる。
+
+影響範囲（`driving-license-bot-pg` をハードコード/参照している箇所）:
+
+| 種別 | 箇所 |
+|---|---|
+| 名前生成 | `driving-license-bot/terraform/locals.tf` の `cloudsql_instance_name`（`${name_prefix}-pg` → 専用 var 化が必要） |
+| 相乗り参照 | `fujisawa-platform` / `fujisawa-info-bot` / `piyolog-analytics` の `shared_cloudsql_instance_name` と `*.tfvars.example` の connection name |
+| ドキュメント | 各 `terraform/README.md` / `docs/SETUP.md` / 本 proposal の Before/After |
+
+> `driving-license-bot` の他リソース名は `name_prefix="driving-license-bot"` 由来のまま据え置き、
+> **Cloud SQL instance 名だけを専用変数（例 `cloudsql_instance_name`、既定 `shared-pg`）に分離**して
+> 切り出すのが最小差分。`${name_prefix}-pg` への暗黙依存を断つ。
+
+**移行ステップ（実装 PR で詳細化、本 proposal では方針のみ）**:
+
+1. 3 DB すべてをバックアップ（`gcloud sql export sql`：question_bank / fujisawa_kb_db / piyolog）。
+2. 新インスタンス `shared-pg`（db-g1-small, max_connections=100）を作成。
+3. 3 DB を `shared-pg` へ import、pgvector 拡張・各 user / GRANT を再作成。
+4. 全 consumer（driving-license-bot / fujisawa-platform / fujisawa-info-bot / piyolog）の
+   `shared_cloudsql_instance_name` と connection name を `shared-pg` に更新し、Cloud Run / Job を再デプロイ。
+5. 動作確認後、旧 `driving-license-bot-pg` は即削除せず一定期間 stop で保持（ロールバック余地）。
+
+> **ロールバック**: consumer の connection name を旧 `driving-license-bot-pg` に戻して再デプロイ、
+> stop 中の旧インスタンスを start。切替直後ならステップ 1 のバックアップから復旧。
+>
+> **ステータス**: 命名を `shared-pg` に決定（意思決定のみ）。実装は別 PR（P1 の続き）。
+> P1 の piyolog 集約（#182）と driving-license-bot の right-size（#183）が先行し、本改名は
+> それらの上に乗せて 1 度の移行メンテで実施するのが望ましい。
+
 ### 3.1 User Stories
 
 #### 3.1.1 ストーリー 1
@@ -277,6 +321,16 @@ After（Cloud SQL 1 台に集約 + Private IP）
 - 却下理由: LINE Bot は 24h 受信し得るため本番 DB の stop は不可。dev インスタンスには有効なので
   「開発用のみ stop 運用」は補助施策として併用可。
 
+### 共有インスタンスの命名に関する代替案
+
+- **案 N1: `driving-license-bot-pg` のまま共有（改名しない）**
+  - 概要: 既存インスタンスをそのまま共有先として使い続ける。追加作業ゼロ・無停止。
+  - 却下理由: 全システム共有なのに名前が 1 エージェント由来で、実態とズレる。命名の妥当性を優先し改名する。
+- **案 N2（採用）: `shared-pg` へ改名（= 新インスタンス作成 + 全 DB 移行）**
+  - 概要: 中立名の新インスタンスを作り、3 DB を移行して切替。
+  - 採用理由: 命名が実態に合う。移行コストは P1 集約と同じ「dump→restore」を一度にまとめて実施できる。
+  - 留意: Cloud SQL は in-place rename 不可のため再生成になる（3.1 P1 補足参照）。
+
 ---
 
 ## 8. Implementation History
@@ -287,3 +341,4 @@ After（Cloud SQL 1 台に集約 + Private IP）
 | 2026-05-30 | Review | レビュー指摘を反映：P2 を「private IP 必須」から「public IP ハードニング優先 / private は任意」に緩和。VPC Connector コスト・到達性リスクを追記 |
 | 2026-05-31 | Implementing (P1) | piyolog Cloud SQL を共有インスタンスへ集約。`cloud_sql_use_shared_instance` フラグで両モード切替（既定 false=後方互換）、移行手順を piyolog-analytics/terraform/README.md に追記 |
 | 2026-05-31 | Implementing (P1) | 共有先 (driving-license-bot) を right-size: tier 既定を db-f1-micro → db-g1-small、max_connections を明示設定済。集約有効化の前提を満たす |
+| 2026-05-31 | Decision (P1) | 共有インスタンス名を `driving-license-bot-pg` → **`shared-pg`** に改名すると決定（命名の妥当性優先）。Cloud SQL は in-place rename 不可のため**インスタンス再生成 + 全 DB 移行**になる。本コミットは意思決定の記録のみ（実装は別 PR、3.1 P1 補足に方針記載） |
