@@ -13,7 +13,7 @@ Phase 1 最小公開（30 問のシードプールで動く LINE Bot）+ Phase 2
 | Secret Manager | `driving-license-bot-line-channel-secret` / `-access-token` / `-line-login-channel-secret` / `-operator-line-user-ids` の 4 枠（値は手動投入）+ `-cloudsql-password` の 1 枠（terraform が `random_password` で投入） |
 | Artifact Registry | `driving-license-bot` Docker repo |
 | Cloud Run | `driving-license-bot-line-bot` service / **`driving-license-bot-admin-ui` service (IAP 直接適用)** / `driving-license-bot-batch` Cloud Run Job (image を指定したときのみ deploy) |
-| Cloud SQL | `driving-license-bot-pg` (Postgres 15, db-f1-micro, asia-northeast1) + `question_bank` database + `app` user |
+| Cloud SQL | `shared-pg` (Postgres 15, db-g1-small, asia-northeast1) + `question_bank` database + `app` user。**モノレポ横断の共有インスタンス** (PROPOSAL-0009 P1: fujisawa_kb_db / piyolog も同居) |
 | Workflows | `driving-license-bot-generation-pipeline` (workflows/generation_pipeline.yaml を埋め込み) |
 | Scheduler | `driving-license-bot-batch-nightly` (cron 02:00 JST) |
 | **IAP** | **`google_iap_web_cloud_run_service_iam_member` で `review_admin_allowed_emails` に `roles/iap.httpsResourceAccessor` 付与** |
@@ -128,6 +128,46 @@ cd terraform && terraform output line_bot_webhook_url
 
 これを LINE Developers Console の Webhook URL に貼り付けて Verify。
 
+## Cloud SQL instance 名の変更 / shared-pg リネーム（PROPOSAL-0009 P1）
+
+この Cloud SQL は **モノレポ横断の共有インスタンス**（driving_license + `fujisawa_kb_db` + piyolog が同居）。
+instance 名は `var.cloudsql_instance_name`（既定 **`shared-pg`**）で制御する。
+
+> **⚠️ Cloud SQL は instance 名を後から変更できない。** `var.cloudsql_instance_name` を変えると
+> Terraform plan は **旧 instance destroy → 新名称で create** になる（in-place rename は無い）。
+> つまり「**新インスタンス作成 + 全 DB 移行 + 切替 + 旧削除**」であり、無停止ではない。
+
+### 旧 `driving-license-bot-pg` から `shared-pg` への移行手順（概要）
+
+```bash
+# 0. 3 DB すべてをバックアップ
+for db in question_bank fujisawa_kb_db piyolog; do
+  gcloud sql export sql driving-license-bot-pg \
+    gs://<backup-bucket>/migrate/${db}_$(date +%Y%m%d).sql --database=$db --project=$PROJECT
+done
+
+# 1. shared-pg を作成（cloudsql_instance_name 既定 shared-pg のまま apply）。
+#    plan で「driving-license-bot-pg を destroy / shared-pg を create」を必ず目視確認。
+#    旧 instance を残したい場合は deletion_protection=true のままにして手動運用にする。
+make tf-plan
+make tf-apply
+
+# 2. 3 DB を shared-pg へ restore（pgvector 拡張・各 user / GRANT を再作成）
+for db in question_bank fujisawa_kb_db piyolog; do
+  gcloud sql import sql shared-pg \
+    gs://<backup-bucket>/migrate/${db}_YYYYMMDD.sql --database=$db --project=$PROJECT
+done
+
+# 3. consumer 側 (fujisawa-platform / fujisawa-info-bot / piyolog-analytics) の
+#    shared_cloudsql_instance_name / connection name を shared-pg に更新して apply + 再デプロイ。
+#    （本リポジトリの *.tfvars.example は既に shared-pg に更新済）
+
+# 4. 全サービス動作確認後、旧 driving-license-bot-pg は即削除せず一定期間 stop で保持。
+```
+
+**ロールバック**: `cloudsql_instance_name = "driving-license-bot-pg"` に戻して apply、consumer も旧名へ戻す。
+stop 中の旧インスタンスを start。切替直後ならステップ 0 のバックアップから復旧。
+
 ## Teardown（2 モード）
 
 | モード | 残るもの | CI plan | 用途 |
@@ -146,7 +186,7 @@ make teardown-app
 - Firestore database
 - Artifact Registry repo + image
 - `sa-line-bot` SA + IAM 3 件
-- **Cloud SQL instance (`driving-license-bot-pg`)** ← 月 ~$10 を停止するため
+- **Cloud SQL instance (`shared-pg`)** ← 共有インスタンスを停止するため (fujisawa / piyolog も停止する点に注意)
 
 残るもの:
 - WIF / `sa-terraform-plan` / tfstate バケット / 有効化済み API（実質無料）

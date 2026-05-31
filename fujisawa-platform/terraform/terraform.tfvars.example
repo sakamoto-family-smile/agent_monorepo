@@ -6,8 +6,8 @@ region     = "asia-northeast1"
 
 # driving-license-bot で作成済の Cloud SQL instance を共有する (proposal §4.5)。
 # 値は `gcloud sql instances list --project=<project_id>` で確認可能。
-shared_cloudsql_instance_name            = "driving-license-bot-pg"
-shared_cloudsql_instance_connection_name = "sakamoto-family-agent:asia-northeast1:driving-license-bot-pg"
+shared_cloudsql_instance_name            = "shared-pg"
+shared_cloudsql_instance_connection_name = "sakamoto-family-agent:asia-northeast1:shared-pg"
 
 # PdfArchive bucket は ASIA-NORTHEAST1 single region (コスト最小)
 pdf_archive_bucket_location           = "ASIA-NORTHEAST1"

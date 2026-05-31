@@ -10,7 +10,7 @@
 #
 # PROPOSAL-0009 P1 (コスト集約):
 #   - cloud_sql_use_shared_instance=true で専用インスタンスを作らず、既存の共有
-#     インスタンス (driving-license-bot-pg 等) に piyolog DB / user を相乗りさせる
+#     インスタンス (共有 shared-pg) に piyolog DB / user を相乗りさせる
 #     (fujisawa-platform / fujisawa-info-bot と同じ data 参照パターン)。
 #   - DB / user は deletion_policy=ABANDON。共有インスタンス上のデータを terraform の
 #     delete API で消さず、instance destroy 時に巻き取らせる (誤削除防止)。

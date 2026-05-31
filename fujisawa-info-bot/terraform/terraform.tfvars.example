@@ -6,8 +6,8 @@ project_id = "sakamomo-family-agent"
 region     = "asia-northeast1"
 
 # fujisawa-platform が同 instance を利用中
-shared_cloudsql_instance_name            = "driving-license-bot-pg"
-shared_cloudsql_instance_connection_name = "sakamomo-family-agent:asia-northeast1:driving-license-bot-pg"
+shared_cloudsql_instance_name            = "shared-pg"
+shared_cloudsql_instance_connection_name = "sakamomo-family-agent:asia-northeast1:shared-pg"
 
 # 初回 apply は image="" でリソース基盤 (SA / IAM / secrets / Artifact Registry)
 # だけ作る。 Cloud Build で image push 後、 2 回目 apply で Cloud Run Service を

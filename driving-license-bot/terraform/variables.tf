@@ -96,6 +96,12 @@ variable "deletion_protection" {
 
 # ---- Cloud SQL Postgres + pgvector (Phase 2-A) ----
 
+variable "cloudsql_instance_name" {
+  type        = string
+  description = "Cloud SQL instance 名。モノレポ横断の共有インスタンス (PROPOSAL-0009 P1: driving_license + fujisawa_kb_db + piyolog が同居) のため、name_prefix から切り離した中立名にする。consumer 側の shared_cloudsql_instance_name とこの値を一致させること。NOTE: Cloud SQL は instance 名を後から変更できない。この値を変えると instance の再生成 (destroy → create) + 全 DB 移行が必要 (terraform/README.md 参照)。"
+  default     = "shared-pg"
+}
+
 variable "cloudsql_tier" {
   type        = string
   description = "Cloud SQL machine tier。この instance は共有 (PROPOSAL-0009 P1: driving-license-bot + fujisawa_kb_db + piyolog が同居)。pgvector + 複数アプリのため db-g1-small (1.7GB) を既定とする。単独運用に戻すなら db-f1-micro でも可。本番増強は db-custom-* へ。"

@@ -26,7 +26,9 @@ locals {
   secret_cloudsql_password = "${var.name_prefix}-cloudsql-password"
 
   # Phase 2-A1: Cloud SQL instance 名と DB / user 名
-  cloudsql_instance_name = "${var.name_prefix}-pg"
+  # PROPOSAL-0009 P1: instance 名は共有用の中立名 (var.cloudsql_instance_name, 既定 shared-pg)。
+  # name_prefix への暗黙依存を断ち、consumer の shared_cloudsql_instance_name と揃える。
+  cloudsql_instance_name = var.cloudsql_instance_name
   cloudsql_database_name = "question_bank"
   cloudsql_user_name     = "app"
 

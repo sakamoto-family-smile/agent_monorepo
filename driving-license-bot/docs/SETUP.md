@@ -161,7 +161,7 @@ gcloud workflows execute driving-license-bot-generation-pipeline \\
 
 Phase 2-A1 で **Terraform 化済**。`make tf-apply` で以下が自動作成される:
 
-- Cloud SQL Postgres 15 instance: `driving-license-bot-pg` (db-f1-micro, asia-northeast1)
+- Cloud SQL Postgres 15 instance: `shared-pg` (db-g1-small, asia-northeast1。PROPOSAL-0009 P1 の共有インスタンス)
 - Database: `question_bank`
 - User: `app` (password は `random_password` で生成され `driving-license-bot-cloudsql-password`
   Secret Manager に格納)
@@ -219,7 +219,7 @@ make cloudsql-verify     # add → find_similar → count → cleanup の smoke
 
 ```bash
 QUESTION_BANK_BACKEND=pgvector
-CLOUDSQL_INSTANCE_CONNECTION_NAME=$GOOGLE_CLOUD_PROJECT:asia-northeast1:driving-license-bot-pg
+CLOUDSQL_INSTANCE_CONNECTION_NAME=$GOOGLE_CLOUD_PROJECT:asia-northeast1:shared-pg
 CLOUDSQL_DB=question_bank
 CLOUDSQL_USER=app
 CLOUDSQL_HOST=127.0.0.1   # Cloud SQL Auth Proxy 経由（Cloud Run では unix socket 使用）
