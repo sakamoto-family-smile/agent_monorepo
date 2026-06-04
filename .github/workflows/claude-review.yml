@@ -11,6 +11,10 @@ name: Claude PR Review
 # 注意（public repo）:
 #   fork からの PR には Secret が渡らないためレビューは走らない（情報漏洩防止の安全な既定動作）。
 #   同一リポジトリの feat/* ブランチからの PR では正常に動作する。
+#
+# CLAUDE_CODE_OAUTH_TOKEN 未設定時:
+#   precheck ジョブが Secret の有無を判定し、未設定なら review ジョブを丸ごとスキップする。
+#   PR チェックは赤（失敗）ではなくグレー（Skipped）表示になり、ノイズにならない。
 
 on:
   pull_request:
@@ -27,8 +31,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Secret の有無を判定する軽量ジョブ。job-level の if からは secrets を直接
+  # 参照できないため、ここで output に逃がして review ジョブを gate する。
+  precheck:
+    name: Check token
+    runs-on: ubuntu-latest
+    outputs:
+      has_token: ${{ steps.check.outputs.has_token }}
+    steps:
+      - name: Check CLAUDE_CODE_OAUTH_TOKEN presence
+        id: check
+        env:
+          CLAUDE_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$CLAUDE_TOKEN" ]; then
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::CLAUDE_CODE_OAUTH_TOKEN 未設定のため Claude review をスキップします"
+          else
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          fi
+
   review:
     name: Claude review
+    needs: precheck
+    if: needs.precheck.outputs.has_token == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
