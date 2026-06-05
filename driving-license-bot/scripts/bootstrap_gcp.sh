@@ -10,7 +10,7 @@
 # Project Owner 相当のアカウントで `gcloud auth login` 済みであること。
 #
 # 使い方:
-#   GOOGLE_CLOUD_PROJECT=sakamoto-family-agent ./scripts/bootstrap_gcp.sh
+#   GOOGLE_CLOUD_PROJECT=sakamomo-family-agent ./scripts/bootstrap_gcp.sh
 
 set -euo pipefail
 

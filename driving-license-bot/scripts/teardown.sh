@@ -12,7 +12,7 @@
 #   - LINE 側の Webhook URL を解除するのは Console で手動対応
 #
 # 使い方:
-#   GOOGLE_CLOUD_PROJECT=sakamoto-family-agent ./scripts/teardown.sh
+#   GOOGLE_CLOUD_PROJECT=sakamomo-family-agent ./scripts/teardown.sh
 #   GOOGLE_CLOUD_PROJECT=... PURGE_STATE=true ./scripts/teardown.sh   # tfstate も消す
 
 set -euo pipefail

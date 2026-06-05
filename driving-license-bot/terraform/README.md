@@ -30,7 +30,7 @@ Phase 1 最小公開（30 問のシードプールで動く LINE Bot）+ Phase 2
 ## 前提
 
 - gcloud CLI 認証済み（`gcloud auth login`、Project Owner 相当）
-- GCP プロジェクト作成済み（例: `sakamoto-family-agent`）
+- GCP プロジェクト作成済み（例: `sakamomo-family-agent`）
 - terraform >= 1.7
 
 ## 使い方
@@ -64,7 +64,7 @@ GOOGLE_CLOUD_PROJECT=other-project make bootstrap
 $EDITOR terraform/terraform.tfvars
 ```
 
-最低限 `project_id` のみ設定すれば動きます（既定値が `sakamoto-family-agent`）。
+最低限 `project_id` のみ設定すれば動きます（既定値が `sakamomo-family-agent`）。
 
 ### 3. 基盤を作る（image なしで apply）
 
@@ -110,7 +110,7 @@ push 完了後、`asia-northeast1-docker.pkg.dev/${PROJECT}/driving-license-bot/
 `terraform.tfvars` の `line_bot_image` をコメント解除して埋める:
 
 ```hcl
-line_bot_image = "asia-northeast1-docker.pkg.dev/sakamoto-family-agent/driving-license-bot/line-bot:latest"
+line_bot_image = "asia-northeast1-docker.pkg.dev/sakamomo-family-agent/driving-license-bot/line-bot:latest"
 ```
 
 再 apply:
@@ -251,7 +251,7 @@ PR ごとに自動で plan が走ります。
 ```hcl
 enable_wif     = true
 github_repo    = "sakamoto-family-smile/agent_monorepo"
-tfstate_bucket = "sakamoto-family-agent-driving-license-bot-tfstate"
+tfstate_bucket = "sakamomo-family-agent-driving-license-bot-tfstate"
 ```
 
 apply:
@@ -280,9 +280,9 @@ cd terraform && terraform output -json wif_setup_summary
 ```json
 {
   "WIF_PROVIDER":   "projects/123456789/locations/global/workloadIdentityPools/github-actions-pool/providers/github",
-  "TF_PLAN_SA":     "sa-terraform-plan@sakamoto-family-agent.iam.gserviceaccount.com",
-  "TFSTATE_BUCKET": "sakamoto-family-agent-driving-license-bot-tfstate",
-  "GCP_PROJECT_ID": "sakamoto-family-agent"
+  "TF_PLAN_SA":     "sa-terraform-plan@sakamomo-family-agent.iam.gserviceaccount.com",
+  "TFSTATE_BUCKET": "sakamomo-family-agent-driving-license-bot-tfstate",
+  "GCP_PROJECT_ID": "sakamomo-family-agent"
 }
 ```
 
@@ -294,7 +294,7 @@ GitHub の `Settings > Secrets and variables > Actions > Variables` で
 | `WIF_PROVIDER` | `projects/.../providers/github` |
 | `TF_PLAN_SA` | `sa-terraform-plan@...` |
 | `TFSTATE_BUCKET` | tfstate バケット名 |
-| `GCP_PROJECT_ID` | `sakamoto-family-agent` |
+| `GCP_PROJECT_ID` | `sakamomo-family-agent` |
 
 #### 3. 動作確認
 

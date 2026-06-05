@@ -11,7 +11,7 @@ GCP 上で公開する手順。すべて Terraform 駆動で、`make teardown` �
 ## 全体像
 
 ```
-1. GCP プロジェクト準備 (sakamoto-family-agent)
+1. GCP プロジェクト準備 (sakamomo-family-agent)
         ▼
 2. ブートストラップ (tfstate バケット + base API)        ← scripts/bootstrap_gcp.sh
         ▼
@@ -36,17 +36,17 @@ make teardown   # → image purge → terraform destroy → secret 削除
 
 ## 1. GCP プロジェクト準備
 
-すでに `sakamoto-family-agent` を作成済み前提。billing が紐づいているか確認:
+すでに `sakamomo-family-agent` を作成済み前提。billing が紐づいているか確認:
 
 ```bash
-gcloud billing projects describe sakamoto-family-agent
+gcloud billing projects describe sakamomo-family-agent
 ```
 
 `gcloud auth login` でオーナー相当のアカウントでログイン:
 
 ```bash
 gcloud auth login
-gcloud config set project sakamoto-family-agent
+gcloud config set project sakamomo-family-agent
 ```
 
 ---
@@ -68,7 +68,7 @@ GOOGLE_CLOUD_PROJECT=other-project make bootstrap
 ```
 
 このコマンドが:
-- `gs://sakamoto-family-agent-driving-license-bot-tfstate` バケット作成（versioning 有効）
+- `gs://sakamomo-family-agent-driving-license-bot-tfstate` バケット作成（versioning 有効）
 - `terraform/backend.tf` 自動生成
 - 必須 base API（serviceusage / cloudresourcemanager / iam）有効化
 - `terraform/terraform.tfvars` をサンプルから生成
@@ -76,7 +76,7 @@ GOOGLE_CLOUD_PROJECT=other-project make bootstrap
 完了後、`terraform/terraform.tfvars` を確認:
 
 ```hcl
-project_id  = "sakamoto-family-agent"
+project_id  = "sakamomo-family-agent"
 region      = "asia-northeast1"
 name_prefix = "driving-license-bot"
 # line_bot_image = ""  ← 初回はこのまま空に
@@ -99,7 +99,7 @@ make tf-apply
 | 種別 | リソース |
 |---|---|
 | API 有効化 | run / cloudbuild / artifactregistry / firestore / secretmanager / iam / iamcredentials / logging / monitoring |
-| SA | `sa-line-bot@sakamoto-family-agent.iam.gserviceaccount.com` |
+| SA | `sa-line-bot@sakamomo-family-agent.iam.gserviceaccount.com` |
 | Firestore | `(default)` database (asia-northeast1, native) |
 | Secret 枠 | 4 件（値はまだ空） |
 | Artifact Registry | `driving-license-bot` Docker repo |
@@ -163,8 +163,8 @@ make image-build
 ```
 
 完了後、以下の image が利用可能:
-- `asia-northeast1-docker.pkg.dev/sakamoto-family-agent/driving-license-bot/line-bot:<SHORT_SHA>`
-- `asia-northeast1-docker.pkg.dev/sakamoto-family-agent/driving-license-bot/line-bot:latest`
+- `asia-northeast1-docker.pkg.dev/sakamomo-family-agent/driving-license-bot/line-bot:<SHORT_SHA>`
+- `asia-northeast1-docker.pkg.dev/sakamomo-family-agent/driving-license-bot/line-bot:latest`
 
 ---
 
@@ -173,7 +173,7 @@ make image-build
 `terraform/terraform.tfvars` を編集:
 
 ```hcl
-line_bot_image = "asia-northeast1-docker.pkg.dev/sakamoto-family-agent/driving-license-bot/line-bot:latest"
+line_bot_image = "asia-northeast1-docker.pkg.dev/sakamomo-family-agent/driving-license-bot/line-bot:latest"
 ```
 
 再 apply:

@@ -665,9 +665,9 @@ jobs:
   #   WIF_PROVIDER    Workload Identity Provider のフル resource name
   #                   例: projects/123/locations/global/workloadIdentityPools/github-actions-pool/providers/github
   #   TF_PLAN_SA      plan 用 SA email
-  #                   例: sa-terraform-plan@sakamoto-family-agent.iam.gserviceaccount.com
+  #                   例: sa-terraform-plan@sakamomo-family-agent.iam.gserviceaccount.com
   #   TFSTATE_BUCKET  tfstate を持つ GCS バケット名
-  #                   例: sakamoto-family-agent-driving-license-bot-tfstate
+  #                   例: sakamomo-family-agent-driving-license-bot-tfstate
   #   GCP_PROJECT_ID  対象 project id
   #
   # vars が未設定 / 空ならジョブごとスキップ（PR は通る）。
