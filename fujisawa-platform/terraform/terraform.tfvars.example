@@ -1,13 +1,13 @@
 # `terraform.tfvars` を作成する際は本ファイルを copy して値を埋めること。
 # `terraform.tfvars` は git ignore 対象 (gitignore でなくとも、機密含む可能性のため commit しないこと)。
 
-project_id = "sakamoto-family-agent"
+project_id = "sakamomo-family-agent"
 region     = "asia-northeast1"
 
 # driving-license-bot で作成済の Cloud SQL instance を共有する (proposal §4.5)。
 # 値は `gcloud sql instances list --project=<project_id>` で確認可能。
 shared_cloudsql_instance_name            = "shared-pg"
-shared_cloudsql_instance_connection_name = "sakamoto-family-agent:asia-northeast1:shared-pg"
+shared_cloudsql_instance_connection_name = "sakamomo-family-agent:asia-northeast1:shared-pg"
 
 # PdfArchive bucket は ASIA-NORTHEAST1 single region (コスト最小)
 pdf_archive_bucket_location           = "ASIA-NORTHEAST1"
@@ -32,7 +32,7 @@ vertex_location = "us-central1"
 
 # Docker image URI。空文字列なら Cloud Run Jobs と Scheduler を deploy しない。
 # 初回は空のまま apply → image を build/push → ここに URI を埋めて再 apply。
-# 例: "asia-northeast1-docker.pkg.dev/sakamoto-family-agent/fujisawa-etl/fujisawa-etl:<sha>"
+# 例: "asia-northeast1-docker.pkg.dev/sakamomo-family-agent/fujisawa-etl/fujisawa-etl:<sha>"
 etl_image = ""
 
 # Job スペック

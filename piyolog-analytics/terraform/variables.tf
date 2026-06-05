@@ -35,6 +35,13 @@ variable "shared_cloudsql_instance_name" {
   type        = string
   description = "相乗り先の既存 Cloud SQL instance 名 (PROPOSAL-0009 P1: shared-pg)。cloud_sql_use_shared_instance=true のとき必須。"
   default     = ""
+
+  # 共有モード有効時に名前未指定だと data source 解決に失敗し、原因の分かりにくい
+  # apply エラーになる。事前に明示エラーで弾く (Terraform 1.9+ のクロス変数 validation)。
+  validation {
+    condition     = !var.cloud_sql_use_shared_instance || trimspace(var.shared_cloudsql_instance_name) != ""
+    error_message = "cloud_sql_use_shared_instance=true のとき shared_cloudsql_instance_name は必須です (例: shared-pg)。"
+  }
 }
 
 variable "cloud_sql_tier" {
