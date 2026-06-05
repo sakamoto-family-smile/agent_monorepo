@@ -343,3 +343,5 @@ After（Cloud SQL 1 台に集約 + Private IP）
 | 2026-05-31 | Implementing (P1) | 共有先 (driving-license-bot) を right-size: tier 既定を db-f1-micro → db-g1-small、max_connections を明示設定済。集約有効化の前提を満たす |
 | 2026-05-31 | Decision (P1) | 共有インスタンス名を `driving-license-bot-pg` → **`shared-pg`** に改名すると決定（命名の妥当性優先）。Cloud SQL は in-place rename 不可のため**インスタンス再生成 + 全 DB 移行**になる。本コミットは意思決定の記録のみ（実装は別 PR、3.1 P1 補足に方針記載） |
 | 2026-05-31 | Implementing (P1) | `shared-pg` 改名を実装。driving-license-bot に `cloudsql_instance_name`（既定 shared-pg）を追加し name_prefix 依存を分離、consumer (fujisawa×2 / piyolog) の tfvars.example・変数説明・docs を `shared-pg` に更新、移行 runbook を driving-license-bot/terraform/README.md に追記 |
+| 2026-06-05 | Implementing (P1) | 実移行前の repo 仕上げ: piyolog tfvars.example の集約変数追記・region 修正、`shared_cloudsql_instance_name` 必須の cross-var validation 追加、fujisawa-platform tfvars.example の project 名タイポ修正（sakamoto→sakamomo）。本番未実行 |
+| 2026-06-05 | Runbook (P1) | 案②（`shared-pg` 改名・完全準拠）の実行手順書を確定（実環境ファクト反映・未実行）。`docs/PROPOSALS/notes/proposal-0009-p1-shared-pg-migration-2026-06-05.md` |

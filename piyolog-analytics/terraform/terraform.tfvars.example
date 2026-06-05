@@ -8,7 +8,8 @@
 ################################################################################
 
 # 推奨デフォルト (必要に応じて上書き)
-region      = "us-central1"
+# region は実デプロイ・共有インスタンス (shared-pg) と揃えて asia-northeast1。
+region      = "asia-northeast1"
 name_prefix = "piyolog"
 
 # Cloud SQL 構成 (家族用は db-f1-micro / ZONAL で月 ~$10)
@@ -22,6 +23,13 @@ name_prefix = "piyolog"
 
 # 開発環境では false にしないと `terraform destroy` で消せない (本番は true 推奨)
 cloud_sql_deletion_protection = true
+
+# ---- PROPOSAL-0009 P1: Cloud SQL 集約 ----
+# 専用 piyolog インスタンスをやめて共有インスタンス (shared-pg) に相乗りする場合に true。
+# 切替はデータ移行 (dump → restore) を伴う。terraform/README.md の移行手順参照。
+# true のときは shared_cloudsql_instance_name が必須 (variables.tf の validation で検証)。
+# cloud_sql_use_shared_instance = true
+# shared_cloudsql_instance_name = "shared-pg"
 
 # Artifact Registry
 # ar_repo_name = "piyolog-analytics"
