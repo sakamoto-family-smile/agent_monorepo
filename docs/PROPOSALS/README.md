@@ -72,7 +72,8 @@ docs/PROPOSALS/NNNN-short-kebab-title.md
 | [0006](0006-edinet-integration.md) | EDINET 統合 (金融庁開示書類で stock-analysis-agent を強化) | stock-analysis-agent + edinet-client (新規) | Implemented |
 | [0007](0007-paper-qa-agent.md) | 論文検索 QA エージェント + 共通基盤 paper-platform | paper-qa-agent (新規) + paper-platform (新規 cross-agent) | Draft |
 | [0008](0008-llm-security-lab.md) | OWASP LLM Top 10 体験学習ラボ llm-security-lab | llm-security-lab (新規教材) | Draft |
-| [0009](0009-gcp-cost-optimization.md) | GCP コスト最適化（Cloud SQL 集約ほか） | cross-agent (GCP インフラ全体) | Draft |
+| [0009](0009-gcp-cost-optimization.md) | GCP コスト最適化（Cloud SQL 集約ほか） | cross-agent (GCP インフラ全体) | Implementing |
+| [0010](0010-analytics-platform-phase5-event-persistence.md) | analytics-platform Phase 5 完遂（本番イベントの GCS 永続化） | cross-agent (analytics-platform + 稼働中エージェント) | Draft |
 
 新しい提案を作るたびに上記表に 1 行追加する (forget-me-not)。
 
