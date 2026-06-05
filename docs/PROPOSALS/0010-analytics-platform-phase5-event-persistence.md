@@ -129,6 +129,32 @@ After（案B: in-process uploader）
     payload(8KB+) → GCSPayloadWriter → gs://<bucket>/payloads/...
 ```
 
+#### 環境別の格納先（local / cloud）と切替
+
+イベントの格納先は **稼働環境ではなく `ANALYTICS_STORAGE_BACKEND` で決まる**（ローカルでも `gcs` を、クラウドでも
+`local` を選べるが、実運用は下表の組合せ）。
+
+| 稼働環境 / backend | イベント本体 (raw JSONL) | 大容量 payload | 永続性 |
+|---|---|---|---|
+| ローカル / `local`（既定） | ローカル FS `${ANALYTICS_DATA_DIR}/raw/`（→ DuckDB / dbt local） | `${ANALYTICS_DATA_DIR}/payloads/` | ✅ ディスク |
+| クラウド / `gcs` | ローカル raw/ に一旦書き → uploader が flush → `gs://<bucket>/uploaded/service_name=.../*.jsonl` → BigQuery external table → dbt marts | `gs://<bucket>/payloads/`（`GCSPayloadWriter` 直書き） | ✅ GCS |
+| （参考）現状クラウド | コンテナ揮発 FS のみ | コンテナ揮発 FS のみ | ❌ 再起動で消失 |
+
+**切替は env のみ**（コード変更・再ビルド不要、再デプロイのみ）:
+
+| env | 値 | 役割 |
+|---|---|---|
+| `ANALYTICS_STORAGE_BACKEND` | `local`（既定）/ `gcs` | 格納先スイッチ |
+| `ANALYTICS_GCS_BUCKET` | バケット名 | `gcs` 時必須。未設定なら **local に自動フォールバック + 警告**（`gcp_config.load_gcs_config`） |
+| `ANALYTICS_GCP_PROJECT` | project id | Cloud Run + WIF なら省略可 |
+| `ANALYTICS_ENABLED` | `true` / `false` | emit 自体の on/off（false で NoOp） |
+| `ANALYTICS_DATA_DIR` | パス | ローカル root（既定 `./data`） |
+
+- 既定 `local` のため、何もしなければ現行どおり（後方互換）。本番は `gcs` + bucket を Cloud Run env に足して再デプロイ。
+- ロールバックは env を `local` に戻して再デプロイするだけ。
+- backend 選択ロジック（`detect_storage_backend` / `load_gcs_config` / `build_upload_transport` / `build_payload_writer`）は
+  analytics-platform 側に実装済。**エージェントの `setup.py` がそれらを呼ぶよう変える + config に上記 env を追加する**のが Step 10 の作業。
+
 ### 4.2 データモデル
 
 - イベントスキーマ変更なし（既存 discriminated union JSONL / Hive partition をそのまま）。
@@ -249,3 +275,4 @@ After（案B: in-process uploader）
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-06-06 | Draft | 初稿。本番イベントが揮発 FS で消失している実態（`gcloud run` / コード調査）を踏まえ、Phase 5 完遂（terraform apply + Step 10 エージェント切替 + 揮発 FS 対応）を提案。方式は案B（in-process uploader）を推奨 |
+| 2026-06-06 | Draft | §4.1 に「環境別の格納先（local / cloud）と env 切替」表を追記（レビュー Q&A 反映）。切替は `ANALYTICS_STORAGE_BACKEND` のみ・既定 local で後方互換であることを明確化 |
