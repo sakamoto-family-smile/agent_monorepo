@@ -5,7 +5,7 @@
 | **対象** | PROPOSAL-0009 P1（Cloud SQL 2台 → 1台集約 + `shared-pg` 改名） |
 | **作成** | 2026-06-05 |
 | **方針** | 案②（proposal 完全準拠）: 共有インスタンスを `driving-license-bot-pg` → `shared-pg` に改名し、3 DB を新インスタンスへ集約、旧2台を撤去 |
-| **状態** | **手順確定のみ（未実行）**。実行は計画メンテ時間帯に別途 |
+| **状態** | **実行完了（2026-06-05 メンテ）**。shared-pg に 3DB 集約・検証 OK。旧 driving-license-bot-pg 削除 / 旧 piyolog stop 保持。詳細は proposal §8 |
 
 > ⚠️ **これは破壊的・有ダウンタイムの本番移行**。Cloud SQL は instance 名を後から変えられないため、
 > 改名は「**旧インスタンス destroy → 新名称で create**」＝ 稼働中インスタンス（pgvector を含む）の作り直し。
