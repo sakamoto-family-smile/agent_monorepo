@@ -4,21 +4,58 @@
 
 ## プロジェクト一覧
 
-| プロジェクト | 種別 | 概要 | 分析基盤連携 |
-|---|---|---|---|
-| [`kanie-lab-agent`](./kanie-lab-agent/) | 実装 | 慶應 SFC 蟹江研究室 大学院入試準備の研究支援エージェント | ⬜ 未着手 |
-| [`stock-analysis-agent`](./stock-analysis-agent/) | 実装 | 日本株・米国株のテクニカル/ファンダメンタル/センチメント統合分析エージェント | ✅ 連携済 (PR #26) |
-| [`lifeplanner-agent`](./lifeplanner-agent/) | 実装 | Money Forward ME 起点の家族向けライフプランニング・30年シミュレーションエージェント | ✅ 連携済 (PR #27) |
-| [`hotcook-agent`](./hotcook-agent/) | 実装 | シャープ ホットクック (KN-HW24H) の食材ベース料理提案エージェント (Phase 1) | ✅ 連携済 (PR #31) |
-| [`piyolog-analytics`](./piyolog-analytics/) | 実装 | ぴよログ (育児記録) を LINE Bot 経由で取り込んで家族で横断サマリ共有 (Phase 1) | ✅ 連携済 (PR #34) |
-| [`tech-news-agent`](./tech-news-agent/) | 実装 | データ基盤領域ニュース・論文の日次 LINE 配信 + 将来 QA 検索 (Phase 1 MVP) | ✅ 連携済 (本 PR) |
-| [`driving-license-bot`](./driving-license-bot/) | 実装 | 運転免許（仮免・本免）学科試験対策 LINE Bot。Vertex AI Gemini で問題を自動生成し根拠条文・教則ページを必ず添付 (Phase 0 基盤整備) | ✅ 連携済 |
-| [`security-platform`](./security-platform/) | 基盤 | 全エージェント共通のセキュリティ基盤（MCP Proxy / CVE 監視 / DLP / Red Team） | — (基盤側) |
-| [`analytics-platform`](./analytics-platform/) | 基盤 | 全エージェント横断の分析基盤（OTel + Phoenix + JSONL + DuckDB + dbt、ローカル版のみ） | — (基盤側、Phase 1-4 完了 / Phase 5+ 未着手) |
-| [`llm-client`](./llm-client/) | 基盤 | 薄い Anthropic Claude API ラッパ (prompt caching / 複数ターン / on_call フック)。モノレポ横断で再利用 | — (基盤側) |
-| [`fujisawa-platform`](./fujisawa-platform/) | 基盤 | 藤沢市 HP / PDF を一次ソースとする共通基盤ライブラリ（クロール / PDF 解析 / pgvector ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL）。`fujisawa-info-bot` / `fujisawa-hokatsu-agent` から path dep で参照される想定 (Phase 4-2h step 3 実装済) | — (基盤側) |
-| [`agent-system-1`](./agent-system-1/) | ダミー | 雛形（Research Assistant スキル用スケルトン） | — |
-| [`agent-system-2`](./agent-system-2/) | ダミー | 雛形（Code Helper スキル用スケルトン） | — |
+**GCP デプロイ** 凡例: ✅ 稼働中（GCP に配備済み） / 🟡 配備可（terraform・cloudbuild 整備済だが現状未配備 or ローカル運用） / ⬜ ローカル（Dockerfile 等あり・GCP 未配備） / — ライブラリ・ダミー（独立デプロイなし）。詳細は [GCP デプロイ状況](#gcp-デプロイ状況) を参照。
+
+| プロジェクト | 種別 | GCP デプロイ | 概要 | 分析基盤連携 |
+|---|---|---|---|---|
+| [`kanie-lab-agent`](./kanie-lab-agent/) | 実装 | 🟡 配備可 (Cloud Run) | 慶應 SFC 蟹江研究室 大学院入試準備の研究支援エージェント | ⬜ 未着手 |
+| [`stock-analysis-agent`](./stock-analysis-agent/) | 実装 | ⬜ ローカル | 日本株・米国株のテクニカル/ファンダメンタル/センチメント統合分析エージェント | ✅ 連携済 (PR #26) |
+| [`lifeplanner-agent`](./lifeplanner-agent/) | 実装 | ⬜ ローカル | Money Forward ME 起点の家族向けライフプランニング・30年シミュレーションエージェント | ✅ 連携済 (PR #27) |
+| [`hotcook-agent`](./hotcook-agent/) | 実装 | ⬜ ローカル | シャープ ホットクック (KN-HW24H) の食材ベース料理提案エージェント (Phase 1) | ✅ 連携済 (PR #31) |
+| [`piyolog-analytics`](./piyolog-analytics/) | 実装 | ✅ 稼働中 (Cloud Run) | ぴよログ (育児記録) を LINE Bot 経由で取り込んで家族で横断サマリ共有 (Phase 1) | ✅ 連携済 (PR #34) |
+| [`tech-news-agent`](./tech-news-agent/) | 実装 | ⬜ ローカル | データ基盤領域ニュース・論文の日次 LINE 配信 + 将来 QA 検索 (Phase 1 MVP) | ✅ 連携済 |
+| [`driving-license-bot`](./driving-license-bot/) | 実装 | ✅ 稼働中 (Cloud Run + Job) | 運転免許（仮免・本免）学科試験対策 LINE Bot。Vertex AI Gemini で問題を自動生成し根拠条文・教則ページを必ず添付 | ✅ 連携済 |
+| [`fujisawa-info-bot`](./fujisawa-info-bot/) | 実装 | ✅ 稼働中 (Cloud Run) | 藤沢市の暮らし情報を返す市民向け LINE Bot（`fujisawa-platform` を path dep で利用、proposal 0004） | — |
+| [`security-platform`](./security-platform/) | 基盤 | ⬜ ローカル | 全エージェント共通のセキュリティ基盤（MCP Proxy / CVE 監視 / DLP / Red Team） | — (基盤側) |
+| [`analytics-platform`](./analytics-platform/) | 基盤 | 🟡 配備可 (TF整備済・現状ローカル) | 全エージェント横断の分析基盤（OTel + Phoenix + JSONL + DuckDB + dbt） | — (基盤側、Phase 1-4 完了 / Phase 5+ 未着手) |
+| [`llm-client`](./llm-client/) | 基盤 | — (ライブラリ) | 薄い Anthropic Claude API ラッパ (prompt caching / 複数ターン / on_call フック)。モノレポ横断で再利用 | — (基盤側) |
+| [`edinet-client`](./edinet-client/) | 基盤 | — (ライブラリ) | 金融庁 EDINET API v2 の薄いラッパ（提出書類取得 / XBRL 解析、proposal 0006）。`stock-analysis-agent` から path dep で利用 | — (基盤側) |
+| [`fujisawa-platform`](./fujisawa-platform/) | 基盤 | ✅ 稼働中 (ETL Jobs + Cloud SQL) | 藤沢市 HP / PDF を一次ソースとする共通基盤ライブラリ（クロール / PDF 解析 / pgvector ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL）。ETL は Cloud Run Jobs として配備済、`fujisawa-info-bot` 等が path dep で参照 | — (基盤側) |
+| [`llm-security-lab`](./llm-security-lab/) | 学習ラボ | ⬜ ローカル | OWASP LLM Top 10 体験学習ラボ（proposal 0008、Phase 0a scaffold） | — |
+| [`agent-system-1`](./agent-system-1/) | ダミー | — | 雛形（Research Assistant スキル用スケルトン） | — |
+| [`agent-system-2`](./agent-system-2/) | ダミー | — | 雛形（Code Helper スキル用スケルトン） | — |
+
+---
+
+## GCP デプロイ状況
+
+本番 GCP プロジェクト `sakamomo-family-agent`（リージョン `asia-northeast1`）に実際に配備済みのリソース一覧。terraform は各モジュールの `terraform/` 配下、WIF 認証付き CI plan は [`.github/workflows/pr-tests.yml`](./.github/workflows/pr-tests.yml) を参照。
+
+### Cloud Run サービス（常時公開エンドポイント）
+
+| サービス | 所属モジュール |
+|---|---|
+| `driving-license-bot-line-bot` / `driving-license-bot-admin-ui` | driving-license-bot |
+| `fujisawa-info-bot` | fujisawa-info-bot |
+| `piyolog-analytics` | piyolog-analytics |
+
+### Cloud Run Jobs（バッチ / ETL）
+
+| ジョブ | 所属モジュール |
+|---|---|
+| `driving-license-bot-batch` | driving-license-bot |
+| `fujisawa-weekly-crawl` / `fujisawa-wayback-backfill` / `fujisawa-half-yearly-facility` / `fujisawa-yearly-navi` / `fujisawa-biyearly-admission-1st` / `fujisawa-biyearly-admission-2nd` / `fujisawa-monthly-stats-compute` / `fujisawa-monthly-vacancy` | fujisawa-platform（ETL） |
+
+### Cloud SQL（共有 Postgres）
+
+- **`shared-pg`**（db-g1-small）— `question_bank`（driving-license）/ `fujisawa_kb_db`（pgvector）/ `piyolog` の 3 DB を 1 インスタンスに集約（[PROPOSAL-0009 P1](./docs/PROPOSALS/0009-gcp-cost-optimization.md)、2026-06-05 移行完了）。
+
+### 未配備（terraform / cloudbuild は整備済）
+
+- **`analytics-platform`**: terraform / Dockerfile / cloudbuild 整備済だが現状ローカル運用（Phase 5+ で GCP 配備予定）。
+- **`kanie-lab-agent`**: cloudbuild で Cloud Run（backend / frontend）へ配備可能だが現状未配備。
+
+> その他（`stock-analysis-agent` / `lifeplanner-agent` / `hotcook-agent` / `tech-news-agent` / `security-platform`）は Dockerfile によるコンテナ実行は可能だが GCP には未配備（ローカル / Docker Compose 運用）。`llm-client` / `edinet-client` はライブラリのため独立デプロイなし。
 
 ---
 
@@ -171,7 +208,7 @@ Cloud Run: agent-service (Claude Agent SDK + Vertex AI)
 
 **スタック**: Python 3.12 / FastAPI / Claude Agent SDK / Vertex AI (Gemini 既定 / Claude 切替可) / Cloud Run / Cloud Tasks / Firestore / BigQuery / GCS / Terraform
 
-**ステータス / ロードマップ**: Phase 0 基盤整備進行中 → Phase 1 最小デプロイ（Terraform 一発削除可）→ Phase 2 機能拡充（`docs/PHASE2_PLAN.md` に PR 分割計画）
+**ステータス / ロードマップ**: Phase 0 基盤整備 → **Phase 1 最小デプロイ完了（Cloud Run: line-bot / admin-ui / batch job 稼働中）** → Phase 2 機能拡充（`docs/PHASE2_PLAN.md` に PR 分割計画）
 
 詳細: [`driving-license-bot/README.md`](./driving-license-bot/README.md) / [`driving-license-bot/docs/DESIGN.md`](./driving-license-bot/docs/DESIGN.md)
 
@@ -196,7 +233,7 @@ Cloud Run: agent-service (Claude Agent SDK + Vertex AI)
 
 ### `fujisawa-platform` — 藤沢市情報の共通基盤ライブラリ
 
-藤沢市の市役所 HP / PDF を一次ソースとする **共通基盤ライブラリ**。サービス単体では起動せず、将来開発予定の 2 エージェント (`fujisawa-info-bot` / `fujisawa-hokatsu-agent`) が `pyproject.toml` の `[tool.uv.sources]` で path dep として参照する形で利用される。**クロール / PDF 解析 / ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL** を一元提供する。
+藤沢市の市役所 HP / PDF を一次ソースとする **共通基盤ライブラリ**兼 **ETL 基盤**。ライブラリ自体は消費側エージェント (`fujisawa-info-bot`〔実装済〕 / `fujisawa-hokatsu-agent`〔未実装〕) が `pyproject.toml` の `[tool.uv.sources]` で path dep として参照する。加えて **ETL は Cloud Run Jobs として GCP に配備済**（crawl / facility / admission / stats 等）。**クロール / PDF 解析 / ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL** を一元提供する。
 
 **主な機能**
 - **Polite クロール**: `PoliteFetcher`（rate limit 遵守 / User-Agent + 連絡先明示）、`WaybackClient`（Internet Archive バックフィル）、`parse_sitemap` / `parse_feed`
@@ -208,15 +245,61 @@ Cloud Run: agent-service (Claude Agent SDK + Vertex AI)
 - **ETL 差分検知**: `compute_hash` / `has_changed` / `FreshnessMetadata` で更新検知 → 差分のみ再 embedding
 - **配備**: Terraform 構成完成済 (Cloud SQL + pgvector の本番ベクトル基盤)
 
-**消費側エージェント (今後開発予定 / 未実装)**
-- **`fujisawa-info-bot`**: 藤沢市の暮らし情報を返す市民向け LINE Bot
-- **`fujisawa-hokatsu-agent`**: 保育園入所活動（保活）支援エージェント
+**消費側エージェント**
+- **`fujisawa-info-bot`**: 藤沢市の暮らし情報を返す市民向け LINE Bot（**実装済 / Cloud Run 配備済**、proposal 0004）
+- **`fujisawa-hokatsu-agent`**: 保育園入所活動（保活）支援エージェント（今後開発予定 / 未実装、proposal 0005）
 
 **スタック**: Python 3.12 / uv / asyncpg / pgvector / Cloud SQL (Postgres) / Vertex AI Embeddings / docling / Terraform
 
 **ステータス**: Phase 4-2h step 3 実装済（Terraform 完成、配備可能状態）
 
 設計詳細: [`docs/PROPOSALS/0003-fujisawa-platform-shared-base.md`](./docs/PROPOSALS/0003-fujisawa-platform-shared-base.md) / [`fujisawa-platform/README.md`](./fujisawa-platform/README.md)
+
+---
+
+### `fujisawa-info-bot` — 藤沢市 暮らし情報 LINE Bot
+
+藤沢市公式 HP を一次ソースとし、自然言語の質問に **出典 URL 付き** で回答する市民向け LINE Bot。`fujisawa-platform` を path dep で利用し、RAG + リンク 1 階層追跡 + 緊急情報プッシュ + 多言語誘導を提供する。
+
+**主な機能**
+- **RAG 回答**: `fujisawa_kb_db`（pgvector）を検索し、根拠となる藤沢市 HP の URL を必ず添付
+- **リンク追跡**: 回答生成時に 1 階層分のリンクを追跡して文脈を補強
+- **LINE 連携**: Messaging API で質問受付・回答返信
+
+**スタック**: Python 3.12 / FastAPI / LangGraph / line-bot-sdk v3 / Vertex AI / fujisawa-platform (path dep) / Cloud SQL (`shared-pg` / pgvector) / Cloud Run / Terraform
+
+**ステータス**: Phase 2（LangGraph + RAG）+ Phase 7（Terraform / Cloud Run 配備）完了。Pub/Sub 非同期化 / Crawl / Emergency push / Feedback は Phase 3+。
+
+詳細: [`fujisawa-info-bot/README.md`](./fujisawa-info-bot/README.md) / [`docs/PROPOSALS/0004-fujisawa-info-bot.md`](./docs/PROPOSALS/0004-fujisawa-info-bot.md)
+
+---
+
+### `edinet-client` — 金融庁 EDINET API ラッパ (ライブラリ)
+
+金融庁 EDINET API v2 の薄いラッパパッケージ。monorepo 内エージェント（主に `stock-analysis-agent`）から path dep で利用する基盤ライブラリで、独立デプロイはしない。
+
+**主な機能**
+- **文書 INDEX 取得**: 日次バッチ向けの提出書類一覧取得
+- **本体ダウンロード**: PDF / XBRL を `LocalCache` 経由で取得（再取得を抑制）
+- **XBRL 解析**: 財務データ抽出（`[xbrl]` extra、Arelle ベース）
+
+**スタック**: Python 3.12 / httpx / Arelle (XBRL, optional) / GCS キャッシュ (optional)
+
+**ステータス**: Phase 1 + 2 完了（proposal 0006、e2e 検証済）。
+
+詳細: [`edinet-client/README.md`](./edinet-client/README.md) / [`docs/PROPOSALS/0006-edinet-integration.md`](./docs/PROPOSALS/0006-edinet-integration.md)
+
+---
+
+### `llm-security-lab` — OWASP LLM Top 10 体験学習ラボ (Phase 0a)
+
+OWASP LLM Top 10 の脆弱性を手を動かして学ぶための学習ラボ。notebooks ベースでローカル実行し、独立デプロイはしない。
+
+**構成**: `notebooks/`（体験課題）/ `shared/`（共通ユーティリティ）/ `tests/`
+
+**ステータス**: Phase 0a scaffold（proposal 0008）。以降の Phase で path dep の `llm-client` / extras（vertex / redteam）を追加予定。
+
+詳細: [`docs/PROPOSALS/0008-llm-security-lab.md`](./docs/PROPOSALS/0008-llm-security-lab.md)
 
 ---
 
