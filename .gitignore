@@ -35,3 +35,25 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+
+# --- Secrets / runtime artifacts hardening (2026-06-05) ---
+# 実値を含む env ファイル。*.example / *.secrets.example は追跡継続 (上記に未マッチ)。
+.env
+.env.local
+.env.deploy
+
+# Terraform plan 出力 (バイナリ。生成 password 等 planned 値を含み得る)
+*.tfplan
+**/terraform/*.out
+
+# ローカル SQLite / 実行時 DB (追跡対象は無し)
+*.db
+*.sqlite
+*.sqlite3
+
+# stock-analysis-agent の実行時データ (analytics/uploaded 等)。
+# driving-license-bot/app/data/seed_questions.json は別パスで追跡継続。
+stock-analysis-agent/app/data/
+
+# Claude Code のユーザーローカル設定 (ネストした module 配下も含む)
+**/.claude/settings.local.json
