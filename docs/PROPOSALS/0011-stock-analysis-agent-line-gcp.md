@@ -62,11 +62,12 @@ LINE Platform
 Cloud Run: stock-analysis-line (FastAPI, min_instances=1)
    ├─ 分析コマンド: Reply で ack → BackgroundTasks で分析 → 完了後 Push
    │     ├─ ticker 解決 / yfinance / 指標 / mplfinance チャート (既存)
-   │     ├─ Vertex AI Claude (統合レポート、既存。location=us-east5)
+   │     ├─ Claude(claude-opus-4-6) 統合レポート ※Anthropic OAuth token 経由 (既存・Vertex 不要)
+   │     ├─ brave-search MCP (npx, in-process) でニュース/センチメント
    │     └─ チャート PNG → ImageStore (in-memory) → /image/{id}.png URL → LINE 画像メッセージ
    ├─ SQLite (ephemeral, cache + 辞書 seed)  ※MVP。永続化は Phase 2 (shared-pg)
    └─ analytics emit → Pub/Sub (PROPOSAL-0010) → GCS
-Secret Manager: LINE secret/token / (EDINET key)
+Secret Manager: LINE secret/token / CLAUDE_CODE_OAUTH_TOKEN / BRAVE_API_KEY
 ```
 
 ### 3.2 段階
@@ -81,10 +82,14 @@ Secret Manager: LINE secret/token / (EDINET key)
 
 ### 3.3 Notes / Constraints / Caveats
 
-- **Vertex AI 上の Claude の前提**: 本エージェントは Claude（Opus 系）を Vertex AI 経由で呼ぶ。Vertex AI Marketplace で
-  **当該 project に Claude が承認されている**必要がある（driving-license-bot が既定 Gemini なのはこの承認待ちのため）。
-  未承認なら、LLM を Gemini にフォールバックする設定 or 承認取得が前提（要確認）。location は `us-east5`（Claude on Vertex は
-  asia 未提供のため、Cloud Run=asia-northeast1 から us-east5 へクロスリージョン呼び出し）。
+- **Claude の認証は Anthropic OAuth トークン（Vertex 不要）**: 本エージェントは `claude-agent-sdk` で
+  `model="claude-opus-4-6"` を **`CLAUDE_CODE_OAUTH_TOKEN`（Anthropic サブスクの OAuth トークン）経由**で呼ぶ
+  （`orchestrator.py`、`ANTHROPIC_API_KEY=""` / Vertex env なし）。**Vertex AI 上の Claude 承認は不要**。
+  GitHub Action（PR #186）で使った `CLAUDE_CODE_OAUTH_TOKEN` と同種（`claude setup-token` で取得、有効期限1年）。
+  コストは Anthropic の **Agent SDK 月次クレジット枠**から（2026-06-15 以降の枠。GitHub Action と同じ）。
+  ※ config の `VERTEX_AI_LOCATION` は現状 LLM 経路では未使用の名残。
+- **brave-search MCP は in-process（npx）**: `@modelcontextprotocol/server-brave-search` を npx 起動するため、
+  コンテナに **Node.js が必要**（既存 Dockerfile に同梱済）+ **`BRAVE_API_KEY`** が要る。
 - **Cloud Run の BackgroundTasks**: レスポンス返却後の処理はインスタンスが凍結/破棄されると途中で止まる。**`min_instances=1`
   かつ CPU always-allocated** にして ack→push を確実にする（常時起動コストとのトレードオフ）。将来は Cloud Tasks（P3）。
 - **ephemeral SQLite**: Cloud Run 再起動で cache / reports が消える。`ticker_dictionary` はイメージに seed し、price_cache は
@@ -97,7 +102,8 @@ Secret Manager: LINE secret/token / (EDINET key)
 
 | リスク | 影響度 | 対策 |
 |---|---|---|
-| Vertex AI で Claude 未承認 → 分析が全失敗 | High | 事前確認。未承認なら Gemini フォールバック or 承認取得を P1 の前提条件にする |
+| CLAUDE_CODE_OAUTH_TOKEN 未設定/失効 → 分析が全失敗 | High | Secret Manager に有効なトークンを登録（`claude setup-token`、有効期限1年）。失効監視 |
+| BRAVE_API_KEY 未設定 → センチメント取得失敗 | Medium | Secret Manager に登録。未設定でも分析本体は継続（ニュースのみ欠落）するよう確認 |
 | BackgroundTasks がインスタンス破棄で途中終了 | Medium | min_instances=1 + CPU always-allocated。失敗時は push でエラー通知（既存）。恒久的には Cloud Tasks(P3) |
 | Claude Opus 分析のコスト増大 | Medium | allow-list（家族のみ）+ レート制限（1 ユーザー日次上限）。分析は明示コマンド時のみ |
 | ephemeral SQLite で履歴消失 | Low | MVP は許容（cache は再生成）。永続化は P2 (shared-pg) |
@@ -116,8 +122,8 @@ Before: ローカルのみ。FastAPI + LINE webhook 実装済だが GCP 配備�
 After (P1/MVP):
   LINE → Cloud Run(stock-analysis-line) webhook
     → 分析(既存) → テキスト push + チャート画像 push (ImageStore 経由 URL)
-  Secret Manager: LINE secret/token
-  Vertex AI(us-east5): Claude 統合レポート
+  Secret Manager: LINE secret/token / CLAUDE_CODE_OAUTH_TOKEN / BRAVE_API_KEY
+  Claude (claude-opus-4-6, Anthropic OAuth token 経由・Vertex 不要): 統合レポート
   analytics → Pub/Sub → GCS (PROPOSAL-0010)
 ```
 
@@ -134,7 +140,7 @@ After (P1/MVP):
 
 | 区分 | 変更 |
 |---|---|
-| 新規: terraform | `stock-analysis-agent/terraform/`（driving-license-bot を雛形に）: Cloud Run service / SA(sa-stock-line) + IAM（Vertex AI User / Secret accessor）/ Secret Manager(LINE secret/token) / Artifact Registry / 出力 |
+| 新規: terraform | `stock-analysis-agent/terraform/`（driving-license-bot を雛形に）: Cloud Run service / SA(sa-stock-line) + IAM（Secret accessor のみ。Vertex 不要）/ Secret Manager(LINE secret/token + CLAUDE_CODE_OAUTH_TOKEN + BRAVE_API_KEY) / Artifact Registry / 出力 |
 | 新規: cloudbuild | `cloudbuild.yaml`（piyolog/driving の build→push 型） |
 | 新規: 画像配信 | `app/services/image_store.py` + `app/routes/image.py`（piyolog から移植・適応）。`config` に `public_base_url` / `image_store_*` 追加 |
 | 変更: 分析→画像 | 分析完了時にチャート PNG を ImageStore に put → 画像 URL を作り、LINE 画像メッセージで push（line_handler の分析 push 経路に追加） |
@@ -181,7 +187,8 @@ After (P1/MVP):
 | webhook 401 | LINE_CHANNEL_SECRET 不一致 |
 
 ### 5.3 Dependencies
-- Cloud Run / Secret Manager / Artifact Registry / Vertex AI（Claude）/ IAM
+- Cloud Run / Secret Manager / Artifact Registry / IAM（**Vertex は使わない**）
+- Anthropic（`CLAUDE_CODE_OAUTH_TOKEN` 経由の claude-agent-sdk）/ Brave Search API（brave-search MCP）/ Node.js（npx, コンテナ同梱）
 - 既存: line-bot-sdk / yfinance / mplfinance / claude-agent-sdk / analytics-platform
 - LINE 専用チャネル（Messaging API）
 
@@ -205,7 +212,7 @@ After (P1/MVP):
 
 - `min_instances=1` の常時起動コスト（小）。回避には Cloud Tasks 化（複雑性増）。
 - ephemeral SQLite のため履歴が消える（MVP 割り切り）。
-- Vertex AI Claude の承認状況に依存（未承認だと前提が崩れる）。
+- Claude 利用は Anthropic の Agent SDK 月次クレジット枠に依存（トークン失効・枠超過時に分析が止まる）。
 
 ## 7. Alternatives
 
@@ -221,9 +228,10 @@ After (P1/MVP):
 - 概要: チャートを GCS に置き公開 URL を LINE に渡す。
 - 評価: 永続配信には良いが、MVP は Cloud Run 自身が in-memory 配信する方が簡単（バケット/IAM 不要）。P2 で検討。
 
-### 案 D: LLM を Gemini に変更
-- 概要: Vertex AI Claude 承認が無い場合に Gemini へ。
-- 評価: 承認状況次第のフォールバック。分析品質の検証が要るため既定は Claude 維持、未承認時の保険として用意。
+### 案 D: LLM を Vertex AI / Gemini に変更
+- 概要: Claude を Vertex AI 経由や Gemini に切替える。
+- 却下理由: 既存実装は **Anthropic OAuth token 経由の claude-agent-sdk**（Vertex 非依存）で動いており、Vertex 承認も
+  Gemini フォールバックも不要。コスト/品質都合で将来見直す余地はあるが、本提案では既存経路を維持する。
 
 ---
 
@@ -232,3 +240,4 @@ After (P1/MVP):
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-06-07 | Draft | 初稿。stock-analysis-agent は LINE ロジック実装済・GCP 配備資産ゼロという調査結果を踏まえ、既存 LINE Bot 配備パターン（driving-license/piyolog）を踏襲した Cloud Run 配備 + チャート画像配信を MVP(P1) として提案。永続化(P2)/分散(P3) は段階導入 |
+| 2026-06-07 | Draft (訂正) | LLM 認証経路を確認: **Vertex AI ではなく Anthropic OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`) 経由**（orchestrator.py）と判明。「Vertex Claude 承認」前提を撤回し、必要 Secret を LINE secret/token + `CLAUDE_CODE_OAUTH_TOKEN` + `BRAVE_API_KEY` に修正。brave-search は npx in-process（Node.js 同梱） |
