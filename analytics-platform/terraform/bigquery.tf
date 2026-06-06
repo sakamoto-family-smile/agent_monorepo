@@ -59,7 +59,11 @@ resource "google_bigquery_table" "agent_events_external" {
   # external table は表自体を delete しても GCS データは無傷
   deletion_protection = false
 
-  description = "External table over gs://${local.raw_bucket_name}/${var.gcs_raw_prefix}/ Hive partitioning."
+  # PROPOSAL-0010 案E-1: Pub/Sub Cloud Storage サブスクの出力 (NDJSON) を読む。
+  # 同出力は Hive partition 形式ではないため hive_partitioning は使わず、
+  # service_name / event_type / dt / hour 等はメッセージ JSON 内のカラムとして読む
+  # (重複は at-least-once のため dbt staging で event_id dedup する: Phase 5 P5-5)。
+  description = "External table over gs://${local.raw_bucket_name}/${var.gcs_events_prefix}/ (Pub/Sub Cloud Storage サブスク出力, NDJSON)."
 
   external_data_configuration {
     autodetect            = true
@@ -67,13 +71,8 @@ resource "google_bigquery_table" "agent_events_external" {
     ignore_unknown_values = true
 
     source_uris = [
-      "gs://${google_storage_bucket.raw.name}/${var.gcs_raw_prefix}/*",
+      "gs://${google_storage_bucket.raw.name}/${var.gcs_events_prefix}/*",
     ]
-
-    hive_partitioning_options {
-      mode              = "AUTO"
-      source_uri_prefix = "gs://${google_storage_bucket.raw.name}/${var.gcs_raw_prefix}/"
-    }
   }
 
   labels = {
