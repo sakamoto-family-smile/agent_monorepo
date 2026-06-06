@@ -6,10 +6,12 @@ locals {
   dead_letter_bucket_name = "${var.name_prefix}-dead-letter"
 
   # IAM Service Accounts (短い ID は 6-30 chars / 小文字 + 数字 + ハイフン)
-  sa_uploader_id  = "sa-uploader"
-  sa_dbt_id       = "sa-dbt"
-  sa_workflow_id  = "sa-workflow"
-  sa_scheduler_id = "sa-scheduler"
+  # 他モジュール (driving-license-bot が sa-workflow / sa-scheduler を所有) との
+  # 衝突を避けるため sa-analytics-* で namespace を切る。
+  sa_uploader_id  = "sa-analytics-uploader"
+  sa_dbt_id       = "sa-analytics-dbt"
+  sa_workflow_id  = "sa-analytics-workflow"
+  sa_scheduler_id = "sa-analytics-scheduler"
 
   sa_uploader_email  = google_service_account.uploader.email
   sa_dbt_email       = google_service_account.dbt.email
