@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     analytics_data_dir: str = "./data/analytics"
     analytics_compress: bool = False
     analytics_content_inline_threshold_bytes: int = 8192
+    # PROPOSAL-0010 P5-3: イベント送信 backend。"local" (既定) | "pubsub"。
+    # pubsub のとき analytics_pubsub_topic 必須 (未設定なら local に fallback)。
+    analytics_storage_backend: str = "local"
+    analytics_pubsub_topic: str = ""
+    analytics_gcp_project: str = ""
 
     # --- OTel ---
     otel_exporter_otlp_endpoint: str = ""

@@ -20,7 +20,8 @@ dependencies = [
     "matplotlib>=3.9.0",
     # Phase 3: Vertex AI Gemini (LLM consultation + tool use)
     "google-cloud-aiplatform>=1.60.0",
-    "analytics-platform",
+    # [pubsub] extra: PROPOSAL-0010 P5-3 で pubsub backend 利用時に必要 (google-cloud-pubsub)
+    "analytics-platform[pubsub]",
 ]
 
 [tool.uv.sources]

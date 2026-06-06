@@ -9,15 +9,13 @@ import logging
 from pathlib import Path
 
 import config
+from analytics_platform.gcp_config import PubSubAnalyticsConfig, build_sink
 from analytics_platform.observability.analytics_logger import AnalyticsLogger
 from analytics_platform.observability.content import (
     ContentRouter,
     LocalFilePayloadWriter,
 )
-from analytics_platform.observability.sinks.file_sink import (
-    JsonlSink,
-    RotatingFileSink,
-)
+from analytics_platform.observability.sinks.file_sink import JsonlSink
 from analytics_platform.observability.tracer import setup_tracer
 from opentelemetry import trace
 
@@ -52,17 +50,28 @@ def setup_observability() -> None:
         raw_dir.mkdir(parents=True, exist_ok=True)
         payloads_dir.mkdir(parents=True, exist_ok=True)
 
-        sink = RotatingFileSink(
-            root_dir=raw_dir,
+        # PROPOSAL-0010 P5-3: backend=pubsub なら PubSubSink、それ以外は
+        # ローカル JSONL。Settings (.env) の値を明示的に渡す (os.environ に
+        # 無くても効くように)。
+        pubsub_cfg: PubSubAnalyticsConfig | None = None
+        if s.analytics_storage_backend == "pubsub" and s.analytics_pubsub_topic:
+            pubsub_cfg = PubSubAnalyticsConfig(
+                topic=s.analytics_pubsub_topic,
+                project_id=(s.analytics_gcp_project or None),
+            )
+        sink = build_sink(
+            local_root=raw_dir,
             service_name=s.analytics_service_name,
             compress=s.analytics_compress,
+            pubsub_config=pubsub_cfg,
         )
         _content_router = ContentRouter(
             writer=LocalFilePayloadWriter(root_dir=payloads_dir),
             inline_threshold_bytes=s.analytics_content_inline_threshold_bytes,
         )
         logger.info(
-            "analytics enabled (data_dir=%s, service=%s)",
+            "analytics enabled (backend=%s, data_dir=%s, service=%s)",
+            s.analytics_storage_backend,
             s.analytics_data_dir,
             s.analytics_service_name,
         )

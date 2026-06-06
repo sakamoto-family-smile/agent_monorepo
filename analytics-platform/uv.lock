@@ -51,6 +51,9 @@ gcp = [
 gcs = [
     { name = "google-cloud-storage" },
 ]
+pubsub = [
+    { name = "google-cloud-pubsub" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -66,6 +69,7 @@ requires-dist = [
     { name = "dbt-duckdb", specifier = ">=1.8.0" },
     { name = "duckdb", specifier = ">=1.1.0" },
     { name = "google-cloud-bigquery", marker = "extra == 'gcp'", specifier = ">=3.20.0" },
+    { name = "google-cloud-pubsub", marker = "extra == 'pubsub'", specifier = ">=2.21.0" },
     { name = "google-cloud-storage", marker = "extra == 'gcp'", specifier = ">=2.18.0" },
     { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=2.18.0" },
     { name = "opentelemetry-api", specifier = ">=1.27.0" },
@@ -77,7 +81,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=8.2.3" },
     { name = "uuid-utils", specifier = ">=0.9.0" },
 ]
-provides-extras = ["gcs", "gcp"]
+provides-extras = ["gcs", "pubsub", "gcp"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -653,6 +657,26 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/37/93/fd399cba4c7cc9b2b56f0f686b8bf810fe374e2b6fa4682a59b9661885d1/google_cloud_dataproc-5.27.0.tar.gz", hash = "sha256:4ed0b248f0f825ce8ed3d29ddd50fa4962321b70cb045416962c1ba7b74b46ec", size = 589166, upload-time = "2026-04-13T22:27:17.991Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fd/da/f4b6723f048c2b89466e7a978338954fc4ed4f501c94bd6c97ec49fd8526/google_cloud_dataproc-5.27.0-py3-none-any.whl", hash = "sha256:7eec2ee649ab28747d304a3acf26a78f0703d73ea8f93a4cb85039fee4f4864f", size = 494239, upload-time = "2026-04-13T22:27:15.981Z" },
+]
+
+[[package]]
+name = "google-cloud-pubsub"
+version = "2.39.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "grpc-google-iam-v1" },
+    { name = "grpcio" },
+    { name = "grpcio-status" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-sdk" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/11/2b/4bf2c17e319ff65340389565b0e1b4d72696d87802b2f5f94390fbefa73c/google_cloud_pubsub-2.39.0.tar.gz", hash = "sha256:eed65e25f57f95bf3e02d96d7ee171688b23922471f9f21b5a91ed90e1282c0f", size = 402096, upload-time = "2026-06-03T15:28:26.396Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/93/20/dd0b27d4ad4577c062e77ff968ca3e2d404186cd78c8a2a53a0ef5fe5389/google_cloud_pubsub-2.39.0-py3-none-any.whl", hash = "sha256:7210d691a46d7a66559696899ebe6eb731e63de29b624964b3be4dd2d12d3e19", size = 324665, upload-time = "2026-06-03T15:27:41.119Z" },
 ]
 
 [[package]]
