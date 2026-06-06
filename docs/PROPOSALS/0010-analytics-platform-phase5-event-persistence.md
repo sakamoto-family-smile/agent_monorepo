@@ -74,6 +74,12 @@
 > 時点で durable なので **Cloud Run の揮発 FS / scale-to-zero でも取りこぼさない**。出口を GCS サブスクにすることで
 > 既存の external table / dbt 資産をそのまま活かす。
 
+> **確定事項（2026-06-06 レビュー）**:
+> - **出口は案E-1 を採用**（Pub/Sub → GCS サブスク → 既存 GCS → BQ external table → dbt）。**GCS を経由して BQ に入れる
+>   構成は維持**（案E-2 の BQ 直接書き込みは採らない）。
+> - **GCS サブスクのファイル命名に伴う BQ external table の再定義**（日時 partition + `service_name`/`event_type` 等を
+>   カラム読み）を**実施することで合意**（§4.2）。
+
 ### 3.1 User Stories
 
 #### 3.1.1 ストーリー 1
@@ -301,3 +307,4 @@ After（案E-1: Pub/Sub 入口）
 | 2026-06-06 | Draft | 初稿。本番イベントが揮発 FS で消失している実態を踏まえ Phase 5 完遂を提案。当初は案B（in-process uploader）を推奨 |
 | 2026-06-06 | Draft | §4.1 に環境別の格納先 / env 切替表を追記 |
 | 2026-06-06 | Draft | レビュー指摘（Pub/Sub 入口・呼出側を非同期にしない）を反映し、**案E-1（Pub/Sub → GCS サブスク）を推奨に格上げ**して全面改稿。クライアントライブラリ（`AnalyticsLogger` + `JsonlSink`）に `PubSubSink` を足し env で sink を選ぶ設計に。案B は代替へ降格 |
+| 2026-06-06 | Draft (確定) | レビューで **案E-1 採用を確定**（GCS 経由 → BQ external table/dbt は維持、案E-2 不採用）。GCS サブスクのファイル命名に伴う **external table 再定義も実施で合意**。実装着手準備 OK（P5-1 terraform から） |
