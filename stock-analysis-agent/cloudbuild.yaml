@@ -1,0 +1,60 @@
+# Cloud Build: stock-analysis-agent Cloud Run Service image を build → push する。
+#
+# build context は **リポジトリルート** (Dockerfile が analytics-platform /
+# edinet-client / stock-analysis-agent を path dep で COPY するため)。
+#
+# 起動例 (リポジトリルートから):
+#   gcloud builds submit \
+#     --config=stock-analysis-agent/cloudbuild.yaml \
+#     --ignore-file=stock-analysis-agent/cloudbuild.gcloudignore \
+#     --substitutions=_SHA=$(git rev-parse --short=7 HEAD) \
+#     .
+#
+# substitutions:
+#   _LOCATION  Artifact Registry location  (default asia-northeast1)
+#   _REPO      Artifact Registry repo name (default stock-analysis-line)
+#   _IMAGE     image name suffix           (default stock-analysis-line)
+#   _SHA       short commit SHA。手動 build では `git rev-parse --short=7 HEAD` を渡す。
+#
+# 出力:
+#   ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_SHA}
+#   ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+
+substitutions:
+  _LOCATION: asia-northeast1
+  _REPO: stock-analysis-line
+  _IMAGE: stock-analysis-line
+  _SHA: manual
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  # 1. build (BuildKit で multi-stage + cache)
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - --file=stock-analysis-agent/Dockerfile
+      - --tag=${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_SHA}
+      - --tag=${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+      - --cache-from=${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+      - --build-arg=BUILDKIT_INLINE_CACHE=1
+      - .
+
+  # 2. push (両タグ)
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}
+
+images:
+  - ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_SHA}
+  - ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+
+timeout: 1800s

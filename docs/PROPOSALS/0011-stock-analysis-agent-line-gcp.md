@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | Implementing |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-06-07 |
 | **Updated** | 2026-06-07 |
 | **Target** | stock-analysis-agent |
-| **Related PRs** | (none yet) |
+| **Related PRs** | P1 実装 (本ブランチ) |
 | **Supersedes** | — |
 | **Superseded by** | — |
 
@@ -282,3 +282,4 @@ After (P1/MVP):
 | 2026-06-07 | Draft (訂正) | LLM 認証経路を確認: **Vertex AI ではなく Anthropic OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`) 経由**（orchestrator.py）と判明。「Vertex Claude 承認」前提を撤回し、必要 Secret を LINE secret/token + `CLAUDE_CODE_OAUTH_TOKEN` + `BRAVE_API_KEY` に修正。brave-search は npx in-process（Node.js 同梱） |
 | 2026-06-07 | Draft (レビュー反映) | PR #199 のレビュー反映: ① Vertex は将来オプションと明記（§7 案D）② テキストレポートの配信方法（Flex バブル + テキスト fallback 先頭~1500字、Push）を §4.3 に追記 ③ EDINET は実装済(既定 false)→ P3 で有効化と明記 ④ DB 保存内容/履歴（reports=分析履歴、MVP は ephemeral）を §4.2 に詳述 ⑤ 1コマンド=1銘柄（複数はバッチ将来）を明記 |
 | 2026-06-07 | Draft (レビュー反映2) | 配信方法を更新: **要約=Flex / チャート=画像 / 全文=Markdown を `GET /api/line/report/{id}.md`（attachment）でホストし URL を LINE で渡す** 3点セットに（ユーザー要望「全文を DL ファイルで」）。ReportStore + エンドポイントを §4.3/§4.4 に追加 |
+| 2026-06-07 | Implementing (P1) | PR #199 マージ後、P1 実装に着手。実装内容: ① `BlobStore`（チャート PNG / 全文 Markdown の LRU+TTL store）+ `routes/media.py`（`GET /api/line/image/{id}.png` / `GET /api/line/report/{id}.md`）② `line_client.push_image` ③ `analysis_summary_bubble` に全文 DL ボタン ④ `line_handler` を 3 点配信（Flex 要約 / チャート画像 / 全文 .md）に + allow-list + 日次レート制限（`access_control.py`）⑤ Dockerfile を repo ルート context のマルチステージ build に刷新（analytics-platform / edinet-client path dep 同梱 + Node.js + `@anthropic-ai/claude-code` CLI + 日本語フォント、port 8080）⑥ `cloudbuild.yaml` + gcloudignore ⑦ terraform 一式（Cloud Run min=1/CPU always-allocated・SA・Secret 4 件・Artifact Registry、Cloud SQL/Vertex 不使用）。unit test 追加（188 passed）。LINE チャネル作成・Secret 値投入・Webhook 登録・PUBLIC_BASE_URL 反映は deploy 時の手動ステップ（terraform/README.md 参照） |

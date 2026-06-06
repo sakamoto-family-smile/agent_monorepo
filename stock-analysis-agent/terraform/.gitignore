@@ -1,0 +1,9 @@
+# terraform local state / plan / secret-bearing tfvars は commit しない
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.tfplan
+plan.out
+crash.log

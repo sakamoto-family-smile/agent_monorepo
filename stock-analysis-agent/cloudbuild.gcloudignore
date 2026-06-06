@@ -1,0 +1,73 @@
+# stock-analysis-agent Cloud Build 専用 ignore file。
+# build context はリポジトリルート、analytics-platform / edinet-client /
+# stock-analysis-agent を必要とするが、それ以外の agent は不要。
+
+# VCS
+.git/
+.github/
+.gitignore
+.gitleaks.toml
+
+# Python build artifacts
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.venv/
+**/venv/
+**/*.egg-info/
+
+# Terraform
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/terraform.tfvars
+**/plan.out
+**/*.tfplan
+
+# secrets / local env
+**/.env
+**/.env.*
+
+# OS / IDE
+.DS_Store
+**/.DS_Store
+.vscode/
+.idea/
+
+# Data fixtures (image には不要、巨大化防止)
+**/data/
+
+# 他 agent (stock-analysis-agent image には不要)
+agent-system-1/
+agent-system-2/
+driving-license-bot/
+fujisawa-info-bot/
+fujisawa-platform/
+hotcook-agent/
+kanie-lab-agent/
+lifeplanner-agent/
+llm-client/
+llm-security-lab/
+piyolog-analytics/
+security-platform/
+tech-news-agent/
+
+# analytics-platform / edinet-client は source のみ (tests / docs / terraform は不要)
+analytics-platform/tests/
+analytics-platform/terraform/
+analytics-platform/docs/
+edinet-client/tests/
+
+# stock-analysis-agent 自身の tests / terraform / docs は image に不要
+stock-analysis-agent/tests/
+stock-analysis-agent/terraform/
+stock-analysis-agent/.ruff_cache/
+stock-analysis-agent/.pytest_cache/
+
+# repo root の docs / 設定 (image には不要)
+/LICENSE
+/README.md
+/docs/

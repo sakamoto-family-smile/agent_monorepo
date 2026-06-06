@@ -29,14 +29,20 @@ services:
     restart: unless-stopped
 
   # Stock Analysis Backend API
+  #
+  # PROPOSAL-0011 で Dockerfile を repo ルート context のマルチステージ build に
+  # 変更したため、build context は親ディレクトリ (リポジトリルート)。
+  # image には claude CLI + brave-search MCP が同梱されるので、MCP_PROXY_URL を
+  # 設定しなければ npx in-process で brave を叩く (security-proxy 経由は任意)。
   backend:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: stock-analysis-agent/Dockerfile
     ports:
-      - "8001:8000"
+      - "8001:8080"
     environment:
       - APP_ENV=local
+      - PORT=8080
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
@@ -48,12 +54,12 @@ services:
       - CACHE_DIR=/app/data/cache
       - DICTIONARIES_DIR=/app/data/dictionaries
       - LOG_LEVEL=debug
-      # Security Platform MCP Proxy (routes brave-search through gateway)
-      - MCP_PROXY_URL=http://security-proxy:8080
+      # チャート画像 / 全文 DL を返すなら公開 URL を入れる (ローカルは ngrok 等)
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
+      # Security Platform MCP Proxy 経由にしたい場合のみ設定 (空なら npx in-process)
+      - MCP_PROXY_URL=${MCP_PROXY_URL:-}
     volumes:
       - stock_data:/app/data
-    depends_on:
-      - security-proxy
     restart: unless-stopped
 
 volumes:

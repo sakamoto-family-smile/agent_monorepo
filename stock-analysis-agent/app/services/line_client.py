@@ -69,6 +69,10 @@ class LineBotClient(Protocol):
 
     async def push_flex(self, *, to: str, alt_text: str, contents: dict) -> None: ...
 
+    async def push_image(
+        self, *, to: str, original_content_url: str, preview_image_url: str
+    ) -> None: ...
+
     async def close(self) -> None: ...
 
 
@@ -203,6 +207,32 @@ class LineBotSdkClient:
             PushMessageRequest(
                 to=to,
                 messages=[FlexMessage(alt_text=self._trim_alt(alt_text), contents=container)],
+            )
+        )
+
+    async def push_image(
+        self, *, to: str, original_content_url: str, preview_image_url: str
+    ) -> None:
+        """チャート PNG を ImageMessage として push する。
+
+        original_content_url / preview_image_url は HTTPS の公開 URL であること
+        (LINE Platform が取得しに来る)。`public_base_url` 未設定時は呼び出し側が
+        skip する。
+        """
+        from linebot.v3.messaging import ImageMessage, PushMessageRequest
+
+        if not to:
+            logger.warning("push_image called without target user_id; skipping")
+            return
+        await self._messaging.push_message(
+            PushMessageRequest(
+                to=to,
+                messages=[
+                    ImageMessage(
+                        original_content_url=original_content_url,
+                        preview_image_url=preview_image_url,
+                    )
+                ],
             )
         )
 

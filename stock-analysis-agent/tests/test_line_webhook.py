@@ -81,6 +81,18 @@ class StubLineBotClient:
             }
         )
 
+    async def push_image(
+        self, *, to: str, original_content_url: str, preview_image_url: str
+    ) -> None:
+        self.pushes.append(
+            {
+                "type": "image",
+                "to": to,
+                "original_content_url": original_content_url,
+                "preview_image_url": preview_image_url,
+            }
+        )
+
     async def close(self) -> None:
         self.close_called = True
 
@@ -385,8 +397,14 @@ async def test_analyze_acks_immediately_then_pushes_result(client, stub):
 
     async def fake_runner(req):
         # 実 Claude を叩かないモック実装
+        from services.line_handler import AnalyzeResult
+
         await asyncio.sleep(0)
-        return ("AAPL", "Apple Inc.", "本文サマリ — テクニカル / ファンダ評価")
+        return AnalyzeResult(
+            ticker="AAPL",
+            company_name="Apple Inc.",
+            report_text="本文サマリ — テクニカル / ファンダ評価",
+        )
 
     # handler が runner を選ぶのは deps.analyze_runner > _default_analyze_runner の順だが、
     # route 側で deps を組み立てているので _default_analyze_runner をパッチするのが手っ取り早い
@@ -531,9 +549,9 @@ async def test_default_analyze_runner_aggregates_report_complete_event():
         }
 
     with patch.object(line_handler, "run_analysis", fake_run_analysis):
-        ticker, name, body = await line_handler._default_analyze_runner(
+        result = await line_handler._default_analyze_runner(
             AnalysisRequest(query="トヨタ")
         )
-    assert ticker == "7203.T"
-    assert name == "トヨタ"
-    assert "テクニカル" in body and "ファンダ" in body
+    assert result.ticker == "7203.T"
+    assert result.company_name == "トヨタ"
+    assert "テクニカル" in result.report_text and "ファンダ" in result.report_text

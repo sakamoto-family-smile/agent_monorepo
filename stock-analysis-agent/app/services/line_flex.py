@@ -244,9 +244,20 @@ def screener_ranking_carousel(candidates: list[dict[str, Any]]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def analysis_summary_bubble(*, ticker: str, company_name: str | None, body_text: str) -> dict:
+def analysis_summary_bubble(
+    *,
+    ticker: str,
+    company_name: str | None,
+    body_text: str,
+    report_url: str | None = None,
+) -> dict:
+    """個別株分析の要約 bubble。
+
+    `report_url` を渡すと footer に「📄 全文(.md)を取得」ボタン (URI action) を付け、
+    Claude 生成の全文 Markdown を DL できるようにする (PROPOSAL-0011 §4.3)。
+    """
     title = company_name or ticker
-    return {
+    bubble: dict = {
         "type": "bubble",
         "size": "giga",
         "header": {
@@ -278,3 +289,23 @@ def analysis_summary_bubble(*, ticker: str, company_name: str | None, body_text:
             ],
         },
     }
+    if report_url:
+        bubble["footer"] = {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": [
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "color": _HEADER_COLOR_PRIMARY,
+                    "height": "sm",
+                    "action": {
+                        "type": "uri",
+                        "label": "📄 全文(.md)を取得",
+                        "uri": report_url,
+                    },
+                }
+            ],
+        }
+    return bubble
