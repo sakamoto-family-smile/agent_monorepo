@@ -23,6 +23,10 @@ dependencies = [
 gcs = [
   "google-cloud-storage>=2.18.0",
 ]
+# Pub/Sub 入口 (PROPOSAL-0010 案E-1) を使う consumer は `[pubsub]` extra を有効にする。
+pubsub = [
+  "google-cloud-pubsub>=2.21.0",
+]
 # BigQuery で dbt を実行する場合の extra。`uv sync --extra gcp`。
 gcp = [
   "google-cloud-storage>=2.18.0",

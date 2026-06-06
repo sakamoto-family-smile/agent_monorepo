@@ -32,9 +32,32 @@ class GcsAnalyticsConfig:
     project_id: str | None
 
 
+@dataclass(frozen=True)
+class PubSubAnalyticsConfig:
+    topic: str
+    project_id: str | None
+
+
 def detect_storage_backend() -> str:
-    """"local" | "gcs"。`ANALYTICS_STORAGE_BACKEND` で切替。"""
+    """"local" (既定) | "pubsub" | "gcs"。`ANALYTICS_STORAGE_BACKEND` で切替。"""
     return (os.environ.get("ANALYTICS_STORAGE_BACKEND") or "local").lower()
+
+
+def load_pubsub_config() -> PubSubAnalyticsConfig | None:
+    """env から Pub/Sub 設定を読み込む。backend が pubsub でない / topic 未設定なら None。"""
+    if detect_storage_backend() != "pubsub":
+        return None
+    topic = os.environ.get("ANALYTICS_PUBSUB_TOPIC", "").strip()
+    if not topic:
+        logger.warning(
+            "ANALYTICS_STORAGE_BACKEND=pubsub but ANALYTICS_PUBSUB_TOPIC not set; "
+            "falling back to local backend"
+        )
+        return None
+    return PubSubAnalyticsConfig(
+        topic=topic,
+        project_id=(os.environ.get("ANALYTICS_GCP_PROJECT") or None),
+    )
 
 
 def load_gcs_config() -> GcsAnalyticsConfig | None:
@@ -98,4 +121,31 @@ def build_upload_transport(*, raw_root: Path):
         bucket_name=cfg.bucket_name,
         dest_prefix=cfg.raw_prefix,
         project_id=cfg.project_id,
+    )
+
+
+def build_sink(*, local_root: Path, service_name: str, compress: bool = False):
+    """`AnalyticsLogger` に渡す `JsonlSink` を env に従って構築 (PROPOSAL-0010)。
+
+    - backend=pubsub + topic 設定あり → `PubSubSink` (Pub/Sub 入口)
+    - それ以外 (local / gcs / 設定不備) → `RotatingFileSink` (ローカル JSONL)
+
+    backend=gcs はローカルに書いて別途 uploader で GCS へ送る案B 互換のため、
+    sink 自体は `RotatingFileSink`。pubsub backend のみ送信を sink で完結させる。
+    """
+    pubsub_cfg = load_pubsub_config()
+    if pubsub_cfg is not None:
+        from .observability.sinks.pubsub_sink import PubSubSink  # noqa: PLC0415
+
+        return PubSubSink(
+            topic=pubsub_cfg.topic,
+            project_id=pubsub_cfg.project_id,
+        )
+
+    from .observability.sinks.file_sink import RotatingFileSink  # noqa: PLC0415
+
+    return RotatingFileSink(
+        root_dir=local_root,
+        service_name=service_name,
+        compress=compress,
     )
