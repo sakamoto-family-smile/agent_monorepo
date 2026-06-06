@@ -70,7 +70,8 @@ Cloud Run: stock-analysis-line (FastAPI, min_instances=1)
    │     ├─ ticker 解決 / yfinance / 指標 / mplfinance チャート (既存)
    │     ├─ Claude(claude-opus-4-6) 統合レポート ※Anthropic OAuth token 経由 (既存・Vertex 不要)
    │     ├─ brave-search MCP (npx, in-process) でニュース/センチメント
-   │     └─ チャート PNG → ImageStore (in-memory) → /image/{id}.png URL → LINE 画像メッセージ
+   │     ├─ チャート PNG → ImageStore → /image/{id}.png URL → LINE 画像メッセージ
+   │     └─ 全文 Markdown → ReportStore → /report/{id}.md (attachment) URL → LINE で「全文DL」リンク
    ├─ SQLite (ephemeral, cache + 辞書 seed)  ※MVP。永続化は Phase 2 (shared-pg)
    └─ analytics emit → Pub/Sub (PROPOSAL-0010) → GCS
 Secret Manager: LINE secret/token / CLAUDE_CODE_OAUTH_TOKEN / BRAVE_API_KEY
@@ -153,12 +154,22 @@ After (P1/MVP):
 
 ### 4.3 API / LINE での結果の渡し方
 
-- LINE webhook（既存 `/api/line/webhook` 等）。画像配信用に **`GET /api/line/image/{image_id}.png`** を追加。
-- **テキストレポートの配信方法（レビュー指摘）**: `分析 <銘柄>` は ack を Reply で返したあと、分析完了後に
-  **LINE Push（`_push_flex_or_text`）で結果を送る**。本文は **Flex バブル（`analysis_summary_bubble`）でサマリ表示**し、
-  Flex 不可時は**テキスト fallback（本文先頭 ~1500 字）** に落ちる（`line_handler._cmd_analyze`）。
-  - 長いレポートは LINE 向けに**要約/先頭抜粋**される（全文ではない）。P1 で、必要なら分割送信や要約強化を検討。
-  - **チャート画像**は本提案で追加する経路で**別途 image メッセージ**として push する。
+`分析 <銘柄>` は ack を Reply で返したあと、分析完了後に **LINE Push** で結果を送る。配信は **3 点セット**:
+
+| 種別 | 中身 | 配信方法 |
+|---|---|---|
+| **要約** | 主要指標 + 結論サマリ | **LINE Flex バブル**（`analysis_summary_bubble`、不可時テキスト fallback） |
+| **チャート** | mplfinance のローソク足 PNG | **LINE 画像メッセージ**（`GET /api/line/image/{id}.png` の URL を push） |
+| **全文レポート** | Claude が生成した**全文（Markdown）** | **ファイルとしてホストし URL を LINE で渡す**（下記） |
+
+- **全文 Markdown を添付ファイルとして取得（レビュー指摘）**:
+  LINE Bot には任意ファイルの「添付」メッセージ型が無いため、**全文 Markdown を Cloud Run 上でホストし、その URL を
+  LINE（Flex のボタン「📄 全文(.md)を取得」or テキストリンク）で渡す**。エンドポイント
+  **`GET /api/line/report/{report_id}.md`**（`Content-Type: text/markdown`, `Content-Disposition: attachment; filename=...md`）
+  でブラウザ表示/ダウンロード可能にする。実装は画像と同じ **in-memory store（ランダム ID + TTL）**（MVP）。永続配布が要れば
+  GCS（P2）。全文は既存の `reports` テーブルにも保存される。
+- LINE webhook（既存 `/api/line/webhook` 等）。新規エンドポイント: 画像 `GET /api/line/image/{id}.png` /
+  全文 `GET /api/line/report/{id}.md`。
 - **1コマンド=1銘柄**: `target = " ".join(args)` を1クエリとして ticker 解決するため、`分析 トヨタ` のように
   1銘柄ずつ。複数企業は複数コマンドを送る（同時バッチは将来）。
 
@@ -168,8 +179,8 @@ After (P1/MVP):
 |---|---|
 | 新規: terraform | `stock-analysis-agent/terraform/`（driving-license-bot を雛形に）: Cloud Run service / SA(sa-stock-line) + IAM（Secret accessor のみ。Vertex 不要）/ Secret Manager(LINE secret/token + CLAUDE_CODE_OAUTH_TOKEN + BRAVE_API_KEY) / Artifact Registry / 出力 |
 | 新規: cloudbuild | `cloudbuild.yaml`（piyolog/driving の build→push 型） |
-| 新規: 画像配信 | `app/services/image_store.py` + `app/routes/image.py`（piyolog から移植・適応）。`config` に `public_base_url` / `image_store_*` 追加 |
-| 変更: 分析→画像 | 分析完了時にチャート PNG を ImageStore に put → 画像 URL を作り、LINE 画像メッセージで push（line_handler の分析 push 経路に追加） |
+| 新規: 画像/全文配信 | `app/services/image_store.py` + `app/routes/image.py`（piyolog から移植）+ **全文 Markdown 用の store + `GET /api/line/report/{id}.md`（attachment）**。`config` に `public_base_url` / store の TTL/上限 |
+| 変更: 分析→3点配信 | 分析完了時に (1) Flex 要約 (2) チャート画像 URL (3) 全文 Markdown の DL URL を組み立てて LINE Push（line_handler の分析 push 経路に追加） |
 | 変更: Cloud Run 設定 | `min_instances=1` / CPU always-allocated / startup probe `/health` |
 | 変更: analytics | instrumentation を `build_sink` 利用に（pubsub backend 対応、P5-3 と同型）※P2 でも可 |
 | 変更: Dockerfile | 不要な Node.js を削る等の整理（任意） |
@@ -270,3 +281,4 @@ After (P1/MVP):
 | 2026-06-07 | Draft | 初稿。stock-analysis-agent は LINE ロジック実装済・GCP 配備資産ゼロという調査結果を踏まえ、既存 LINE Bot 配備パターン（driving-license/piyolog）を踏襲した Cloud Run 配備 + チャート画像配信を MVP(P1) として提案。永続化(P2)/分散(P3) は段階導入 |
 | 2026-06-07 | Draft (訂正) | LLM 認証経路を確認: **Vertex AI ではなく Anthropic OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`) 経由**（orchestrator.py）と判明。「Vertex Claude 承認」前提を撤回し、必要 Secret を LINE secret/token + `CLAUDE_CODE_OAUTH_TOKEN` + `BRAVE_API_KEY` に修正。brave-search は npx in-process（Node.js 同梱） |
 | 2026-06-07 | Draft (レビュー反映) | PR #199 のレビュー反映: ① Vertex は将来オプションと明記（§7 案D）② テキストレポートの配信方法（Flex バブル + テキスト fallback 先頭~1500字、Push）を §4.3 に追記 ③ EDINET は実装済(既定 false)→ P3 で有効化と明記 ④ DB 保存内容/履歴（reports=分析履歴、MVP は ephemeral）を §4.2 に詳述 ⑤ 1コマンド=1銘柄（複数はバッチ将来）を明記 |
+| 2026-06-07 | Draft (レビュー反映2) | 配信方法を更新: **要約=Flex / チャート=画像 / 全文=Markdown を `GET /api/line/report/{id}.md`（attachment）でホストし URL を LINE で渡す** 3点セットに（ユーザー要望「全文を DL ファイルで」）。ReportStore + エンドポイントを §4.3/§4.4 に追加 |
