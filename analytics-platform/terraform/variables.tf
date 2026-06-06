@@ -136,3 +136,53 @@ variable "dbt_job_max_duration_seconds" {
   description = "Threshold for the dbt Cloud Run Job duration alert. 0 disables the duration alert."
   default     = 1800 # 30 分
 }
+
+# ---- Pub/Sub ingestion (Phase 5 案E-1 / PROPOSAL-0010) ----
+
+variable "enable_pubsub" {
+  type        = bool
+  description = "Pub/Sub 入口 (topic / GCS サブスク / dead-letter / IAM) を作るか。false で作らない (段階適用用)。"
+  default     = true
+}
+
+variable "gcs_events_prefix" {
+  type        = string
+  description = "Cloud Storage サブスクが raw バケット配下に NDJSON を書く prefix。external table はこの prefix を読む。"
+  default     = "events"
+}
+
+variable "publisher_service_account_emails" {
+  type        = list(string)
+  description = "events topic への publish を許可する consumer SA email 群 (例: sa-piyolog@...)。配備後に追記する。"
+  default     = []
+}
+
+variable "pubsub_gcs_max_duration" {
+  type        = string
+  description = "Cloud Storage サブスクのバッチ flush 最大間隔 (この時間で1ファイル化)。"
+  default     = "300s"
+}
+
+variable "pubsub_gcs_max_bytes" {
+  type        = number
+  description = "Cloud Storage サブスクのバッチ flush 最大バイト数 (この量で1ファイル化)。"
+  default     = 1000000 # 1 MB
+}
+
+variable "dead_letter_max_delivery_attempts" {
+  type        = number
+  description = "Cloud Storage サブスクの配信失敗が連続したら dead-letter topic へ送る試行回数。"
+  default     = 5
+}
+
+variable "pubsub_topic_retention_duration" {
+  type        = string
+  description = "events topic のメッセージ保持期間 (サブスク障害時のバッファ)。"
+  default     = "86400s" # 1 日
+}
+
+variable "pubsub_message_retention_duration" {
+  type        = string
+  description = "dead-letter pull サブスクのメッセージ保持期間。"
+  default     = "604800s" # 7 日
+}

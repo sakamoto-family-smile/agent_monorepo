@@ -40,6 +40,7 @@ gcloud services enable \
   run.googleapis.com \
   workflows.googleapis.com \
   cloudscheduler.googleapis.com \
+  pubsub.googleapis.com \
   iam.googleapis.com \
   iamcredentials.googleapis.com \
   --project="${PROJECT}"
@@ -121,6 +122,42 @@ source .env.gcp
 set +a
 make deploy-orchestration
 ```
+
+---
+
+## Pub/Sub 入口 (Phase 5 案E-1 / PROPOSAL-0010)
+
+イベント入口を Pub/Sub にし、Cloud Storage サブスクで raw バケットへ NDJSON を流す
+(`pubsub.tf`)。出口の BigQuery external table / dbt はそのまま流用。
+
+作成されるもの: `*-events` topic / `*-events-to-gcs` サブスク (Cloud Storage) /
+`*-events-dlq` topic + `*-events-dlq-sub` (dead-letter 保持用) / Pub/Sub SA への
+GCS 書込・DLQ 転送 IAM。
+
+主な変数:
+
+| 変数 | 既定 | 用途 |
+|---|---|---|
+| `enable_pubsub` | `true` | Pub/Sub 一式を作るか (false で段階適用) |
+| `gcs_events_prefix` | `events` | サブスクが NDJSON を書く raw バケット配下 prefix (external table も同じ) |
+| `publisher_service_account_emails` | `[]` | events topic へ publish 可能にする consumer SA 群 |
+| `pubsub_gcs_max_duration` / `pubsub_gcs_max_bytes` | `300s` / `1MB` | サブスクのバッチ flush 条件 |
+| `dead_letter_max_delivery_attempts` | `5` | DLQ 送りの試行回数 |
+
+consumer 側の繋ぎ込み (Step 10 / P5-3 以降):
+
+```bash
+# 1) topic 名を取得して consumer の env に渡す
+terraform output -raw events_topic   # 例: analytics-events
+#    → consumer の ANALYTICS_STORAGE_BACKEND=pubsub / ANALYTICS_PUBSUB_TOPIC=<topic>
+
+# 2) consumer の SA に publish 権限を付与 (tfvars に追記して apply)
+#    publisher_service_account_emails = ["sa-piyolog@<project>.iam.gserviceaccount.com", ...]
+```
+
+> 注意: GCS サブスクの出力は Hive partition 形式ではないため、external table は
+> `gcs_events_prefix` を非 Hive で読む (service_name / event_type 等は JSON カラム)。
+> at-least-once のため dbt staging で `event_id` dedup する (P5-5)。
 
 ---
 

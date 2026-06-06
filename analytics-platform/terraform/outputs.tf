@@ -63,6 +63,23 @@ output "sa_scheduler_email" {
   value       = google_service_account.scheduler.email
 }
 
+# ---- Pub/Sub ingestion (Phase 5 案E-1 / PROPOSAL-0010) ----
+
+output "events_topic" {
+  description = "consumer 側 ANALYTICS_PUBSUB_TOPIC に渡す events topic 名。"
+  value       = var.enable_pubsub ? google_pubsub_topic.events[0].name : null
+}
+
+output "events_topic_id" {
+  description = "events topic のフル ID (projects/<p>/topics/<name>)。"
+  value       = var.enable_pubsub ? google_pubsub_topic.events[0].id : null
+}
+
+output "events_dlq_topic" {
+  description = "dead-letter topic 名。"
+  value       = var.enable_pubsub ? google_pubsub_topic.events_dlq[0].name : null
+}
+
 # ---- Monitoring (Step 9) ----
 
 output "alert_policies" {
