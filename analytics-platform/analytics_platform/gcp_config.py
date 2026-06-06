@@ -124,16 +124,26 @@ def build_upload_transport(*, raw_root: Path):
     )
 
 
-def build_sink(*, local_root: Path, service_name: str, compress: bool = False):
-    """`AnalyticsLogger` に渡す `JsonlSink` を env に従って構築 (PROPOSAL-0010)。
+def build_sink(
+    *,
+    local_root: Path,
+    service_name: str,
+    compress: bool = False,
+    pubsub_config: PubSubAnalyticsConfig | None = None,
+):
+    """`AnalyticsLogger` に渡す `JsonlSink` を構築 (PROPOSAL-0010)。
 
-    - backend=pubsub + topic 設定あり → `PubSubSink` (Pub/Sub 入口)
+    - `pubsub_config` 明示 or backend=pubsub + topic 設定あり → `PubSubSink` (Pub/Sub 入口)
     - それ以外 (local / gcs / 設定不備) → `RotatingFileSink` (ローカル JSONL)
+
+    `pubsub_config` を渡すと env を読まずにその設定を使う。pydantic Settings (.env)
+    から値を取る consumer は明示的に渡すこと (os.environ に無くても効く)。None の場合は
+    `ANALYTICS_STORAGE_BACKEND` / `ANALYTICS_PUBSUB_TOPIC` から読む。
 
     backend=gcs はローカルに書いて別途 uploader で GCS へ送る案B 互換のため、
     sink 自体は `RotatingFileSink`。pubsub backend のみ送信を sink で完結させる。
     """
-    pubsub_cfg = load_pubsub_config()
+    pubsub_cfg = pubsub_config if pubsub_config is not None else load_pubsub_config()
     if pubsub_cfg is not None:
         from .observability.sinks.pubsub_sink import PubSubSink  # noqa: PLC0415
 

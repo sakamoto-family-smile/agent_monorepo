@@ -182,6 +182,11 @@ dependencies = [
     { name = "uuid-utils" },
 ]
 
+[package.optional-dependencies]
+pubsub = [
+    { name = "google-cloud-pubsub" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "dbt-bigquery", marker = "extra == 'gcp'", specifier = ">=1.8.0" },
@@ -189,6 +194,7 @@ requires-dist = [
     { name = "dbt-duckdb", specifier = ">=1.8.0" },
     { name = "duckdb", specifier = ">=1.1.0" },
     { name = "google-cloud-bigquery", marker = "extra == 'gcp'", specifier = ">=3.20.0" },
+    { name = "google-cloud-pubsub", marker = "extra == 'pubsub'", specifier = ">=2.21.0" },
     { name = "google-cloud-storage", marker = "extra == 'gcp'", specifier = ">=2.18.0" },
     { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=2.18.0" },
     { name = "opentelemetry-api", specifier = ">=1.27.0" },
@@ -200,7 +206,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=8.2.3" },
     { name = "uuid-utils", specifier = ">=0.9.0" },
 ]
-provides-extras = ["gcs", "gcp"]
+provides-extras = ["gcs", "pubsub", "gcp"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1063,6 +1069,26 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/dc/24/6ca08b0a03c7b0c620427503ab00353a4ae806b848b93bcea18b6b76fde6/google_cloud_core-2.5.1.tar.gz", hash = "sha256:3dc94bdec9d05a31d9f355045ed0f369fbc0d8c665076c734f065d729800f811", size = 36078, upload-time = "2026-03-30T22:50:08.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/73/d9/5bb050cb32826466aa9b25f79e2ca2879fe66cb76782d4ed798dd7506151/google_cloud_core-2.5.1-py3-none-any.whl", hash = "sha256:ea62cdf502c20e3e14be8a32c05ed02113d7bef454e40ff3fab6fe1ec9f1f4e7", size = 29452, upload-time = "2026-03-30T22:48:31.567Z" },
+]
+
+[[package]]
+name = "google-cloud-pubsub"
+version = "2.39.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "grpc-google-iam-v1" },
+    { name = "grpcio" },
+    { name = "grpcio-status" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-sdk" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/11/2b/4bf2c17e319ff65340389565b0e1b4d72696d87802b2f5f94390fbefa73c/google_cloud_pubsub-2.39.0.tar.gz", hash = "sha256:eed65e25f57f95bf3e02d96d7ee171688b23922471f9f21b5a91ed90e1282c0f", size = 402096, upload-time = "2026-06-03T15:28:26.396Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/93/20/dd0b27d4ad4577c062e77ff968ca3e2d404186cd78c8a2a53a0ef5fe5389/google_cloud_pubsub-2.39.0-py3-none-any.whl", hash = "sha256:7210d691a46d7a66559696899ebe6eb731e63de29b624964b3be4dd2d12d3e19", size = 324665, upload-time = "2026-06-03T15:27:41.119Z" },
 ]
 
 [[package]]
@@ -2120,7 +2146,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "alembic" },
-    { name = "analytics-platform" },
+    { name = "analytics-platform", extra = ["pubsub"] },
     { name = "asyncpg" },
     { name = "fastapi" },
     { name = "google-cloud-aiplatform" },
@@ -2147,7 +2173,7 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "alembic", specifier = ">=1.13.0" },
-    { name = "analytics-platform", directory = "../analytics-platform" },
+    { name = "analytics-platform", extras = ["pubsub"], directory = "../analytics-platform" },
     { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "google-cloud-aiplatform", specifier = ">=1.60.0" },

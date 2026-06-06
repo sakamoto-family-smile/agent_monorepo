@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from analytics_platform.gcp_config import (
+    PubSubAnalyticsConfig,
     build_sink,
     detect_storage_backend,
     load_pubsub_config,
@@ -77,6 +78,18 @@ def test_build_sink_returns_pubsub_when_configured(
     monkeypatch.setenv("ANALYTICS_GCP_PROJECT", "proj")
 
     sink = build_sink(local_root=tmp_path, service_name="svc")
+
+    assert isinstance(sink, PubSubSink)
+
+
+def test_build_sink_with_explicit_pubsub_config_overrides_env(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # env が local でも、明示 config を渡せば PubSubSink になる (.env consumer 向け)。
+    monkeypatch.setenv("ANALYTICS_STORAGE_BACKEND", "local")
+    cfg = PubSubAnalyticsConfig(topic="analytics-events", project_id="proj")
+
+    sink = build_sink(local_root=tmp_path, service_name="svc", pubsub_config=cfg)
 
     assert isinstance(sink, PubSubSink)
 
