@@ -1,4 +1,4 @@
-# PROPOSAL-0010: analytics-platform Phase 5 完遂（本番イベントの GCS 永続化）
+# PROPOSAL-0010: analytics-platform Phase 5 完遂（Pub/Sub 入口 + 本番イベントの GCS 永続化）
 
 | | |
 |---|---|
@@ -15,96 +15,99 @@
 
 ## 1. Summary
 
-本番 Cloud Run で稼働中のエージェント（`piyolog-analytics` / `driving-license-bot`）は
-analytics イベントを発火しているが、**コンテナの揮発性ローカル FS に JSONL を書くだけ**で、
-GCS 等への永続化が無いため **scale-to-zero / 再起動 / 新リビジョンデプロイのたびに消失**している。
+本番 Cloud Run のエージェント（`piyolog-analytics` / `driving-license-bot`）は analytics イベントを発火しているが、
+**コンテナの揮発性ローカル FS に JSONL を書くだけ**で、再起動・scale-to-zero・新リビジョンのたびに消失している。
 
-analytics-platform の Phase 5（GCS / BigQuery / Workflows / Terraform / Monitoring）は**コードとしては大部分
-実装済**だが、(a) **terraform が未 apply で本番に GCS バケットが存在しない**、(b) **各エージェントが GCS backend
-に切り替わっていない（Step 10 未着手）**、(c) **Cloud Run の揮発 FS では「ローカル raw/ → 別 Job がアップロード」
-方式が別コンテナから FS を見れず成立しない**、という 3 点で本番イベントが永続化されていない。
+本提案は **イベント送信の入口を Cloud Pub/Sub に変更**し、Pub/Sub の **Cloud Storage サブスクリプション**で
+既存の GCS バケットへ流し込み、そこから **BigQuery external table → dbt marts**（Phase 5 で実装済）に繋ぐことで、
+本番イベントを確実に永続化する。
 
-本提案は、この 3 点を解消し **本番イベントを GCS（→ BigQuery external table → dbt marts）に確実に永続化**する
-ことをゴールとする。新規コードは最小限とし、既存の `GCSTransport` / `build_upload_transport()` /
-`build_payload_writer()` / terraform 資産を最大活用する。
+採用方式は **案E-1（Pub/Sub → GCS サブスク）**。クライアント（エージェント）は `AnalyticsLogger.emit()` で
+**publish するだけ**になり、ローカル FS への依存・アプリ内アップローダ・shutdown flush といった moving part が
+不要になる（揮発 FS 問題が入口で根本解決する）。実装は analytics-platform の**クライアントライブラリに
+`PubSubSink` を 1 つ足し、env で sink を選ぶ**のが中心で、emit API は不変。
 
 ## 2. Motivation
 
-- 本番のイベントが捨てられているため、**KPI 計測・本番の挙動観測・dbt marts が成立しない**。
-  ローカル開発フロー（`data/raw` JSONL → DuckDB → dbt）は機能するが、本番データが入らない。
-- Phase 1〜4（ローカル）は完了。Phase 5 は **Step 1,3〜9 がコード実装済、Step 2(Langfuse) / Step 10(エージェント切替)
-  が未着手**（`analytics-platform/README.md` Status / `docs/DESIGN.md` §6.3）。残りは「本番に配備して各エージェントを
-  繋ぐ」配線作業が主体。
-- 個人運営のため、**hot path の性能を落とさず・固定費を増やさず**永続化したい。
+- 本番イベントが捨てられており、**KPI 計測・本番挙動の観測・dbt marts が成立しない**。
+- Phase 1〜4（ローカル）完了。Phase 5 は **Step 1,3〜9 がコード実装済、Step 2(Langfuse)/Step 10(エージェント切替)
+  が未着手**。残りは「本番に配備して各エージェントを繋ぐ」配線。
+- 当初案（案B: ローカル FS + アプリ内アップローダ）はアプリに非同期バッファ/flush の複雑さが残る。**Pub/Sub を入口に
+  すれば、publish 時点で durable になり、呼び出し側の非同期管理が不要**になる（レビュー指摘）。Pub/Sub は
+  **月 10 GiB スループットまで無料枠**で、本システムの低頻度では実質 $0 のため、コスト障壁はない。
 
 ### 2.1 Goals
 
-- [ ] 本番 Cloud Run の emit イベントを **GCS に永続化**（→ BigQuery external table → dbt marts まで疎通）
-- [ ] analytics-platform の **terraform を本番 apply**（GCS バケット 3 種 / BQ dataset / SA + IAM / Monitoring）
-- [ ] 稼働中エージェント（まず `piyolog-analytics`、次に `driving-license-bot`）を **GCS backend に切替**（Step 10）
-- [ ] **Cloud Run の揮発 FS でも取りこぼさないアップロード方式**を確立し、文書化する
-- [ ] 既定は **後方互換**（`ANALYTICS_STORAGE_BACKEND=local` のまま、env で `gcs` 切替）。切替は env 1 つ
+- [ ] 本番 Cloud Run の emit イベントを **Pub/Sub 経由で GCS に永続化**（→ BigQuery external table → dbt marts まで疎通）
+- [ ] イベント送信ライブラリ（`analytics_platform.observability`）に **`PubSubSink` を追加**し、`AnalyticsLogger.emit()`
+      の API を変えずに backend を差し替え可能にする
+- [ ] 稼働中エージェント（まず `piyolog-analytics`、次に `driving-license-bot`）を **Pub/Sub backend に切替**（Step 10）
+- [ ] Pub/Sub topic / GCS サブスク / dead-letter / IAM を **terraform で本番作成**
+- [ ] 既定は **後方互換**（`ANALYTICS_STORAGE_BACKEND=local`）。切替は env のみ・即ロールバック可
 - [ ] 切替・ロールバック手順を明記する
 
 ### 2.2 Non-Goals
 
-- **Langfuse on GKE（Step 2）** の導入（別提案 / 別フェーズ。本提案は JSONL→GCS→BQ パイプラインに限定）
-- **全エージェントの一斉切替**（まず本番稼働中の 2〜3 サービスから段階適用。ローカルのみのサービスは対象外）
-- イベントスキーマの大改修（既存の discriminated union JSONL をそのまま使う）
-- リアルタイム / ストリーミング分析（バッチ前提。dbt は既存の定期実行）
+- **emit API（`AnalyticsLogger.emit`）の変更**（sink 差し替えのみ。呼び出し側コードは原則不変）
+- **Langfuse on GKE（Step 2）**（別フェーズ）
+- **全エージェントの一斉切替**（本番稼働中の 2〜3 サービスから段階適用。ローカルのみのサービスは対象外）
+- イベントスキーマの大改修 / リアルタイム集計（バッチ前提、dbt は既存の定期実行）
 
 ---
 
 ## 3. Proposal
 
-Phase 5 完遂を 3 つの未解決点（terraform 未 apply / エージェント未切替 / 揮発 FS）に分けて解く。
-最大の論点は **「Cloud Run の揮発 FS からどう GCS に届けるか」** であり、以下の方式から選ぶ。
+イベント送信の **入口を Pub/Sub** にする。クライアントライブラリの sink を `RotatingFileSink`（ローカル）から
+`PubSubSink`（topic に publish）へ env で切り替える。Pub/Sub からの出口は **Cloud Storage サブスク**で既存 GCS に
+流し、**BQ external table → dbt** をそのまま使う。
 
-| 方式 | 概要 | hot path 性能 | 取りこぼし耐性 | 新規コード | 既存資産活用 |
-|---|---|---|---|---|---|
-| **案A: GCSSink 直書き** | イベント JSONL を batch flush 時に GCS へ直接 PUT する新 Sink | 中（flush 時 GCS I/O） | 高（local FS 非依存） | 中（新 Sink） | `GCSTransport` 部分流用 |
-| **案B: in-process uploader（推奨）** | 既存どおり `RotatingFileSink` で local に書き、**アプリ内バックグラウンドタスクが短間隔で `GCSTransport` により GCS へ flush** + shutdown 時 flush | 高（append はローカル） | 中（flush 間隔分の窓） | 小（runner + 起動配線） | `LocalUploader`/`GCSTransport` をほぼそのまま |
-| 案C: GCS FUSE マウント | `analytics_data_dir` を Cloud Run の GCS volume にマウント | 低（小ファイル高頻度に弱い） | 高 | ほぼ無 | — |
-| 案D（却下）: 別 Cloud Run Job で raw/ をアップロード | 別 Job が agent の揮発 FS を読む | — | **不成立** | — | — |
+| 方式 | 入口 | 出口 | 呼出側の複雑さ | 揮発FS耐性 | 既存資産 | コスト |
+|---|---|---|---|---|---|---|
+| **案E-1（採用/推奨）** | Pub/Sub topic | **GCS サブスク** → 既存 GCS → BQ external table → dbt | **小**（publish のみ） | **◎ 入口で解決** | dbt/external table 流用 | 無料枠内 |
+| 案E-2 | Pub/Sub topic | **BQ サブスク**（直接） | 小 | ◎ | GCS/external 層を撤去、dbt source 変更 | 無料枠内 |
+| 案B | RotatingFileSink(local) | アプリ内 uploader → GCS → BQ | 中（buffer/flush/shutdown） | △（flush 窓） | 最大流用 | 無料枠内 |
+| 案A | GCSSink 直書き | GCS → BQ | 中 | ◎ | 一部流用 | 無料枠内 |
+| 案D（却下） | 別 Job が raw/ 収集 | — | — | **不成立** | — | — |
 
-> **推奨は案B**。理由: 既存 `LocalUploader` / `GCSTransport` をほぼそのまま使え、**hot path はローカル append のまま**で
-> 性能劣化が無く、flush 間隔を短く（例 30〜60s）すれば取りこぼし窓は実用上小さい。Cloud Run の SIGTERM 猶予中に
-> best-effort の最終 flush を行う。イベント低頻度（個人運営）なので案B で十分。
-> 案A（GCSSink）は窓ゼロにできるが hot path / batch に GCS I/O が乗る。将来高頻度化したら案A へ移行可能。
-> 案C（FUSE）は小ファイル高頻度 append に弱く却下寄り。
+> **採用は案E-1**。`AnalyticsLogger` が既にバッファ + 非同期フラッシュを内蔵しているため、`PubSubSink.write_batch()` は
+> publish するだけでよく、**アプリ側に追加の非同期処理は不要**。Pub/Sub クライアントがバッチ/リトライを担い、publish ack
+> 時点で durable なので **Cloud Run の揮発 FS / scale-to-zero でも取りこぼさない**。出口を GCS サブスクにすることで
+> 既存の external table / dbt 資産をそのまま活かす。
 
 ### 3.1 User Stories
 
 #### 3.1.1 ストーリー 1
-> 運営者として、本番で動いている LINE Bot 群の利用イベント（取り込み成否・相談回数等）を後から
-> BigQuery / dbt で集計したい。今はコンテナ再起動で消えてしまい計測できない。
+> 運営者として、本番の LINE Bot 群のイベントを後から BigQuery / dbt で集計したい。今は再起動で消える。
 
 #### 3.1.2 ストーリー 2
-> 開発者として、永続化を **env 1 つ（`ANALYTICS_STORAGE_BACKEND=gcs`）で on/off** したい。問題が出たら
-> その env を `local` に戻すだけでロールバックしたい。
+> 開発者として、イベント送信は `emit()` を呼ぶだけにしたい。アップロードの非同期管理やコンテナ終了時の flush を
+> アプリに書きたくない。切替は env 1 つで、問題が出たら `local` に戻すだけにしたい。
 
 ### 3.2 Notes / Constraints / Caveats
 
-- **GCS バケット名はグローバル一意**。terraform `name_prefix` を `sakamomo-family-agent-analytics` 等に設定する。
-- **リージョン整合**: terraform の bucket location 既定は `US`。egress / レイテンシ / proposal 0009 P4 のリージョン整理に
-  合わせ **`ASIA-NORTHEAST1`** に寄せる。BigQuery dataset も同一ロケーションにする（external table 制約）。
-- **認証**: Cloud Run の SA に GCS 書込（`roles/storage.objectAdmin` を raw/payloads prefix にスコープ）を付与。
-  CI は WIF（既存 `pr-tests.yml` の WIF パターン踏襲）。
-- **揮発 FS と flush 窓**: 案B はクラッシュ / 強制終了時に未 flush 分（最大 flush 間隔）を失う。低頻度のため許容。
-  窓ゼロが要件化したら案A へ。
-- **payload**: 8KB 超の本文は `GCSPayloadWriter`（実装済）で GCS payloads/ prefix に直書きできる。イベント本体（raw JSONL）
-  とは別 prefix。
+- **`AnalyticsLogger.emit` は不変**。差し替えるのは `JsonlSink` 実装（`write_batch(lines)`）。`PubSubSink` は各行（JSON
+  イベント）を Pub/Sub message として publish する。
+- **at-least-once**: Pub/Sub は最低 1 回配信で重複し得る。既存の `event_id`（`sha256(...)`）で **dbt 側 dedup** する
+  （現行の冪等設計を踏襲）。
+- **GCS サブスクのファイル/パーティション命名**は現行の Hive `service_name=/event_type=/dt=/hour=` と異なり、
+  **ingestion 日時プレフィックス**ベースになる。よって BQ external table を「日時パーティション + `service_name`/`event_type`
+  はメッセージ内カラムとして読む」形に**定義調整**が要る（§4.2 / §3.3）。
+- **無料枠**: Pub/Sub は月 10 GiB スループット無料。本システムは低頻度のため実質 $0。GCS / BQ も従量・微小。
+- **fail-open**: publish 失敗はアプリ本体を止めない（best-effort、ログ + メトリクス）。Pub/Sub クライアントが
+  リトライ、恒久失敗は dead-letter topic へ。
+- **ローカル開発**: ローカルは引き続き `local`（ファイル）backend を既定にする。Pub/Sub エミュレータは任意
+  （cloud のみ pubsub backend を使う運用で十分）。
 
 ### 3.3 Risks and Mitigations
 
 | リスク | 影響度 | 対策 |
 |---|---|---|
-| flush 前のコンテナ強制終了でイベント取りこぼし | Medium | flush 間隔を短く（30〜60s）+ SIGTERM 時 best-effort flush。低頻度のため実害小。要件次第で案A へ |
-| GCS 書込権限不足で全 emit が失敗 / アプリに影響 | High | emit / upload は **fail-open**（失敗してもアプリ本体は継続）。dead_letter/ に退避し再送。SA 権限を事前検証 |
-| terraform apply で既存リソースに影響 | Medium | analytics-platform は新規スタック（既存と独立 state）。plan を目視。バケット名一意性を事前確認 |
-| 固定費の増加 | Low | GCS は従量・低額（イベント微小）。lifecycle で NEARLINE→COLDLINE→ARCHIVE 逓減（terraform 実装済） |
-| BigQuery external table がパーティションを認識しない | Medium | Hive partition (`service_name=/event_type=/dt=/hour=`) を GCSTransport が保持。autodetect 設定済。疎通テストで確認 |
-| 切替後にイベントが二重 / 欠落 | Medium | env gate で段階適用。1 サービスずつ切替→ GCS / BQ で件数照合してから次へ |
+| GCS サブスクのファイル命名が external table 定義と不一致でクエリできない | High | external table を ingestion 日時パーティション + カラム読みに再定義し、疎通テストで確認（§4.5） |
+| 重複配信でイベント二重計上 | Medium | `event_id` で dbt staging に dedup を入れる（既存ハッシュ流用） |
+| publish 失敗でイベント欠落 / アプリ影響 | Medium | fail-open + Pub/Sub リトライ + dead-letter topic。送信失敗率を Monitoring |
+| Pub/Sub / サブスク / IAM の新規インフラが増える | Medium | terraform で一括管理（topic/subscription/dead-letter/SA）。plan 目視 |
+| backend 切替時の二重 / 欠落 | Medium | env gate で 1 サービスずつ切替→ GCS/BQ で件数照合してから次へ |
+| 無料枠超過 | Low | 低頻度で当面無料枠内。Monitoring でスループット監視、超過時アラート |
 
 ---
 
@@ -114,93 +117,105 @@ Phase 5 完遂を 3 つの未解決点（terraform 未 apply / エージェン�
 
 ```
 Before（本番イベントは消失）
-  Cloud Run (piyolog / driving-license-bot)
-    AnalyticsLogger → RotatingFileSink → /data/raw/...jsonl  （揮発 FS）
-                                            └─ 再起動で消失。GCS 連携なし
+  Cloud Run (agent)
+    AnalyticsLogger.emit → RotatingFileSink → /data/raw/...jsonl  （揮発 FS、再起動で消失）
 
-After（案B: in-process uploader）
-  Cloud Run (agent, ANALYTICS_STORAGE_BACKEND=gcs)
-    AnalyticsLogger → RotatingFileSink → ./data/raw/...jsonl
-                          │
-                          └─ 同コンテナ内 background task（30〜60s 間隔 + shutdown flush）
-                                LocalUploader.run_once() → GCSTransport.send()
-                                   → gs://<bucket>/uploaded/service_name=.../*.jsonl
-                                        └→ BigQuery external table → dbt staging/marts
-    payload(8KB+) → GCSPayloadWriter → gs://<bucket>/payloads/...
+After（案E-1: Pub/Sub 入口）
+  Cloud Run (agent, ANALYTICS_STORAGE_BACKEND=pubsub)
+    AnalyticsLogger.emit
+       └─ (buffer + 非同期 flush は AnalyticsLogger が内蔵)
+            └─ PubSubSink.write_batch(lines)
+                  → publish to topic: analytics-events            ← ここで durable
+                        │
+              Pub/Sub Cloud Storage サブスク（バッチ）
+                        ↓
+              gs://<raw-bucket>/<prefix>/<YYYY/MM/DD/HH>/...        （既存バケット）
+                        ↓
+              BigQuery external table → dbt staging/marts          （Phase 5 実装済を流用）
+        恒久失敗 → dead-letter topic
 ```
+
+#### クライアントライブラリ（送信側）の構造
+
+- 入口: `analytics_platform.observability.AnalyticsLogger`（path dep）。`emit()` が **バリデーション + バッファ +
+  非同期フラッシュ**を担い、`JsonlSink.write_batch(lines: list[str])` を呼ぶ（`sinks/file_sink.py` の Protocol）。
+- 現状: `RotatingFileSink`（ローカル Hive JSONL）/ `NoOpSink` のみ。
+- 追加: **`PubSubSink(JsonlSink)`** — `write_batch` で各行を topic に publish（fire-and-forget、ack で durable）。
+- **backend 選択を 1 箇所に集約**: `gcp_config.build_sink(...)` を新設（既存 `build_upload_transport` / `build_payload_writer`
+  と同様）し、`ANALYTICS_STORAGE_BACKEND` で `local`→`RotatingFileSink` / `pubsub`→`PubSubSink` を返す。
+  エージェントの `setup.py` はこの factory を呼ぶだけ（現状のハードコードを置換 = Step 10）。
 
 #### 環境別の格納先（local / cloud）と切替
 
-イベントの格納先は **稼働環境ではなく `ANALYTICS_STORAGE_BACKEND` で決まる**（ローカルでも `gcs` を、クラウドでも
-`local` を選べるが、実運用は下表の組合せ）。
+格納先は稼働環境ではなく **`ANALYTICS_STORAGE_BACKEND`** で決まる。
 
-| 稼働環境 / backend | イベント本体 (raw JSONL) | 大容量 payload | 永続性 |
+| 稼働環境 / backend | イベント本体 | 大容量 payload | 永続性 |
 |---|---|---|---|
-| ローカル / `local`（既定） | ローカル FS `${ANALYTICS_DATA_DIR}/raw/`（→ DuckDB / dbt local） | `${ANALYTICS_DATA_DIR}/payloads/` | ✅ ディスク |
-| クラウド / `gcs` | ローカル raw/ に一旦書き → uploader が flush → `gs://<bucket>/uploaded/service_name=.../*.jsonl` → BigQuery external table → dbt marts | `gs://<bucket>/payloads/`（`GCSPayloadWriter` 直書き） | ✅ GCS |
-| （参考）現状クラウド | コンテナ揮発 FS のみ | コンテナ揮発 FS のみ | ❌ 再起動で消失 |
+| ローカル / `local`（既定） | ローカル FS `${ANALYTICS_DATA_DIR}/raw/` → DuckDB/dbt | `.../payloads/` | ✅ ディスク |
+| クラウド / `pubsub`（推奨） | Pub/Sub topic → GCS サブスク → `gs://<bucket>/...` → BQ external table → dbt | `gs://<bucket>/payloads/`（`GCSPayloadWriter` 直書き） | ✅ Pub/Sub→GCS |
+| （参考）現状クラウド | コンテナ揮発 FS のみ | コンテナ揮発 FS のみ | ❌ 消失 |
 
 **切替は env のみ**（コード変更・再ビルド不要、再デプロイのみ）:
 
 | env | 値 | 役割 |
 |---|---|---|
-| `ANALYTICS_STORAGE_BACKEND` | `local`（既定）/ `gcs` | 格納先スイッチ |
-| `ANALYTICS_GCS_BUCKET` | バケット名 | `gcs` 時必須。未設定なら **local に自動フォールバック + 警告**（`gcp_config.load_gcs_config`） |
+| `ANALYTICS_STORAGE_BACKEND` | `local`（既定）/ `pubsub`（/ `gcs` は案B 互換の file-upload） | sink 選択スイッチ |
+| `ANALYTICS_PUBSUB_TOPIC` | topic 名 | `pubsub` 時必須。未設定なら local に fallback + 警告 |
 | `ANALYTICS_GCP_PROJECT` | project id | Cloud Run + WIF なら省略可 |
-| `ANALYTICS_ENABLED` | `true` / `false` | emit 自体の on/off（false で NoOp） |
-| `ANALYTICS_DATA_DIR` | パス | ローカル root（既定 `./data`） |
+| `ANALYTICS_ENABLED` | `true`/`false` | emit 自体の on/off（false で NoOp） |
+| `ANALYTICS_DATA_DIR` | パス | ローカル root（`local` 時のみ使用、既定 `./data`） |
 
-- 既定 `local` のため、何もしなければ現行どおり（後方互換）。本番は `gcs` + bucket を Cloud Run env に足して再デプロイ。
+- 既定 `local` で現行どおり（後方互換）。本番は `pubsub` + topic を Cloud Run env に足して再デプロイ。
 - ロールバックは env を `local` に戻して再デプロイするだけ。
-- backend 選択ロジック（`detect_storage_backend` / `load_gcs_config` / `build_upload_transport` / `build_payload_writer`）は
-  analytics-platform 側に実装済。**エージェントの `setup.py` がそれらを呼ぶよう変える + config に上記 env を追加する**のが Step 10 の作業。
 
 ### 4.2 データモデル
 
-- イベントスキーマ変更なし（既存 discriminated union JSONL / Hive partition をそのまま）。
-- GCS key 構造: `uploaded/service_name=<svc>/event_type=<et>/dt=<YYYY-MM-DD>/hour=<HH>/<file>.jsonl[.gz]`。
-- BigQuery external table が上記 prefix を Hive partition として読む（実装済）。
+- イベントスキーマ変更なし（既存 discriminated union JSONL を Pub/Sub message body にそのまま載せる）。
+- GCS 上のファイルは GCS サブスクが ingestion 日時でパーティション。`service_name` / `event_type` / `ts` /
+  `event_id` 等は**メッセージ内のカラム**として保持され、BQ external table はそれらをカラムとして読む
+  （Hive パス partition から日時 partition + カラムフィルタへ定義変更）。
+- dedup は `event_id` で dbt staging にて実施。
 
 ### 4.3 API
 
-- 外部 API 変更なし。切替は env（`ANALYTICS_STORAGE_BACKEND` / `ANALYTICS_GCS_BUCKET` / `ANALYTICS_GCP_PROJECT`）。
+- 外部 API / emit API 変更なし。切替は env（`ANALYTICS_STORAGE_BACKEND` / `ANALYTICS_PUBSUB_TOPIC` / `ANALYTICS_GCP_PROJECT`）。
 
 ### 4.4 主要モジュール
 
 | 区分 | 変更 |
 |---|---|
-| analytics-platform | uploader の **実行 entrypoint**（`python -m analytics_platform.uploader` 相当の async runner）を追加。アプリ内 background task として起動できる薄い API（`start_background_uploader(...)`）も提供 |
-| analytics-platform | （案A 採用時のみ）`GCSSink` を新設。本提案では推奨案B のため optional |
-| agent: instrumentation | `setup.py` を **`build_payload_writer()` / `build_upload_transport()`（`gcp_config`）利用**に変更。`ANALYTICS_STORAGE_BACKEND=gcs` のとき GCS、`local` 既定で現行どおり。app startup で background uploader を起動、shutdown で flush |
-| agent: config | `analytics_storage_backend` / `analytics_gcs_bucket` / `analytics_gcp_project` を `Settings` に追加（既定 local/空） |
-| terraform | analytics-platform `terraform/` を **本番 apply**。`name_prefix` / bucket location（asia-northeast1）/ project を設定。各 agent SA に GCS 書込 IAM を付与 |
-| Cloud Run env | 対象サービスに `ANALYTICS_STORAGE_BACKEND=gcs` / `ANALYTICS_GCS_BUCKET=<raw bucket>` / `ANALYTICS_GCP_PROJECT` を設定して再デプロイ |
+| analytics-platform (lib) | `observability/sinks/pubsub_sink.py` に **`PubSubSink(JsonlSink)`** を追加（`google-cloud-pubsub`、`[pubsub]` extra・遅延 import）。`gcp_config.build_sink()` を新設して backend で sink を選択 |
+| analytics-platform (terraform) | Pub/Sub **topic** / **GCS サブスク** / **dead-letter topic + サブスク** / 関連 IAM を追加。BQ external table を ingestion 日時 partition + カラム読みに調整。既存 GCS バケット/BQ dataset/Monitoring は流用 |
+| agent: instrumentation | `setup.py` を **`build_sink()` 利用**に変更（`RotatingFileSink` ハードコードを置換）。`emit` 呼び出し箇所は不変 |
+| agent: config | `analytics_storage_backend` / `analytics_pubsub_topic` / `analytics_gcp_project` を `Settings` に追加（既定 local/空） |
+| Cloud Run env | 対象サービスに `ANALYTICS_STORAGE_BACKEND=pubsub` / `ANALYTICS_PUBSUB_TOPIC=<topic>` / `ANALYTICS_GCP_PROJECT` を設定し、SA に `roles/pubsub.publisher` を付与して再デプロイ |
 
 ### 4.5 Test Plan
 
-- **Unit**: backend 選択（`detect_storage_backend` / `load_gcs_config` の local/gcs/fallback）、uploader の retry / dead_letter 振り分け、Hive key 生成。
-- **Integration**: fake GCS client（既存 `tests/test_gcs_transport.py` 流儀）で emit → `run_once` → 期待 GCS key にアップロード・local 削除を確認。
-- **E2E（本番 / staging）**:
-  - [ ] 対象サービスを `gcs` 切替・再デプロイ後、テストイベント発火 → `gs://<bucket>/uploaded/...` にオブジェクト出現
-  - [ ] BigQuery external table から当該イベントが SELECT できる
+- **Unit**: `build_sink` の backend 分岐（local/pubsub/fallback）、`PubSubSink.write_batch` が各行を publish するか
+  （fake publisher で検証）、publish 失敗時の fail-open。
+- **Integration**: Pub/Sub エミュレータ or fake で emit → publish → （サブスク相当の）GCS 書き込み形を検証。
+- **E2E（staging / 本番）**:
+  - [ ] 対象サービスを `pubsub` 切替・再デプロイ後、テストイベント発火 → topic にメッセージ → `gs://<bucket>/...` に出現
+  - [ ] BigQuery external table から当該イベントが SELECT でき、`event_id` dedup が効く
   - [ ] dbt（`--target gcp`）で staging/marts までビルドできる
   - [ ] env を `local` に戻すと現行どおり（後方互換）
+  - [ ] publish を強制失敗させてもアプリ本体は 200 を返し継続（fail-open）
 
 ### 4.6 Migration / Rollback
 
 - **Migration（段階適用）**:
-  1. terraform apply（GCS / BQ / IAM / Monitoring を本番作成）
-  2. analytics-platform に uploader runner 追加（コードのみ、挙動は env gate）
-  3. `piyolog-analytics` を `gcs` に切替・再デプロイ → GCS / BQ で件数照合
+  1. terraform apply（topic / GCS サブスク / dead-letter / IAM / external table 調整を本番作成）
+  2. analytics-platform に `PubSubSink` + `build_sink` を追加（コードのみ、挙動は env gate）
+  3. `piyolog-analytics` を `pubsub` に切替・再デプロイ → topic / GCS / BQ で件数照合
   4. 問題なければ `driving-license-bot` も切替
   5. dbt marts / Monitoring で観測開始
 - **Rollback**: 対象サービスの env を `ANALYTICS_STORAGE_BACKEND=local` に戻して再デプロイ（即時・コード変更不要）。
-  GCS / BQ リソースは残しても課金は微小。
 
 ### 4.7 Feature Enablement
 
-- `ANALYTICS_STORAGE_BACKEND`（既定 `local`）= `gcs` で有効化。`ANALYTICS_GCS_BUCKET` 未設定なら local に
-  fallback + 警告（`gcp_config.load_gcs_config` 実装済）。無効時は現行 NoOp / local 挙動を完全維持。
+- `ANALYTICS_STORAGE_BACKEND`（既定 `local`）= `pubsub` で有効化。`ANALYTICS_PUBSUB_TOPIC` 未設定なら local に
+  fallback + 警告。無効時は現行 local/NoOp 挙動を完全維持。
 
 ---
 
@@ -208,65 +223,74 @@ After（案B: in-process uploader）
 
 ### 5.1 Monitoring
 
-- Cloud Monitoring（terraform 実装済のアラートポリシー）: uploader 失敗率 / dead_letter 増加 / GCS 書込エラー。
-- BigQuery: 日次のイベント件数推移（外部テーブル → marts）。サービス別 emit 件数の急減を異常として検知。
-- アプリログ: uploader の `UploadOutcome`（uploaded / dead_letter 件数）を構造化ログで emit。
+- Pub/Sub: publish 失敗率 / 未 ack メッセージ数 / dead-letter のメッセージ数（Cloud Monitoring アラート）。
+- GCS サブスク: 書き込み遅延 / エラー。BigQuery: 日次イベント件数（marts）でサービス別 emit の急減を検知。
+- アプリ: `PubSubSink` の publish 成否を構造化ログ + メトリクスで emit。
 
 ### 5.2 Troubleshooting
 
 | 症状 | 原因 / 対処 |
 |---|---|
-| GCS にオブジェクトが出ない | env（backend/bucket/project）未設定 or SA 権限不足 → `gcp_config` 警告ログ / IAM 確認 |
-| dead_letter/ が増える | GCS 一時障害 / 権限 → 再送、`max_attempts` / backoff 調整 |
-| BQ external table が空 | prefix / Hive partition 不一致 → key 構造と external table 定義を照合 |
-| 再起動でまだ消える | env が `local` のまま or uploader 未起動 → backend と startup 配線を確認 |
+| GCS にファイルが出ない | サブスク未設定 / SA 権限（publisher / サブスク writer）→ IAM とサブスク設定を確認 |
+| BQ external table が空 | ファイル命名と external table 定義の不一致 → §4.2 の日時 partition / カラム定義を確認 |
+| 重複計上 | dbt の `event_id` dedup 未適用 → staging の distinct 化を確認 |
+| 再起動でまだ消える | env が `local` のまま or topic 未設定 → backend と topic を確認 |
+| dead-letter が増える | publish 先 / スキーマ不正 → メッセージとサブスク設定を点検 |
 
 ### 5.3 Dependencies
 
-- GCS / BigQuery / Cloud Monitoring / Secret Manager（不要）/ IAM（SA + WIF）
-- `google-cloud-storage`（analytics-platform `[gcs]` extra）/ `google-cloud-bigquery`（dbt-bigquery）
-- 既存: `GCSTransport` / `LocalUploader` / `build_upload_transport` / `build_payload_writer` / terraform 一式
+- Cloud Pub/Sub（topic / GCS サブスク / dead-letter）/ GCS / BigQuery / Cloud Monitoring / IAM（SA + WIF）
+- `google-cloud-pubsub`（analytics-platform `[pubsub]` extra）/ 既存 `google-cloud-storage` / dbt-bigquery
+- 既存資産: `AnalyticsLogger` / `JsonlSink` / `GCSPayloadWriter` / BQ external table / dbt / terraform 一式
 
 ### 5.4 Non-Functional Requirements
 
 #### 性能 (Performance)
-- hot path（emit）はローカル append のままで劣化なし（案B）。GCS 送信は background。
+- hot path（emit）は AnalyticsLogger のバッファ + publish（非同期）で劣化なし。GCS/BQ への配送は Pub/Sub が担う。
 
 #### コスト (Cost)
-- GCS 従量・低額（イベント微小 + lifecycle 逓減）。BigQuery external table はストレージ課金なし、クエリ従量。
-  固定費の増加はほぼ無し。
+- Pub/Sub は月 10 GiB 無料枠内（低頻度）。GCS / BQ external table も従量・微小。固定費増はほぼ無し。
 
 #### プライバシー / データ保持
-- LINE 個人データを含み得るため、バケットは非公開・最小権限 SA。lifecycle で逓減保持。payload は別 prefix。
+- LINE 個人データを含み得るため topic / バケットは非公開・最小権限 SA。GCS lifecycle で逓減保持。payload は別 prefix。
 
 #### キャパシティ
-- 低頻度（個人運営）。将来高頻度化時は flush 間隔短縮 or 案A（GCSSink）へ移行。
+- 低頻度（個人運営）。将来高頻度化しても Pub/Sub がスケール。サブスクのバッチ間隔 / ファイルサイズで調整。
 
 ---
 
 ## 6. Drawbacks
 
-- アプリ内 background uploader（案B）は **moving part が増える**（起動 / shutdown flush / 失敗時の dead_letter）。
-- flush 間隔分の **取りこぼし窓**が残る（低頻度ゆえ許容、要件次第で案A）。
-- terraform スタックを 1 つ本番運用に追加する（GCS / BQ / IAM / Monitoring の維持）。
+- 新規インフラ（Pub/Sub topic / GCS サブスク / dead-letter / IAM）が増え、terraform の維持対象が広がる。
+- **at-least-once** のため downstream で `event_id` dedup が必須（既存ハッシュで対応可だが dbt に明示実装が要る）。
+- GCS サブスクのファイル命名が現行 Hive partition と異なり、**BQ external table の定義変更**が必要。
+- ローカルと本番で backend が分かれる（local=ファイル / cloud=Pub/Sub）。ただし env 切替で吸収。
 
 ## 7. Alternatives
 
+### 案 E-1: Pub/Sub → GCS サブスク（採用 / 推奨）
+- 概要: 入口を Pub/Sub、出口を GCS サブスクにして既存 GCS / external table / dbt を流用。
+- 採用理由: 呼出側は publish のみで揮発 FS を入口で根本解決。既存 Phase 5 資産（GCS/dbt）を最大流用。無料枠内。
+
+### 案 E-2: Pub/Sub → BigQuery サブスク（直接）
+- 概要: GCS / external table を撤去し、Pub/Sub から BQ ネイティブテーブルへ直接書き込む。
+- 評価: 最もシンプル（中間層ゼロ）。ただし GCS の安価な長期アーカイブと既存 external-table/dbt 接続を失う。
+  GCS アーカイブ不要なら有力な簡素化。
+
+### 案 B: ローカル FS + アプリ内 uploader（旧推奨）
+- 概要: `RotatingFileSink` で local に書き、アプリ内 background `GCSTransport` で flush + shutdown flush。
+- 却下理由: アプリに buffer/flush/shutdown の複雑さが残り、flush 窓の取りこぼしもある。Pub/Sub 化で入口解決する方が綺麗。
+  ただし既存 uploader 資産を最大流用でき、Pub/Sub を増やしたくない場合の代替。
+
 ### 案 A: GCSSink で直書き
-- 概要: イベント JSONL を batch flush 時に GCS へ直接 PUT する新 Sink を実装し、local FS を経由しない。
-- 評価: 取りこぼし窓ゼロ。ただし hot path / batch に GCS I/O が乗り、新規 Sink コードが要る。**将来高頻度化したら本案へ移行**。
+- 概要: イベント JSONL を batch flush 時に GCS へ直接 PUT する新 Sink。
+- 評価: 取りこぼし窓ゼロだが hot path に GCS I/O が乗る。Pub/Sub を使わない最小構成の代替。
 
-### 案 B: in-process uploader（採用 / 推奨）
-- 概要: 既存 `RotatingFileSink` + アプリ内 background `LocalUploader`/`GCSTransport` で短間隔 flush + shutdown flush。
-- 採用理由: 既存資産をほぼそのまま使え、hot path 無劣化、env gate で段階適用・即ロールバック。個人運営の低頻度に最適。
-
-### 案 C: GCS FUSE ボリュームマウント
-- 概要: `analytics_data_dir` を Cloud Run の GCS volume にマウントし、書き込みをそのまま GCS に。
-- 却下寄り理由: 小ファイル高頻度 append にレイテンシ / 整合性面で弱い。コード変更は最小だが運用特性が読みにくい。
+### 案 C: GCS FUSE マウント
+- 却下寄り: 小ファイル高頻度 append にレイテンシ / 整合性で弱い。
 
 ### 案 D: 別 Cloud Run Job が raw/ をアップロード（却下）
-- 概要: 別 Job が定期的に agent の `raw/` を読んで GCS へ。
-- 却下理由: Cloud Run の揮発 FS は **別コンテナから参照不可**。アーキ的に成立しない。
+- 却下理由: Cloud Run の揮発 FS は別コンテナから参照不可。アーキ的に成立しない。
 
 ---
 
@@ -274,5 +298,6 @@ After（案B: in-process uploader）
 
 | 日付 | 種別 | 内容 |
 |---|---|---|
-| 2026-06-06 | Draft | 初稿。本番イベントが揮発 FS で消失している実態（`gcloud run` / コード調査）を踏まえ、Phase 5 完遂（terraform apply + Step 10 エージェント切替 + 揮発 FS 対応）を提案。方式は案B（in-process uploader）を推奨 |
-| 2026-06-06 | Draft | §4.1 に「環境別の格納先（local / cloud）と env 切替」表を追記（レビュー Q&A 反映）。切替は `ANALYTICS_STORAGE_BACKEND` のみ・既定 local で後方互換であることを明確化 |
+| 2026-06-06 | Draft | 初稿。本番イベントが揮発 FS で消失している実態を踏まえ Phase 5 完遂を提案。当初は案B（in-process uploader）を推奨 |
+| 2026-06-06 | Draft | §4.1 に環境別の格納先 / env 切替表を追記 |
+| 2026-06-06 | Draft | レビュー指摘（Pub/Sub 入口・呼出側を非同期にしない）を反映し、**案E-1（Pub/Sub → GCS サブスク）を推奨に格上げ**して全面改稿。クライアントライブラリ（`AnalyticsLogger` + `JsonlSink`）に `PubSubSink` を足し env で sink を選ぶ設計に。案B は代替へ降格 |
