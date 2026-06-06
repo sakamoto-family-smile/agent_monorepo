@@ -45,8 +45,14 @@ LINE から `分析 トヨタ` のように呼べる本番サービス**にす�
 - 分析ロジック自体の改修（既存の ticker 解決 / yfinance / 指標 / Claude 統合をそのまま使う）
 - **SQLite → Cloud SQL の本格移行**（MVP は ephemeral SQLite で割り切る。永続化は Phase 2）
 - Cloud Tasks による分散非同期（MVP は同一インスタンス内 BackgroundTasks。Phase 2 で検討）
-- EDINET 連携の本番化（`EDINET_ENABLED` は既定 false のまま。別途）
+- **複数銘柄を1コマンドで同時分析**（現状 `分析 <1銘柄>`。複数は複数コマンドで。バッチは将来）
+- LLM を Vertex AI 経由に変更（MVP は既存の Anthropic OAuth token 経路。Vertex は将来オプション、§7 案D）
 - Web UI / 公開 API の提供（LINE 経由に限定）
+
+> **EDINET 連携について（レビュー指摘）**: EDINET は本 agent に**実装済み**（`edinet_collector.collect_filings` /
+> `edinet-client[xbrl]` path dep / proposal 0006）だが **`EDINET_ENABLED` 既定 false** で無効。本提案では
+> **P3 で有効化**（`EDINET_API_KEY` を Secret Manager + `EDINET_ENABLED=true`）を扱う。有効化すると Claude が
+> XBRL/PDF を読むため分析が長くなる（1〜5分）。MVP(P1) では無効のまま。別 proposal に切り出しても良い。
 
 ---
 
@@ -76,7 +82,8 @@ Secret Manager: LINE secret/token / CLAUDE_CODE_OAUTH_TOKEN / BRAVE_API_KEY
 |---|---|
 | **P1 (MVP)** | terraform（Cloud Run + SA + Secret Manager + AR）+ cloudbuild + 画像配信（ImageStore + `/image/{id}.png`）+ チャートを LINE 画像メッセージで返す配線 + 配備・LINE Webhook 登録・疎通 |
 | **P2** | shared Cloud SQL へ移行（reports / price_cache / ticker_dictionary を永続化、SQLite→Postgres）、analytics を pubsub backend に切替 |
-| **P3** | Cloud Tasks で分析を別ワーカー化（長時間分析の信頼性 / スケール）、レート制限の強化、EDINET 本番化 |
+| **P3** | Cloud Tasks で分析を別ワーカー化（長時間分析の信頼性 / スケール）、レート制限の強化、**EDINET 有効化**（`EDINET_API_KEY` + `EDINET_ENABLED=true`） |
+| **将来** | LLM 経路を **Vertex AI Claude** に切替（要 Vertex で Claude 承認、§7 案D）、複数銘柄バッチ分析 |
 
 > MVP は **P1 のみ**。動いてから P2/P3 を必要に応じて。
 
@@ -127,14 +134,33 @@ After (P1/MVP):
   analytics → Pub/Sub → GCS (PROPOSAL-0010)
 ```
 
-### 4.2 データモデル
+### 4.2 データモデル（DB に保存される内容・履歴）
 
-- MVP はスキーマ変更なし（既存 SQLite テーブル: ticker_dictionary / price_cache / reports / alerts / edinet_documents）。
-  Cloud Run では ephemeral。P2 で Postgres へ（移行スクリプト or 作り直し）。
+既存 SQLite（`services/database.py`）のテーブル:
 
-### 4.3 API
+| テーブル | 内容 | 履歴か |
+|---|---|---|
+| `ticker_dictionary` | 企業名↔ティッカーの辞書（alias/market） | 種データ |
+| `price_cache` | yfinance OHLCV のキャッシュ（TTL） | キャッシュ |
+| **`reports`** | **分析結果（ticker / company / report_data JSON / created_at）** | **= 分析履歴** |
+| `alerts` | 価格アラート（最小限） | 設定 |
+| `edinet_documents` | EDINET 提出書類インデックス | 索引 |
+
+- **分析履歴は `reports` テーブルに保存される**。ただし **MVP(P1) は Cloud Run の ephemeral SQLite なので、
+  再起動で履歴/キャッシュは消える**（cache は再取得で復元）。**永続的な履歴が要れば P2 で shared Cloud SQL へ**
+  （SQLite→Postgres 移行 or 作り直し）。
+- MVP はスキーマ変更なし。
+
+### 4.3 API / LINE での結果の渡し方
 
 - LINE webhook（既存 `/api/line/webhook` 等）。画像配信用に **`GET /api/line/image/{image_id}.png`** を追加。
+- **テキストレポートの配信方法（レビュー指摘）**: `分析 <銘柄>` は ack を Reply で返したあと、分析完了後に
+  **LINE Push（`_push_flex_or_text`）で結果を送る**。本文は **Flex バブル（`analysis_summary_bubble`）でサマリ表示**し、
+  Flex 不可時は**テキスト fallback（本文先頭 ~1500 字）** に落ちる（`line_handler._cmd_analyze`）。
+  - 長いレポートは LINE 向けに**要約/先頭抜粋**される（全文ではない）。P1 で、必要なら分割送信や要約強化を検討。
+  - **チャート画像**は本提案で追加する経路で**別途 image メッセージ**として push する。
+- **1コマンド=1銘柄**: `target = " ".join(args)` を1クエリとして ticker 解決するため、`分析 トヨタ` のように
+  1銘柄ずつ。複数企業は複数コマンドを送る（同時バッチは将来）。
 
 ### 4.4 主要モジュール
 
@@ -228,10 +254,12 @@ After (P1/MVP):
 - 概要: チャートを GCS に置き公開 URL を LINE に渡す。
 - 評価: 永続配信には良いが、MVP は Cloud Run 自身が in-memory 配信する方が簡単（バケット/IAM 不要）。P2 で検討。
 
-### 案 D: LLM を Vertex AI / Gemini に変更
-- 概要: Claude を Vertex AI 経由や Gemini に切替える。
-- 却下理由: 既存実装は **Anthropic OAuth token 経由の claude-agent-sdk**（Vertex 非依存）で動いており、Vertex 承認も
-  Gemini フォールバックも不要。コスト/品質都合で将来見直す余地はあるが、本提案では既存経路を維持する。
+### 案 D: LLM を Vertex AI Claude 経由に変更（**将来対応予定**）
+- 概要: claude-agent-sdk を Vertex AI 経由（env: `CLAUDE_CODE_USE_VERTEX=1` / `ANTHROPIC_VERTEX_PROJECT_ID` /
+  `CLOUD_ML_REGION`）に切替える。**ユーザー要望により後追いで対応予定**。
+- 本提案での扱い: **MVP(P1) は既存の Anthropic OAuth token 経路を採用**（Vertex 承認不要・最短）。
+  Vertex 切替は別フェーズ（前提: 当該 project の Vertex AI で Claude が承認されていること。location は us-east5 等）。
+  切替は orchestrator の env 設定差分が中心で、コードの大改修は不要。
 
 ---
 
@@ -241,3 +269,4 @@ After (P1/MVP):
 |---|---|---|
 | 2026-06-07 | Draft | 初稿。stock-analysis-agent は LINE ロジック実装済・GCP 配備資産ゼロという調査結果を踏まえ、既存 LINE Bot 配備パターン（driving-license/piyolog）を踏襲した Cloud Run 配備 + チャート画像配信を MVP(P1) として提案。永続化(P2)/分散(P3) は段階導入 |
 | 2026-06-07 | Draft (訂正) | LLM 認証経路を確認: **Vertex AI ではなく Anthropic OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`) 経由**（orchestrator.py）と判明。「Vertex Claude 承認」前提を撤回し、必要 Secret を LINE secret/token + `CLAUDE_CODE_OAUTH_TOKEN` + `BRAVE_API_KEY` に修正。brave-search は npx in-process（Node.js 同梱） |
+| 2026-06-07 | Draft (レビュー反映) | PR #199 のレビュー反映: ① Vertex は将来オプションと明記（§7 案D）② テキストレポートの配信方法（Flex バブル + テキスト fallback 先頭~1500字、Push）を §4.3 に追記 ③ EDINET は実装済(既定 false)→ P3 で有効化と明記 ④ DB 保存内容/履歴（reports=分析履歴、MVP は ephemeral）を §4.2 に詳述 ⑤ 1コマンド=1銘柄（複数はバッチ将来）を明記 |
