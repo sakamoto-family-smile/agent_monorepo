@@ -48,6 +48,22 @@ resource "google_secret_manager_secret" "brave_api_key" {
   depends_on = [google_project_service.secretmanager]
 }
 
+# DB password は terraform が生成して自動投入 (PROPOSAL-0011 P2-B)。
+resource "google_secret_manager_secret" "db_password" {
+  secret_id = local.secret_db_password
+  replication {
+    auto {}
+  }
+  labels = local.labels
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_version" "db_password" {
+  secret      = google_secret_manager_secret.db_password.id
+  secret_data = random_password.db_password.result
+}
+
 # SA に各 Secret への accessor 権限を付与
 resource "google_secret_manager_secret_iam_member" "service_line_channel_secret" {
   secret_id = google_secret_manager_secret.line_channel_secret.id
@@ -69,6 +85,12 @@ resource "google_secret_manager_secret_iam_member" "service_claude_code_oauth_to
 
 resource "google_secret_manager_secret_iam_member" "service_brave_api_key" {
   secret_id = google_secret_manager_secret.brave_api_key.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.service.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "service_db_password" {
+  secret_id = google_secret_manager_secret.db_password.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.service.email}"
 }

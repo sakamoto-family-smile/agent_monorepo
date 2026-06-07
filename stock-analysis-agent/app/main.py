@@ -12,6 +12,7 @@ from instrumentation import (
     start_upload_loop,
 )
 from services.database import init_db
+from services.db_engine import dispose_engine
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await shutdown_observability()
+        await dispose_engine()
 
 
 app = FastAPI(

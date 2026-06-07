@@ -29,7 +29,6 @@ from datetime import date, timedelta
 from edinet_client import EdinetClient, InMemoryCache
 
 from config import settings
-from services.database import init_db
 from services.edinet_index_repo import EdinetIndexRepo
 
 logger = logging.getLogger(__name__)
@@ -147,7 +146,9 @@ async def main_async(argv: list[str]) -> int:
         target_dates[-1] if target_dates else "—",
     )
 
-    await init_db()  # 既存テーブルがなければ作る
+    # EDINET (edinet_documents) は P2-B では aiosqlite 据え置き。core init_db は
+    # 本テーブルを作らないため、repo 自身でスキーマを用意する (P3 で Cloud SQL 移行)。
+    await EdinetIndexRepo().ensure_schema()
     summary = await run(target_dates)
     logger.info("edinet_index_etl finished: %s", summary)
     return 0 if summary["failed_days"] == 0 else 1
