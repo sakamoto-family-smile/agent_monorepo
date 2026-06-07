@@ -148,6 +148,48 @@ def test_setup_with_gcs_backend_falls_back_when_bucket_missing(
     assert isinstance(cr.writer, LocalFilePayloadWriter)
 
 
+# --------------------------------------------------------------------------
+# PROPOSAL-0010 P5-3 / 0011 P2-A: Pub/Sub backend 切替
+# --------------------------------------------------------------------------
+
+
+def test_setup_with_pubsub_backend_uses_pubsub_sink(monkeypatch, tmp_path: Path):
+    """`backend=pubsub` + topic 設定で PubSubSink が選ばれる (publisher は遅延生成)。"""
+    from analytics_platform.observability.sinks.pubsub_sink import PubSubSink
+    from config import settings
+
+    monkeypatch.setattr(settings, "analytics_enabled", True)
+    monkeypatch.setattr(settings, "analytics_data_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "otel_exporter_otlp_endpoint", "")
+    monkeypatch.setattr(settings, "analytics_storage_backend", "pubsub")
+    monkeypatch.setattr(settings, "analytics_pubsub_topic", "analytics-events")
+    monkeypatch.setattr(settings, "analytics_gcp_project", "test-project")
+
+    instrumentation.setup_observability()
+
+    al = instrumentation.get_analytics_logger()
+    assert isinstance(al._sink, PubSubSink)
+
+
+def test_setup_pubsub_backend_without_topic_falls_back_to_file_sink(
+    monkeypatch, tmp_path: Path
+):
+    """`backend=pubsub` でも topic 未設定なら RotatingFileSink にフォールバック。"""
+    from analytics_platform.observability.sinks.file_sink import RotatingFileSink
+    from config import settings
+
+    monkeypatch.setattr(settings, "analytics_enabled", True)
+    monkeypatch.setattr(settings, "analytics_data_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "otel_exporter_otlp_endpoint", "")
+    monkeypatch.setattr(settings, "analytics_storage_backend", "pubsub")
+    monkeypatch.setattr(settings, "analytics_pubsub_topic", "")
+
+    instrumentation.setup_observability()
+
+    al = instrumentation.get_analytics_logger()
+    assert isinstance(al._sink, RotatingFileSink)
+
+
 def test_setup_creates_uploader_when_analytics_enabled(monkeypatch, tmp_path: Path):
     """ANALYTICS_ENABLED=true なら LocalUploader が DI コンテナにある。"""
     from analytics_platform.uploader.local_uploader import LocalUploader

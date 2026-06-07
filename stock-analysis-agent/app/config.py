@@ -47,14 +47,21 @@ class Settings:
     otel_sampling_ratio: float = float(os.getenv("OTEL_SAMPLING_RATIO", "1.0"))
     service_version: str = os.getenv("SERVICE_VERSION", "0.1.0")
 
-    # ── 分析基盤 GCP backend (Phase 5 Step 10) ──
-    # `local` (既定) | `gcs`。`gcs` のとき content payload と JSONL の upload 先が
-    # GCS に切り替わる。残りの GCS 設定は analytics_platform.gcp_config が env から読む:
+    # ── 分析基盤 GCP backend (Phase 5 Step 10 / PROPOSAL-0010 P5-3) ──
+    # `local` (既定) | `gcs` | `pubsub`。
+    #   - local : ローカル JSONL のみ (dev)
+    #   - gcs   : ローカル JSONL を LocalUploader で GCS へ転送 (案B 互換)
+    #   - pubsub: イベント行を直接 Pub/Sub topic に publish (PROPOSAL-0010 入口)
+    # 残りの GCS 設定は analytics_platform.gcp_config が env から読む:
     #   ANALYTICS_GCS_BUCKET / ANALYTICS_GCS_RAW_PREFIX / ANALYTICS_GCS_PAYLOAD_PREFIX
-    #   ANALYTICS_GCP_PROJECT
     analytics_storage_backend: str = os.getenv(
         "ANALYTICS_STORAGE_BACKEND", "local"
     ).lower()
+    # backend=pubsub のとき必須。topic 短縮名 (例 "analytics-events") かフルパス
+    # (projects/<p>/topics/<name>)。未設定なら local JSONL に fallback。
+    analytics_pubsub_topic: str = os.getenv("ANALYTICS_PUBSUB_TOPIC", "")
+    # Pub/Sub / GCS の project_id。短縮名 topic のとき必須 (未指定なら ADC 推論)。
+    analytics_gcp_project: str = os.getenv("ANALYTICS_GCP_PROJECT", "")
     # 周期的に LocalUploader.run_once() を回す間隔 (秒)。0 以下なら定期 upload 無効
     # (shutdown 時のみ 1 回 upload する)。`gcs` backend のときに意味を持つ。
     analytics_upload_interval_seconds: int = int(

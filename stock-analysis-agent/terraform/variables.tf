@@ -88,3 +88,23 @@ variable "edinet_enabled" {
   default     = false
   description = "EDINET 法定開示連携。P1 は false (yfinance + Brave のみ)。P3 で true + EDINET_API_KEY 投入。"
 }
+
+# ─────────────────────────────────────────────────────────────────────
+# analytics-platform 連携 (PROPOSAL-0011 P2-A / PROPOSAL-0010 P5)
+# ─────────────────────────────────────────────────────────────────────
+
+variable "analytics_storage_backend" {
+  type        = string
+  default     = "pubsub"
+  description = "イベント送信 backend。local | gcs | pubsub。P2-A で pubsub に切替 (Pub/Sub→GCS→BQ で本番イベントを永続化)。"
+}
+
+variable "analytics_pubsub_topic" {
+  type        = string
+  default     = "analytics-events"
+  description = "analytics-platform の events topic 短縮名 (analytics-platform terraform の name_prefix=analytics → analytics-events)。backend=pubsub のとき必須。"
+}
+
+# 前提: この SA (sa-stock-analysis-line) を analytics-platform terraform の
+# `publisher_service_account_emails` に追記して apply 済であること
+# (events topic への roles/pubsub.publisher 付与は analytics 側で行う)。

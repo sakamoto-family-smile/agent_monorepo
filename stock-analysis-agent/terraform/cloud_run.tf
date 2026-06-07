@@ -111,14 +111,22 @@ resource "google_cloud_run_v2_service" "stock" {
         value = tostring(var.analyze_rate_limit_per_day)
       }
 
-      # ─── analytics (MVP は local backend。pubsub 切替は P2) ────────
+      # ─── analytics (P2-A: pubsub 入口で本番イベントを永続化) ──────
       env {
         name  = "ANALYTICS_ENABLED"
         value = "true"
       }
       env {
         name  = "ANALYTICS_STORAGE_BACKEND"
-        value = "local"
+        value = var.analytics_storage_backend
+      }
+      env {
+        name  = "ANALYTICS_PUBSUB_TOPIC"
+        value = var.analytics_pubsub_topic
+      }
+      env {
+        name  = "ANALYTICS_GCP_PROJECT"
+        value = var.project_id
       }
 
       # ─── EDINET (P1 は無効) ──────────────────────────────────────

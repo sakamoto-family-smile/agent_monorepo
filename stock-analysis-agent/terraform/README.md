@@ -90,6 +90,30 @@ terraform apply
 LINE で `ヘルプ` → コマンド一覧、`分析 トヨタ` → ack 後に要約 Flex + チャート画像 +
 「📄 全文(.md)」ボタンが届けば OK。
 
+## analytics → Pub/Sub 入口 (PROPOSAL-0011 P2-A)
+
+本番イベント（llm_call / tool_invocation / business_event 等）を **Pub/Sub → GCS → BQ**
+で永続化する（`ANALYTICS_STORAGE_BACKEND=pubsub`）。Cloud Run env は terraform で設定済
+（`analytics_pubsub_topic` / `ANALYTICS_GCP_PROJECT`）だが、**publish 権限は
+analytics-platform 側で付与**する必要がある:
+
+```bash
+# 1. stock の SA email を確認
+terraform output service_account_email
+#   → sa-stock-analysis-line@sakamomo-family-agent.iam.gserviceaccount.com
+
+# 2. analytics-platform/terraform/terraform.tfvars の publisher_service_account_emails に
+#    上記 SA を追記して apply（events topic への roles/pubsub.publisher を付与）
+cd ../../analytics-platform/terraform
+#   publisher_service_account_emails = [ ..., "sa-stock-analysis-line@..." ]
+terraform apply
+```
+
+> 権限付与前に pubsub backend で稼働すると publish が `7 PermissionDenied` になる。
+> 不安なら一旦 `analytics_storage_backend = "local"` で deploy し、publisher 追記後に
+> pubsub へ切替える。確認: BigQuery で
+> `SELECT COUNT(*) FROM analytics_raw.agent_events_external WHERE service_name='stock-analysis-agent'`。
+
 ## 更新（image 入れ替え）
 
 ```bash

@@ -31,3 +31,9 @@ log_level                  = "info"
 
 # EDINET は P1 無効。P3 で true + EDINET_API_KEY 投入。
 edinet_enabled = false
+
+# analytics-platform 連携 (PROPOSAL-0011 P2-A)
+# pubsub にする前に、この SA を analytics-platform terraform の
+# publisher_service_account_emails に追記して apply しておくこと。
+analytics_storage_backend = "pubsub"
+analytics_pubsub_topic    = "analytics-events"
