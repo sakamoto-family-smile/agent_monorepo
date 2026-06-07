@@ -72,6 +72,33 @@ class Settings:
     line_channel_secret: str = os.getenv("LINE_CHANNEL_SECRET", "")
     line_channel_access_token: str = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 
+    # ── PROPOSAL-0011 P1: チャート画像 / 全文レポート配信 ──
+    # LINE の ImageMessage / 全文 DL リンクは HTTPS 公開 URL を要求する。
+    # Cloud Run なら `https://<service>-<...>.run.app`、ローカルは ngrok の URL。
+    # 末尾スラッシュ不要、空なら画像/全文 URL の生成を skip し Flex 要約のみ送る。
+    public_base_url: str = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+
+    # 一時 store の容量・TTL (プロセス内 LRU + TTL。再起動で消える MVP 仕様)
+    image_store_max_entries: int = int(os.getenv("IMAGE_STORE_MAX_ENTRIES", "50"))
+    image_store_ttl_seconds: int = int(os.getenv("IMAGE_STORE_TTL_SECONDS", "3600"))
+    report_store_max_entries: int = int(os.getenv("REPORT_STORE_MAX_ENTRIES", "50"))
+    report_store_ttl_seconds: int = int(os.getenv("REPORT_STORE_TTL_SECONDS", "3600"))
+
+    # ── PROPOSAL-0011 P1: アクセス制御 / コスト上限 ──
+    # 許可ユーザ (LINE userId) の CSV。空なら全許可 (dev)。webhook は public のため、
+    # Claude Opus を濫用されないよう本番では家族の userId を必ず設定する。
+    family_user_ids: str = os.getenv("FAMILY_USER_IDS", "")
+    # 1 ユーザあたりの `分析` 1 日上限 (Opus コスト抑制)。0 以下で無制限。
+    analyze_rate_limit_per_day: int = int(os.getenv("ANALYZE_RATE_LIMIT_PER_DAY", "20"))
+
+    @property
+    def family_user_id_set(self) -> frozenset[str]:
+        if not self.family_user_ids:
+            return frozenset()
+        return frozenset(
+            uid.strip() for uid in self.family_user_ids.split(",") if uid.strip()
+        )
+
     # ── EDINET 統合 (proposal 0006 Phase 1d) ──
     # EDINET API v2 で有報・四半期報告書を取得し、 Claude 分析に投入する。
     # false (既定) のとき EDINET 経路は完全に skip され、 既存の yfinance + Brave Search

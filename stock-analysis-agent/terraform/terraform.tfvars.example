@@ -1,0 +1,33 @@
+# stock-analysis-agent terraform.tfvars テンプレ。
+# `terraform.tfvars` に copy して値を埋める。`terraform.tfvars` は .gitignore 済。
+
+project_id = "sakamomo-family-agent"
+region     = "asia-northeast1"
+
+# 初回 apply は image="" でリソース基盤 (SA / IAM / secrets / Artifact Registry) だけ
+# 作る。Cloud Build で image push 後、2 回目 apply で Cloud Run Service を作る。
+image = ""
+
+# 本番運用時の image 例:
+# image = "asia-northeast1-docker.pkg.dev/sakamomo-family-agent/stock-analysis-line/stock-analysis-line:<short_sha>"
+
+# Cloud Run Service スペック
+min_instances                   = 1
+max_instances                   = 3
+service_cpu                     = "1"
+service_memory                  = "2Gi"
+service_request_timeout_seconds = 300
+
+# アプリ設定
+# PUBLIC_BASE_URL は初回 deploy 後に Cloud Run URL を埋めて 2 回目 apply で反映。
+# 例: public_base_url = "https://stock-analysis-line-xxxxxxxxxx-an.a.run.app"
+public_base_url = ""
+
+# allow-list: 本番は家族の LINE userId を必ず設定 (Opus 濫用防止)。空は全許可 (dev)。
+family_user_ids = ""
+
+analyze_rate_limit_per_day = 20
+log_level                  = "info"
+
+# EDINET は P1 無効。P3 で true + EDINET_API_KEY 投入。
+edinet_enabled = false

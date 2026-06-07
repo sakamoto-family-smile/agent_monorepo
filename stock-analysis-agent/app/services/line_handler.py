@@ -22,11 +22,14 @@ from typing import Awaitable, Callable
 from agents.fund_screener import run_fund_recommend
 from agents.orchestrator import run_analysis
 from agents.screener import run_screener
+from config import settings
 from models.stock import (
     AnalysisRequest,
     FundRecommendRequest,
     ScreenerRequest,
 )
+from services.access_control import get_analyze_limiter, is_user_allowed
+from services.blob_store import get_image_store, get_report_store
 from services.line_client import (
     LineBotClient,
     LineEvent,
@@ -81,15 +84,34 @@ ANALYZE_FAIL_TEMPLATE = (
     "時間を置いて再度お試しください。"
 )
 
+ANALYZE_RATE_LIMITED_TEXT = (
+    "🚦 本日の分析回数の上限に達しました。\n"
+    "明日また分析できます (おすすめ / スクリーニングは引き続き利用可能)。"
+)
+
 
 # ---------------------------------------------------------------------------
 # 依存バンドル
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class AnalyzeResult:
+    """分析結果の配信に必要な素材。
+
+    report_text は Claude が生成した全文 (Markdown)、chart_path は mplfinance が
+    出力したローソク足 PNG のローカルパス (無い場合は None)。
+    """
+
+    ticker: str
+    company_name: str | None
+    report_text: str
+    chart_path: str | None = None
+
+
 # AnalyzeRunner: テストで差し替えやすいよう、orchestrator の呼び出しを
 # 関数差し込みできるようにする
-AnalyzeRunner = Callable[[AnalysisRequest], "Awaitable[tuple[str, str | None, str]]"]
+AnalyzeRunner = Callable[[AnalysisRequest], "Awaitable[AnalyzeResult]"]
 
 
 @dataclass
@@ -205,6 +227,12 @@ _MARKET_ALIASES: dict[str, str] = {
 
 
 async def _handle_text(event: LineTextEvent, deps: HandlerDeps) -> None:
+    # allow-list: FAMILY_USER_IDS 設定時は家族以外を無視 (返信せず黙殺)。
+    # public webhook + Claude Opus 課金の濫用を防ぐ (PROPOSAL-0011 §3.4)。
+    if not is_user_allowed(event.line_user_id):
+        logger.info("ignoring message from non-allowlisted user")
+        return
+
     cmd, args = _normalize_command(event.text)
     if not cmd:
         await deps.line_client.reply_text(reply_token=event.reply_token, text=UNKNOWN_HINT)
@@ -355,6 +383,15 @@ async def _cmd_analyze(
         )
         return
 
+    user_id = event.line_user_id
+
+    # レート制限: 1 ユーザ 1 日の分析回数上限 (Opus コスト抑制、PROPOSAL-0011 §3.4)。
+    if not get_analyze_limiter().check_and_increment(user_id):
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token, text=ANALYZE_RATE_LIMITED_TEXT
+        )
+        return
+
     target = " ".join(args).strip()
     # ack reply
     await deps.line_client.reply_text(
@@ -363,14 +400,11 @@ async def _cmd_analyze(
     )
 
     # バックグラウンド実行
-    user_id = event.line_user_id
     runner = deps.analyze_runner or _default_analyze_runner
 
     async def _job() -> None:
         try:
-            ticker, company_name, body_text = await runner(
-                AnalysisRequest(query=target, period="3mo")
-            )
+            result = await runner(AnalysisRequest(query=target, period="3mo"))
         except Exception as e:
             logger.exception("background analyze failed for %s", target)
             await deps.line_client.push_text(
@@ -379,20 +413,83 @@ async def _cmd_analyze(
             )
             return
 
-        flex = analysis_summary_bubble(
-            ticker=ticker, company_name=company_name, body_text=body_text
-        )
-        alt_text = f"{company_name or ticker} 分析完了"
-        # 本文先頭をフォールバックに使う
-        await _push_flex_or_text(
-            deps,
-            to=user_id,
-            fallback_text=f"{company_name or ticker} ({ticker}) 分析結果\n\n{body_text[:1500]}",
-            flex_contents=flex,
-            alt_text=alt_text,
-        )
+        await _deliver_analysis(deps, to=user_id, result=result)
 
     deps.schedule_background(_job)
+
+
+# ---------------------------------------------------------------------------
+# 分析結果の 3 点配信 (要約 Flex / チャート画像 / 全文 Markdown DL)
+# ---------------------------------------------------------------------------
+
+
+def _build_report_url(report_text: str) -> str | None:
+    """全文 Markdown を ReportStore に入れ、DL 用 URL を返す。
+
+    `public_base_url` 未設定 / 本文空なら None (URL 無しで Flex 要約のみ配信)。
+    """
+    base = settings.public_base_url
+    if not base or not report_text:
+        return None
+    report_id = get_report_store().put(report_text.encode("utf-8"), "text/markdown")
+    return f"{base}/api/line/report/{report_id}.md"
+
+
+def _build_image_url(chart_path: str | None) -> str | None:
+    """チャート PNG を ImageStore に入れ、配信 URL を返す。
+
+    `public_base_url` 未設定 / chart 不在 / 読込失敗なら None。
+    """
+    base = settings.public_base_url
+    if not base or not chart_path:
+        return None
+    try:
+        with open(chart_path, "rb") as f:
+            png = f.read()
+    except OSError:
+        logger.exception("failed to read chart file: %s", chart_path)
+        return None
+    image_id = get_image_store().put(png, "image/png")
+    return f"{base}/api/line/image/{image_id}.png"
+
+
+async def _deliver_analysis(
+    deps: HandlerDeps, *, to: str, result: AnalyzeResult
+) -> None:
+    """(1) 要約 Flex (2) チャート画像 (3) 全文 DL リンク を Push する。"""
+    report_url = _build_report_url(result.report_text)
+    image_url = _build_image_url(result.chart_path)
+
+    label = result.company_name or result.ticker
+
+    # (1) 要約 Flex (全文ボタン付き) + text フォールバック
+    flex = analysis_summary_bubble(
+        ticker=result.ticker,
+        company_name=result.company_name,
+        body_text=result.report_text,
+        report_url=report_url,
+    )
+    fallback = f"{label} ({result.ticker}) 分析結果\n\n{result.report_text[:1500]}"
+    if report_url:
+        fallback += f"\n\n📄 全文(.md): {report_url}"
+    await _push_flex_or_text(
+        deps,
+        to=to,
+        fallback_text=fallback,
+        flex_contents=flex,
+        alt_text=f"{label} 分析完了",
+    )
+
+    # (2) チャート画像 (任意)
+    if image_url:
+        try:
+            await deps.line_client.push_image(
+                to=to,
+                original_content_url=image_url,
+                preview_image_url=image_url,
+            )
+        except Exception:
+            logger.exception("push_image failed (continuing)")
 
 
 # ---------------------------------------------------------------------------
@@ -400,19 +497,19 @@ async def _cmd_analyze(
 # ---------------------------------------------------------------------------
 
 
-async def _default_analyze_runner(
-    req: AnalysisRequest,
-) -> tuple[str, str | None, str]:
-    """run_analysis のイベントストリームから本文と銘柄情報を集約して返す。"""
+async def _default_analyze_runner(req: AnalysisRequest) -> AnalyzeResult:
+    """run_analysis のイベントストリームから本文・銘柄情報・チャートパスを集約する。"""
     parts: list[str] = []
     ticker = req.query
     company_name: str | None = None
+    chart_path: str | None = None
     async for event in run_analysis(req):
         et = event.get("type") if isinstance(event, dict) else None
         if et == "report_complete":
             ticker = event.get("ticker", ticker)
             company_name = event.get("company_name") or company_name
             report = event.get("report") or {}
+            chart_path = report.get("chart_path") or chart_path
             text = report.get("report_text") or ""
             if text:
                 parts.append(text)
@@ -420,7 +517,12 @@ async def _default_analyze_runner(
             # 既に "report_complete" で本文を集めるため、ここでは無視
             pass
     body = "\n".join(parts).strip() or "(分析本文が空でした。再度お試しください)"
-    return ticker, company_name, body
+    return AnalyzeResult(
+        ticker=ticker,
+        company_name=company_name,
+        report_text=body,
+        chart_path=chart_path,
+    )
 
 
 # ---------------------------------------------------------------------------

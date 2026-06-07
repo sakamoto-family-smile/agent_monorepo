@@ -441,6 +441,30 @@ make test
 
 ---
 
+## GCP デプロイ (LINE 経由で利用) — PROPOSAL-0011 P1
+
+LINE から `分析 トヨタ` のように使える本番サービスを Cloud Run に配備する。MVP は
+**ephemeral SQLite**（永続化は Phase 2）、LLM は Anthropic OAuth token 経由の
+claude-agent-sdk（Vertex 不要）。配信は **要約 Flex / チャート画像 / 全文 Markdown
+(`.md` DL リンク)** の 3 点セット。
+
+- 設計: [docs/PROPOSALS/0011-stock-analysis-agent-line-gcp.md](../docs/PROPOSALS/0011-stock-analysis-agent-line-gcp.md)
+- 手順書: [terraform/README.md](terraform/README.md)（基盤 apply → Secret 投入 →
+  Cloud Build → service 化 → PUBLIC_BASE_URL 反映 → Webhook 登録 → 疎通）
+
+必要な Secret（すべて手動投入）: LINE channel secret / access token /
+`CLAUDE_CODE_OAUTH_TOKEN` / `BRAVE_API_KEY`。本番は `family_user_ids`（allow-list）と
+`analyze_rate_limit_per_day` で Opus コストを抑制する。
+
+```bash
+# image build (リポジトリルートから)
+gcloud builds submit --config=stock-analysis-agent/cloudbuild.yaml \
+  --ignore-file=stock-analysis-agent/cloudbuild.gcloudignore \
+  --substitutions=_SHA=$(git rev-parse --short=7 HEAD) .
+```
+
+---
+
 ## 使用例
 
 ### 分析実行（curl）
