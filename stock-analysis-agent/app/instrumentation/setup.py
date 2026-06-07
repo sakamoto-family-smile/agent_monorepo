@@ -22,16 +22,15 @@ import logging
 from pathlib import Path
 
 from analytics_platform.gcp_config import (
+    PubSubAnalyticsConfig,
     build_payload_writer,
+    build_sink,
     build_upload_transport,
     detect_storage_backend,
 )
 from analytics_platform.observability.analytics_logger import AnalyticsLogger
 from analytics_platform.observability.content import ContentRouter
-from analytics_platform.observability.sinks.file_sink import (
-    JsonlSink,
-    RotatingFileSink,
-)
+from analytics_platform.observability.sinks.file_sink import JsonlSink
 from analytics_platform.observability.tracer import setup_tracer
 from analytics_platform.uploader.local_uploader import LocalUploader
 from opentelemetry import trace
@@ -87,10 +86,20 @@ def setup_observability() -> None:
         for d in (raw_dir, payloads_dir, uploaded_dir, dead_letter_dir):
             d.mkdir(parents=True, exist_ok=True)
 
-        sink = RotatingFileSink(
-            root_dir=raw_dir,
+        # PROPOSAL-0010 P5-3: backend=pubsub なら PubSubSink (Pub/Sub 入口)、
+        # それ以外 (local / gcs) は RotatingFileSink。pydantic 風 Settings の値を
+        # 明示的に渡す (os.environ に無くても効くように)。
+        pubsub_cfg: PubSubAnalyticsConfig | None = None
+        if s.analytics_storage_backend == "pubsub" and s.analytics_pubsub_topic:
+            pubsub_cfg = PubSubAnalyticsConfig(
+                topic=s.analytics_pubsub_topic,
+                project_id=(s.analytics_gcp_project or None),
+            )
+        sink = build_sink(
+            local_root=raw_dir,
             service_name=s.analytics_service_name,
             compress=s.analytics_compress,
+            pubsub_config=pubsub_cfg,
         )
         # Content router: env 駆動 (local | gcs)
         # ANALYTICS_STORAGE_BACKEND=gcs かつ ANALYTICS_GCS_BUCKET 設定済なら

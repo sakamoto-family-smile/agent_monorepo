@@ -40,3 +40,16 @@ enable_alerts = true
 
 # 0 にすると duration alert を作らない (Workflow + failed alert だけで運用も可能)
 # dbt_job_max_duration_seconds = 1800
+
+# ---- Pub/Sub 入口 (PROPOSAL-0010 P5) ----
+
+# events topic / GCS subscription / DLQ を作る。false なら Pub/Sub 系は作らない。
+enable_pubsub = true
+
+# events topic への publish を許可する consumer SA。各 agent を Cloud Run に配備
+# (= SA 作成) してから、その SA email をここに追記して再 apply する。
+publisher_service_account_emails = [
+  "sa-piyolog-analytics@your-gcp-project-id.iam.gserviceaccount.com",
+  # PROPOSAL-0011 P2-A: stock-analysis-line を pubsub backend にする際に追記
+  "sa-stock-analysis-line@your-gcp-project-id.iam.gserviceaccount.com",
+]
