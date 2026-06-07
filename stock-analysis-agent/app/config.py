@@ -9,8 +9,35 @@ class Settings:
     log_level: str = os.getenv("LOG_LEVEL", "info")
     claude_code_oauth_token: str = os.getenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-    # Database
+    # Database (PROPOSAL-0011 P2-B: SQLAlchemy async)
+    # 優先度: DATABASE_URL > DB_HOST/DB_USER/DB_NAME(+DB_PASSWORD)組立 > db_path(sqlite)
+    #   - dev/test: sqlite+aiosqlite:///{db_path}
+    #   - prod:     postgresql+asyncpg://user:pass@/db?host=/cloudsql/<conn>
     db_path: str = os.getenv("DB_PATH", "data/stock_analysis.db")
+    database_url: str = os.getenv("DATABASE_URL", "")
+    # Cloud SQL connector (unix socket) 用の分割指定。DATABASE_URL 未設定時に組み立てる。
+    db_host: str = os.getenv("DB_HOST", "")  # 例: /cloudsql/proj:region:shared-pg
+    db_user: str = os.getenv("DB_USER", "")
+    db_name: str = os.getenv("DB_NAME", "")
+    db_password: str = os.getenv("DB_PASSWORD", "")
+    # スキーマ作成方法: true(既定/dev) は init_db で create_all + seed。
+    # prod Postgres は alembic で管理するため false にし、init_db は seed のみ行う。
+    db_auto_create: bool = os.getenv("DB_AUTO_CREATE", "true").lower() == "true"
+
+    @property
+    def resolved_database_url(self) -> str:
+        """最終的な SQLAlchemy 非同期 URL を解決する。"""
+        if self.database_url:
+            return self.database_url
+        if self.db_host and self.db_user and self.db_name:
+            from urllib.parse import quote
+
+            pw = quote(self.db_password, safe="")
+            return (
+                f"postgresql+asyncpg://{self.db_user}:{pw}"
+                f"@/{self.db_name}?host={self.db_host}"
+            )
+        return f"sqlite+aiosqlite:///{self.db_path}"
 
     # Data directories
     data_dir: str = os.getenv("DATA_DIR", "data")

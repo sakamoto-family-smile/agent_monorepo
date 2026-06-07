@@ -4,6 +4,12 @@
 project_id = "sakamomo-family-agent"
 region     = "asia-northeast1"
 
+# Cloud SQL (PROPOSAL-0011 P2-B: shared-pg に相乗り)
+shared_cloudsql_instance_name            = "shared-pg"
+shared_cloudsql_instance_connection_name = "sakamomo-family-agent:asia-northeast1:shared-pg"
+db_name                                  = "stock_analysis_db"
+db_user                                  = "stock_analysis_user"
+
 # 初回 apply は image="" でリソース基盤 (SA / IAM / secrets / Artifact Registry) だけ
 # 作る。Cloud Build で image push 後、2 回目 apply で Cloud Run Service を作る。
 image = ""

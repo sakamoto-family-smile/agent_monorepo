@@ -26,3 +26,10 @@ resource "google_project_iam_member" "service_artifact_reader" {
   role    = "roles/artifactregistry.reader"
   member  = "serviceAccount:${google_service_account.service.email}"
 }
+
+# Cloud SQL 接続 (PROPOSAL-0011 P2-B: shared-pg connector)
+resource "google_project_iam_member" "service_cloudsql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.service.email}"
+}

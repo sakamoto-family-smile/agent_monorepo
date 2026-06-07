@@ -32,3 +32,9 @@ resource "google_project_service" "cloudbuild" {
   disable_on_destroy         = false
   disable_dependent_services = false
 }
+
+resource "google_project_service" "sqladmin" {
+  service                    = "sqladmin.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+}

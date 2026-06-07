@@ -32,6 +32,14 @@ resource "google_cloud_run_v2_service" "stock" {
 
     timeout = "${var.service_request_timeout_seconds}s"
 
+    # Cloud SQL connector (UNIX socket /cloudsql/<connection_name>)
+    volumes {
+      name = "cloudsql"
+      cloud_sql_instance {
+        instances = [var.shared_cloudsql_instance_connection_name]
+      }
+    }
+
     containers {
       image = var.image
 
@@ -47,6 +55,11 @@ resource "google_cloud_run_v2_service" "stock" {
         # CPU always-allocated: レスポンス後の BackgroundTasks を止めないため必須。
         cpu_idle          = false
         startup_cpu_boost = true
+      }
+
+      volume_mounts {
+        name       = "cloudsql"
+        mount_path = "/cloudsql"
       }
 
       # ─── LINE secrets (Secret Manager) ───────────────────────────
@@ -140,6 +153,40 @@ resource "google_cloud_run_v2_service" "stock" {
         name  = "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"
         value = "1"
       }
+
+      # ─── DB (PROPOSAL-0011 P2-B: shared Cloud SQL Postgres) ──────
+      # config.resolved_database_url が DB_HOST/USER/NAME/PASSWORD から
+      # postgresql+asyncpg URL を組み立てる (DB_HOST は connector の unix socket)。
+      env {
+        name  = "DB_HOST"
+        value = "/cloudsql/${var.shared_cloudsql_instance_connection_name}"
+      }
+      env {
+        name  = "DB_USER"
+        value = var.db_user
+      }
+      env {
+        name  = "DB_NAME"
+        value = var.db_name
+      }
+      env {
+        name = "DB_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.db_password.secret_id
+            version = "latest"
+          }
+        }
+      }
+      # prod はスキーマを alembic で管理: 起動時 migrate + init_db は seed のみ。
+      env {
+        name  = "DB_AUTO_CREATE"
+        value = "false"
+      }
+      env {
+        name  = "RUN_MIGRATIONS"
+        value = "true"
+      }
     }
   }
 
@@ -153,10 +200,16 @@ resource "google_cloud_run_v2_service" "stock" {
 
   depends_on = [
     google_project_service.run,
+    google_project_service.sqladmin,
+    google_project_iam_member.service_cloudsql_client,
     google_secret_manager_secret_iam_member.service_line_channel_secret,
     google_secret_manager_secret_iam_member.service_line_channel_access_token,
     google_secret_manager_secret_iam_member.service_claude_code_oauth_token,
     google_secret_manager_secret_iam_member.service_brave_api_key,
+    google_secret_manager_secret_iam_member.service_db_password,
+    google_secret_manager_secret_version.db_password,
+    google_sql_user.stock,
+    google_sql_database.stock,
   ]
 }
 

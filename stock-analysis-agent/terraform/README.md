@@ -114,6 +114,47 @@ terraform apply
 > pubsub へ切替える。確認: BigQuery で
 > `SELECT COUNT(*) FROM analytics_raw.agent_events_external WHERE service_name='stock-analysis-agent'`。
 
+## Cloud SQL 永続化 (PROPOSAL-0011 P2-B)
+
+`reports` / `price_cache` / `ticker_dictionary` を共有 Cloud SQL (`shared-pg`) に
+永続化する。terraform が shared-pg 上に `stock_analysis_db` + `stock_analysis_user`
+（password は自動生成 → Secret Manager）を作り、Cloud Run に connector + DB env を配線
+する。スキーマは **alembic** が管理し、prod はコンテナ起動時に `alembic upgrade head`
+を実行する（`RUN_MIGRATIONS=true` / `DB_AUTO_CREATE=false`）。
+
+### 必須: DB/スキーマ権限の付与（apply 後 1 回）
+
+`stock_analysis_user` は新規 DB のテーブルを作成できる必要がある（alembic が作成する）。
+Postgres 15+ は `public` schema の CREATE が制限されるため、apply 後に admin で 1 回 GRANT する:
+
+```bash
+# cloud-sql-proxy で shared-pg に接続 (admin user)
+cloud-sql-proxy sakamomo-family-agent:asia-northeast1:shared-pg &
+
+psql "host=127.0.0.1 user=postgres dbname=stock_analysis_db" <<'SQL'
+ALTER DATABASE stock_analysis_db OWNER TO stock_analysis_user;
+GRANT ALL ON SCHEMA public TO stock_analysis_user;
+ALTER SCHEMA public OWNER TO stock_analysis_user;
+SQL
+```
+
+> これを忘れると起動時の `alembic upgrade head` が `permission denied for schema public`
+> で失敗する。
+
+### 確認
+
+```bash
+# 起動ログに alembic upgrade のログ + init_db seed
+gcloud run services logs read stock-analysis-line --region=asia-northeast1 --limit=50
+
+# LINE で `分析 トヨタ` 後、reports が増えるか
+psql "host=127.0.0.1 user=stock_analysis_user dbname=stock_analysis_db" \
+  -c "SELECT ticker, created_at FROM reports ORDER BY created_at DESC LIMIT 5;"
+```
+
+> 再起動で履歴が消えなくなる（P1 の ephemeral SQLite から脱却）。ローカル/dev は
+> `DB_AUTO_CREATE=true`（既定）で SQLite に create_all + seed され、alembic は任意。
+
 ## 更新（image 入れ替え）
 
 ```bash

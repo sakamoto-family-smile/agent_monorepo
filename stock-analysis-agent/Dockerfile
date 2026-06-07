@@ -42,6 +42,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev --no-editable
 
 COPY stock-analysis-agent/app ./app
+COPY stock-analysis-agent/alembic ./alembic
+COPY stock-analysis-agent/alembic.ini ./alembic.ini
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
@@ -79,6 +81,8 @@ RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin runner
 
 COPY --from=builder --chown=runner:runner /app/.venv /app/.venv
 COPY --from=builder --chown=runner:runner /app/app /app/app
+COPY --from=builder --chown=runner:runner /app/alembic /app/alembic
+COPY --from=builder --chown=runner:runner /app/alembic.ini /app/alembic.ini
 
 # ephemeral SQLite / チャート出力用の data ディレクトリ (MVP は揮発で割り切り)
 RUN mkdir -p /app/data/charts /app/data/cache /app/data/reports \
@@ -92,5 +96,7 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
 
+# prod (Postgres) は RUN_MIGRATIONS=true で起動時に alembic upgrade head を実行
+# (DB_AUTO_CREATE=false と併用)。dev/sqlite は未設定で skip し init_db が create_all。
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --app-dir /app/app"]
+CMD ["sh", "-c", "if [ \"$RUN_MIGRATIONS\" = \"true\" ]; then alembic upgrade head; fi; exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --app-dir /app/app"]

@@ -79,6 +79,45 @@ class EdinetIndexRepo:
     def __init__(self, db_path: str | None = None) -> None:
         self._db_path = db_path or settings.db_path
 
+    # NOTE (PROPOSAL-0011 P2-B): core 4 テーブルは SQLAlchemy/Postgres へ移行したが、
+    # EDINET (edinet_documents) は EDINET 有効化 (P3) まで aiosqlite のまま据え置く。
+    # core の init_db が本テーブルを作らなくなったため、batch は ensure_schema() で
+    # 自前に SQLite スキーマを用意する。P3 で shared Cloud SQL へ移行予定。
+    async def ensure_schema(self) -> None:
+        """edinet_documents テーブルを (無ければ) 作成する。SQLite 専用 (P3 で移行)。"""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS edinet_documents (
+                    document_id TEXT PRIMARY KEY,
+                    edinet_code TEXT NOT NULL,
+                    securities_code TEXT,
+                    submitter_name TEXT NOT NULL,
+                    document_type TEXT NOT NULL,
+                    submit_date TEXT NOT NULL,
+                    period_end TEXT,
+                    description TEXT DEFAULT '',
+                    withdrawal_status INTEGER NOT NULL DEFAULT 0,
+                    disclosure_status INTEGER NOT NULL DEFAULT 0,
+                    doc_info_edit_status INTEGER NOT NULL DEFAULT 0,
+                    xbrl_flag INTEGER NOT NULL DEFAULT 0,
+                    pdf_flag INTEGER NOT NULL DEFAULT 0,
+                    attach_doc_flag INTEGER NOT NULL DEFAULT 0,
+                    cache_uri TEXT,
+                    cached_at TEXT,
+                    first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    last_index_refreshed_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_edinet_docs_sec_code_date
+                    ON edinet_documents (securities_code, submit_date DESC);
+                CREATE INDEX IF NOT EXISTS idx_edinet_docs_edinet_code_date
+                    ON edinet_documents (edinet_code, submit_date DESC);
+                CREATE INDEX IF NOT EXISTS idx_edinet_docs_type_date
+                    ON edinet_documents (document_type, submit_date DESC);
+                """
+            )
+            await db.commit()
+
     async def upsert_many(self, items: Iterable[DocumentMetadata]) -> int:
         """`document_id` を PK として bulk upsert。 戻り値は upsert された件数。
 

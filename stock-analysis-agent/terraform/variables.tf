@@ -16,6 +16,34 @@ variable "service_name" {
 }
 
 # ─────────────────────────────────────────────────────────────────────
+# Cloud SQL (PROPOSAL-0011 P2-B: shared-pg に相乗り)
+# ─────────────────────────────────────────────────────────────────────
+
+variable "shared_cloudsql_instance_name" {
+  type        = string
+  default     = "shared-pg"
+  description = "共有 Cloud SQL Postgres インスタンス名 (PROPOSAL-0009 P1)。"
+}
+
+variable "shared_cloudsql_instance_connection_name" {
+  type        = string
+  default     = "sakamomo-family-agent:asia-northeast1:shared-pg"
+  description = "共有インスタンスの connection name (project:region:instance)。Cloud Run の Cloud SQL connector が使う。"
+}
+
+variable "db_name" {
+  type        = string
+  default     = "stock_analysis_db"
+  description = "stock 専用 database 名 (shared-pg 上に作成)。"
+}
+
+variable "db_user" {
+  type        = string
+  default     = "stock_analysis_user"
+  description = "stock 専用 DB user 名。password は terraform 生成 → Secret Manager 投入。"
+}
+
+# ─────────────────────────────────────────────────────────────────────
 # Cloud Run Service
 # ─────────────────────────────────────────────────────────────────────
 

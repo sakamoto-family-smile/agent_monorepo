@@ -13,6 +13,7 @@ locals {
   secret_line_channel_access_token = "${var.service_name}-line-channel-access-token"
   secret_claude_code_oauth_token   = "${var.service_name}-claude-code-oauth-token"
   secret_brave_api_key             = "${var.service_name}-brave-api-key"
+  secret_db_password               = "${var.service_name}-db-password"
 
   # image 指定があるときだけ Cloud Run Service を作る (chicken-and-egg 回避)
   deploy_service = length(trimspace(var.image)) > 0

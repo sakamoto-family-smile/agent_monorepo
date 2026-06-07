@@ -19,6 +19,17 @@ output "secret_ids" {
     line_channel_access_token = google_secret_manager_secret.line_channel_access_token.secret_id
     claude_code_oauth_token   = google_secret_manager_secret.claude_code_oauth_token.secret_id
     brave_api_key             = google_secret_manager_secret.brave_api_key.secret_id
+    db_password               = google_secret_manager_secret.db_password.secret_id
   }
-  description = "Secret Manager の secret ID 一覧。値はすべて手動投入 (gcloud secrets versions add)。"
+  description = "Secret Manager の secret ID 一覧。LINE/Claude/Brave は手動投入、db_password は terraform 自動投入済。"
+}
+
+output "cloudsql_database" {
+  value       = google_sql_database.stock.name
+  description = "shared-pg 上に作成した stock 専用 database 名。"
+}
+
+output "cloudsql_user" {
+  value       = google_sql_user.stock.name
+  description = "stock 専用 DB user 名。GRANT は psql で別途流す (terraform/README.md 参照)。"
 }
