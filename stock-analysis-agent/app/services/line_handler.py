@@ -29,7 +29,8 @@ from models.stock import (
     ScreenerRequest,
 )
 from services.access_control import get_analyze_limiter, is_user_allowed
-from services.blob_store import get_image_store, get_report_store
+from services.media import store_chart_png, store_report_md
+from services.task_queue import enqueue_analysis
 from services.line_client import (
     LineBotClient,
     LineEvent,
@@ -399,23 +400,51 @@ async def _cmd_analyze(
         text=ANALYZE_ACK_TEMPLATE.format(target=target),
     )
 
-    # バックグラウンド実行
-    runner = deps.analyze_runner or _default_analyze_runner
+    # P3-A: tasks_enabled なら Cloud Tasks に委譲 (worker run が実行)。
+    # enqueue 失敗時や dev (tasks 無効) は従来の in-process 実行にフォールバック。
+    if settings.tasks_enabled:
+        try:
+            enqueue_analysis(user_id, target)
+            return
+        except Exception:
+            logger.exception("enqueue_analysis failed; falling back to in-process")
 
     async def _job() -> None:
         try:
-            result = await runner(AnalysisRequest(query=target, period="3mo"))
+            await run_and_deliver_analysis(deps, to=user_id, target=target)
         except Exception as e:
-            logger.exception("background analyze failed for %s", target)
-            await deps.line_client.push_text(
-                to=user_id,
-                text=ANALYZE_FAIL_TEMPLATE.format(target=target, reason=str(e)[:200]),
+            await push_analysis_failure(
+                deps, to=user_id, target=target, reason=str(e)
             )
-            return
-
-        await _deliver_analysis(deps, to=user_id, result=result)
 
     deps.schedule_background(_job)
+
+
+async def run_and_deliver_analysis(
+    deps: HandlerDeps, *, to: str, target: str
+) -> None:
+    """分析を実行して 3 点配信する。失敗時はエラーを push して例外を再送出する。
+
+    in-process 実行 (webhook) と Cloud Tasks worker の両方から使う共通経路。
+    worker は例外を捕捉してリトライ判定に使う。
+    """
+    runner = deps.analyze_runner or _default_analyze_runner
+    try:
+        result = await runner(AnalysisRequest(query=target, period="3mo"))
+    except Exception:
+        logger.exception("analyze failed for %s", target)
+        raise
+    await _deliver_analysis(deps, to=to, result=result)
+
+
+async def push_analysis_failure(deps: HandlerDeps, *, to: str, target: str, reason: str) -> None:
+    """分析失敗を LINE Push で通知する (リトライ尽きた worker / inline 失敗時)。"""
+    try:
+        await deps.line_client.push_text(
+            to=to, text=ANALYZE_FAIL_TEMPLATE.format(target=target, reason=reason[:200])
+        )
+    except Exception:
+        logger.exception("failed to push analysis failure notice")
 
 
 # ---------------------------------------------------------------------------
@@ -424,24 +453,16 @@ async def _cmd_analyze(
 
 
 def _build_report_url(report_text: str) -> str | None:
-    """全文 Markdown を ReportStore に入れ、DL 用 URL を返す。
-
-    `public_base_url` 未設定 / 本文空なら None (URL 無しで Flex 要約のみ配信)。
-    """
-    base = settings.public_base_url
-    if not base or not report_text:
-        return None
-    report_id = get_report_store().put(report_text.encode("utf-8"), "text/markdown")
-    return f"{base}/api/line/report/{report_id}.md"
+    """全文 Markdown を media backend に保存し、DL 用 URL を返す (P3-A: memory|gcs)。"""
+    return store_report_md(report_text)
 
 
 def _build_image_url(chart_path: str | None) -> str | None:
-    """チャート PNG を ImageStore に入れ、配信 URL を返す。
+    """チャート PNG を media backend に保存し、配信 URL を返す (P3-A: memory|gcs)。
 
-    `public_base_url` 未設定 / chart 不在 / 読込失敗なら None。
+    chart 不在 / 読込失敗 / backend 未設定なら None。
     """
-    base = settings.public_base_url
-    if not base or not chart_path:
+    if not chart_path:
         return None
     try:
         with open(chart_path, "rb") as f:
@@ -449,8 +470,7 @@ def _build_image_url(chart_path: str | None) -> str | None:
     except OSError:
         logger.exception("failed to read chart file: %s", chart_path)
         return None
-    image_id = get_image_store().put(png, "image/png")
-    return f"{base}/api/line/image/{image_id}.png"
+    return store_chart_png(png)
 
 
 async def _deliver_analysis(

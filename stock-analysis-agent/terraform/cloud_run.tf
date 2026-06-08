@@ -187,6 +187,34 @@ resource "google_cloud_run_v2_service" "stock" {
         name  = "RUN_MIGRATIONS"
         value = "true"
       }
+
+      # ─── Cloud Tasks 委譲 (P3-A) ─────────────────────────────────
+      env {
+        name  = "TASKS_ENABLED"
+        value = "true"
+      }
+      env {
+        name  = "TASKS_QUEUE"
+        value = google_cloud_tasks_queue.analysis.id
+      }
+      env {
+        name  = "TASKS_WORKER_URL"
+        value = local.tasks_worker_endpoint
+      }
+      env {
+        name  = "TASKS_INVOKER_SA"
+        value = google_service_account.tasks_invoker.email
+      }
+
+      # ─── media backend (GCS。inline フォールバック配信でも使う) ──
+      env {
+        name  = "MEDIA_BACKEND"
+        value = "gcs"
+      }
+      env {
+        name  = "MEDIA_GCS_BUCKET"
+        value = google_storage_bucket.media.name
+      }
     }
   }
 
@@ -210,6 +238,10 @@ resource "google_cloud_run_v2_service" "stock" {
     google_secret_manager_secret_version.db_password,
     google_sql_user.stock,
     google_sql_database.stock,
+    google_cloud_tasks_queue.analysis,
+    google_cloud_run_v2_service.worker,
+    google_storage_bucket_iam_member.media_writer,
+    google_project_iam_member.service_tasks_enqueuer,
   ]
 }
 

@@ -155,6 +155,46 @@ psql "host=127.0.0.1 user=stock_analysis_user dbname=stock_analysis_db" \
 > 再起動で履歴が消えなくなる（P1 の ephemeral SQLite から脱却）。ローカル/dev は
 > `DB_AUTO_CREATE=true`（既定）で SQLite に create_all + seed され、alembic は任意。
 
+## Cloud Tasks 分散非同期 + GCS media (PROPOSAL-0011 P3-A)
+
+分析を webhook の in-process BackgroundTasks から **Cloud Tasks + 別 worker run** に
+委譲する。これで複数依頼の流量制御・自動リトライ・タスク永続化が入り、webhook /
+worker とも **min_instances=0** にできる。
+
+`terraform apply`（image 指定済）で以下が**1回で**作られる（worker URL は terraform が
+webhook env に自動配線）:
+
+- Cloud Tasks queue `stock-analysis`（`tasks_max_concurrent_dispatches` で並列度制御）
+- worker Cloud Run `stock-analysis-worker`（webhook と同一イメージ、public、min=0）
+- media 配信用 GCS バケット `stock-analysis-line-media`（public read / 1 日で自動削除）
+- invoker SA `sa-stock-tasks-invoker`（Cloud Tasks→worker の OIDC identity）
+
+構成:
+
+```
+LINE → webhook(/api/line/webhook, min=0) → Cloud Tasks queue
+          → OIDC POST → worker(/api/tasks/analyze, min=0)
+              → 分析 → チャート/全文を GCS へ → LINE Push (画像/全文URLはGCS)
+```
+
+- worker は media を LINE が取得するため public。`/api/tasks/analyze` は app 内で
+  Cloud Tasks の OIDC token（invoker SA）を検証して保護する。
+- スキーマ migration は webhook 側のみ（`RUN_MIGRATIONS=true`）。worker は false。
+  タスクは webhook 経由でしか生まれないため、migration 実行順は自然に満たされる。
+- 並列度を上げたいときは `worker_max_instances` と `tasks_max_concurrent_dispatches`
+  を揃えて増やす。
+
+### 確認
+
+```bash
+terraform output worker_url tasks_queue media_bucket
+# LINE で `分析 トヨタ` → ack 即返し → 数十秒〜数分後にチャート画像 + 全文リンクが届く
+gcloud run services logs read stock-analysis-worker --region=asia-northeast1 --limit=50
+```
+
+> 失敗タスクは Cloud Tasks が自動リトライ（`tasks_max_attempts`）。試行を使い切ると
+> worker がユーザにエラー通知して ack する。
+
 ## 更新（image 入れ替え）
 
 ```bash

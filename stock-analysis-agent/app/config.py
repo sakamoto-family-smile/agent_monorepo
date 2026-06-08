@@ -118,6 +118,28 @@ class Settings:
     report_store_max_entries: int = int(os.getenv("REPORT_STORE_MAX_ENTRIES", "50"))
     report_store_ttl_seconds: int = int(os.getenv("REPORT_STORE_TTL_SECONDS", "3600"))
 
+    # ── PROPOSAL-0011 P3-A: media (チャート/全文) 配信 backend ──
+    # memory (既定): インメモリ store + public_base_url で配信 (単一 instance 用)。
+    # gcs: GCS にアップロードして公開 URL を返す (worker 複数 instance 対応)。
+    media_backend: str = os.getenv("MEDIA_BACKEND", "memory").lower()
+    media_gcs_bucket: str = os.getenv("MEDIA_GCS_BUCKET", "")
+    media_gcs_public_base: str = os.getenv(
+        "MEDIA_GCS_PUBLIC_BASE", "https://storage.googleapis.com"
+    ).rstrip("/")
+
+    # ── PROPOSAL-0011 P3-A: Cloud Tasks 分散非同期 ──
+    # true のとき webhook は分析を Cloud Tasks に enqueue し、worker run が実行する。
+    # false (dev/test) のときは従来通り in-process BackgroundTasks で実行。
+    tasks_enabled: bool = os.getenv("TASKS_ENABLED", "false").lower() == "true"
+    # queue のフルパス: projects/<p>/locations/<loc>/queues/<name>
+    tasks_queue: str = os.getenv("TASKS_QUEUE", "")
+    # worker の分析エンドポイント URL (例: https://stock-analysis-worker-...run.app/api/tasks/analyze)
+    tasks_worker_url: str = os.getenv("TASKS_WORKER_URL", "")
+    # Cloud Tasks が OIDC token を発行する invoker SA email (worker が検証)
+    tasks_invoker_sa: str = os.getenv("TASKS_INVOKER_SA", "")
+    # Cloud Tasks の最大試行回数 (worker のリトライ判定に使う)
+    tasks_max_attempts: int = int(os.getenv("TASKS_MAX_ATTEMPTS", "3"))
+
     # ── PROPOSAL-0011 P1: アクセス制御 / コスト上限 ──
     # 許可ユーザ (LINE userId) の CSV。空なら全許可 (dev)。webhook は public のため、
     # Claude Opus を濫用されないよう本番では家族の userId を必ず設定する。
