@@ -38,3 +38,9 @@ resource "google_project_service" "sqladmin" {
   disable_on_destroy         = false
   disable_dependent_services = false
 }
+
+resource "google_project_service" "cloudtasks" {
+  service                    = "cloudtasks.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+}

@@ -43,3 +43,9 @@ edinet_enabled = false
 # publisher_service_account_emails に追記して apply しておくこと。
 analytics_storage_backend = "pubsub"
 analytics_pubsub_topic    = "analytics-events"
+
+# Cloud Tasks worker (PROPOSAL-0011 P3-A) — 既定で十分。並列度を上げたいとき調整。
+# worker_max_instances            = 3
+# tasks_max_concurrent_dispatches = 3
+# tasks_max_attempts              = 3
+# media_retention_days            = 1

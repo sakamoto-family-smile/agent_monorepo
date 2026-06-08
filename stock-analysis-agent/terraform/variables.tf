@@ -55,8 +55,8 @@ variable "image" {
 
 variable "min_instances" {
   type        = number
-  default     = 1
-  description = "最小 instance 数。LINE webhook の ack→push (BackgroundTasks) を確実に完了させるため MVP は 1 (CPU always-allocated と併用)。"
+  default     = 0
+  description = "webhook の最小 instance 数。P3-A で分析を Cloud Tasks/worker に委譲したため 0 で可 (enqueue のみで軽量)。初回リクエストは cold start。"
 }
 
 variable "max_instances" {
@@ -115,6 +115,76 @@ variable "edinet_enabled" {
   type        = bool
   default     = false
   description = "EDINET 法定開示連携。P1 は false (yfinance + Brave のみ)。P3 で true + EDINET_API_KEY 投入。"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# Cloud Tasks worker (PROPOSAL-0011 P3-A)
+# ─────────────────────────────────────────────────────────────────────
+
+variable "worker_service_name" {
+  type        = string
+  default     = "stock-analysis-worker"
+  description = "分析 worker の Cloud Run Service 名 (webhook と同一イメージ)。"
+}
+
+variable "worker_min_instances" {
+  type        = number
+  default     = 0
+  description = "worker 最小 instance 数。タスク到着時にスケール、アイドルで 0。"
+}
+
+variable "worker_max_instances" {
+  type        = number
+  default     = 3
+  description = "worker 最大 instance 数 (並列度の上限。queue の concurrency と揃える)。"
+}
+
+variable "worker_cpu" {
+  type        = string
+  default     = "1"
+  description = "worker の CPU 数。"
+}
+
+variable "worker_memory" {
+  type        = string
+  default     = "2Gi"
+  description = "worker の memory (claude-agent-sdk subprocess + matplotlib)。"
+}
+
+variable "worker_request_timeout_seconds" {
+  type        = number
+  default     = 900
+  description = "worker の request timeout (秒)。EDINET 有効化で 1〜5 分かかるため長め。"
+}
+
+variable "tasks_queue_name" {
+  type        = string
+  default     = "stock-analysis"
+  description = "Cloud Tasks queue 名。"
+}
+
+variable "tasks_max_concurrent_dispatches" {
+  type        = number
+  default     = 3
+  description = "queue の同時 dispatch 上限 (= 同時分析数)。worker_max_instances と揃える。"
+}
+
+variable "tasks_max_dispatches_per_second" {
+  type        = number
+  default     = 1
+  description = "queue の毎秒 dispatch 上限。"
+}
+
+variable "tasks_max_attempts" {
+  type        = number
+  default     = 3
+  description = "タスクの最大試行回数 (worker のリトライ判定にも env で渡す)。"
+}
+
+variable "media_retention_days" {
+  type        = number
+  default     = 1
+  description = "media バケットのオブジェクト保持日数 (一時配信のみ)。"
 }
 
 # ─────────────────────────────────────────────────────────────────────

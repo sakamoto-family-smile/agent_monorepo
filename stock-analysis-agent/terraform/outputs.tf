@@ -33,3 +33,23 @@ output "cloudsql_user" {
   value       = google_sql_user.stock.name
   description = "stock 専用 DB user 名。GRANT は psql で別途流す (terraform/README.md 参照)。"
 }
+
+output "worker_url" {
+  value       = length(google_cloud_run_v2_service.worker) > 0 ? google_cloud_run_v2_service.worker[0].uri : null
+  description = "分析 worker Cloud Run の URL (Cloud Tasks の dispatch 先 + media 配信元)。"
+}
+
+output "tasks_queue" {
+  value       = google_cloud_tasks_queue.analysis.id
+  description = "Cloud Tasks queue のフルパス。"
+}
+
+output "tasks_invoker_sa" {
+  value       = google_service_account.tasks_invoker.email
+  description = "Cloud Tasks OIDC invoker SA (worker が email を検証)。"
+}
+
+output "media_bucket" {
+  value       = google_storage_bucket.media.name
+  description = "チャート/全文 media 配信用 GCS バケット。"
+}

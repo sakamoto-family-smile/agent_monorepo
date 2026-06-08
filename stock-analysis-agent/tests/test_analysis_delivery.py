@@ -179,3 +179,49 @@ async def test_allowlisted_user_gets_help(monkeypatch):
     )
     await line_handler._handle_text(ev, _deps(client))
     assert any("ヘルプ" in r["text"] for r in client.replies)
+
+
+# ---------------------------------------------------------------------------
+# Cloud Tasks 委譲 (P3-A)
+# ---------------------------------------------------------------------------
+
+
+async def test_analyze_enqueues_when_tasks_enabled(monkeypatch):
+    monkeypatch.setattr(line_handler.settings, "tasks_enabled", True)
+    enqueued = []
+    monkeypatch.setattr(
+        line_handler, "enqueue_analysis", lambda uid, target: enqueued.append((uid, target))
+    )
+    scheduled = []
+    client = _StubClient()
+    deps = line_handler.HandlerDeps(
+        line_client=client, schedule_background=lambda f: scheduled.append(f)
+    )
+    ev = LineTextEvent(
+        event_type="text", line_user_id="U_a", reply_token="rt", text="分析 トヨタ"
+    )
+    await line_handler._cmd_analyze(["トヨタ"], ev, deps)
+
+    assert enqueued == [("U_a", "トヨタ")]
+    assert scheduled == []  # in-process 実行はしない
+    assert any("分析を開始" in r["text"] for r in client.replies)  # ack は返す
+
+
+async def test_analyze_falls_back_inline_when_enqueue_fails(monkeypatch):
+    monkeypatch.setattr(line_handler.settings, "tasks_enabled", True)
+
+    def boom(uid, target):
+        raise RuntimeError("tasks unavailable")
+
+    monkeypatch.setattr(line_handler, "enqueue_analysis", boom)
+    scheduled = []
+    client = _StubClient()
+    deps = line_handler.HandlerDeps(
+        line_client=client, schedule_background=lambda f: scheduled.append(f)
+    )
+    ev = LineTextEvent(
+        event_type="text", line_user_id="U_a", reply_token="rt", text="分析 トヨタ"
+    )
+    await line_handler._cmd_analyze(["トヨタ"], ev, deps)
+
+    assert len(scheduled) == 1  # enqueue 失敗 → in-process にフォールバック
