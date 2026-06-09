@@ -94,3 +94,21 @@ resource "google_secret_manager_secret_iam_member" "service_db_password" {
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.service.email}"
 }
+
+# EDINET API key (PROPOSAL-0011 P3-B)。disclosure2.edinet-fsa.go.jp で無料登録した
+# key を手動投入。EDINET 無効時は空文字 version で可 (collector が graceful skip)。
+resource "google_secret_manager_secret" "edinet_api_key" {
+  secret_id = local.secret_edinet_api_key
+  replication {
+    auto {}
+  }
+  labels = local.labels
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_iam_member" "service_edinet_api_key" {
+  secret_id = google_secret_manager_secret.edinet_api_key.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.service.email}"
+}

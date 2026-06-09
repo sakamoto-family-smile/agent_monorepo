@@ -195,6 +195,51 @@ gcloud run services logs read stock-analysis-worker --region=asia-northeast1 --l
 > 失敗タスクは Cloud Tasks が自動リトライ（`tasks_max_attempts`）。試行を使い切ると
 > worker がユーザにエラー通知して ack する。
 
+## EDINET 有効化 (PROPOSAL-0011 P3-B)
+
+EDINET（金融庁 法定開示）を分析に投入する。`edinet_documents` は shared Cloud SQL に
+移行済（alembic 0002）。index 投入 batch を Cloud Run Job + Cloud Scheduler（日次）で
+回し、worker が分析時に DB を引いて高速に取得する。
+
+`var.edinet_enabled=true` で有効化。前提（apply 前に準備）:
+
+```bash
+# 1. EDINET API key を取得 (disclosure2.edinet-fsa.go.jp で無料登録) → Secret に投入
+gcloud secrets versions add stock-analysis-line-edinet-api-key --data-file=- <<<'＜api key＞'
+
+# 2. Edinetcode.csv (ticker→EDINET code 対応表) を取得して GCS にアップロード
+#    出典: https://disclosure2.edinet-fsa.go.jp/weee0030.aspx (EDINETコードリスト zip)
+terraform output edinet_code_csv_uri   # → gs://stock-analysis-line-edinet/Edinetcode.csv
+gsutil cp Edinetcode.csv "$(terraform output -raw edinet_code_csv_uri)"
+
+# 3. 有効化して apply (worker に EDINET env + Job/Scheduler を作成)
+#    terraform.tfvars: edinet_enabled = true
+terraform apply
+```
+
+これで作られるもの:
+
+- worker に `EDINET_ENABLED=true` + `EDINET_API_KEY` + `EDINET_CODE_CSV_PATH`（gs://）
+  + EDINET cache（GCS, prefix `edinet/`）
+- `stock-edinet-index` Cloud Run Job（同一イメージ、`alembic upgrade head` →
+  `python -m batch.edinet_index_etl`）
+- Cloud Scheduler `stock-edinet-index-daily`（毎日 02:00 JST に Job 実行）
+- EDINET 用 GCS バケット `stock-analysis-line-edinet`（cache は `edinet_cache_retention_days` で自動削除）
+
+### 初回の index 投入（バックフィル）
+
+Scheduler は rolling 7 日窓のみ。過去分を入れるには Job を範囲指定で手動実行:
+
+```bash
+gcloud run jobs execute stock-edinet-index --region=asia-northeast1 \
+  --args="cd /app && alembic upgrade head && python -m batch.edinet_index_etl --from 2025-06-01 --to 2026-06-09"
+```
+
+> EDINET 有効化後、`分析 トヨタ` は有報/四半期報告書の XBRL 数値 + PDF も読むため
+> 分析が長くなる（1〜5 分）。worker の request timeout（既定 900s）+ Cloud Tasks の
+> リトライでカバーされる。DB が空（batch 未実行）の銘柄は初回のみ直叩き（~7 分）に
+> フォールバックする。
+
 ## 更新（image 入れ替え）
 
 ```bash

@@ -140,10 +140,39 @@ resource "google_cloud_run_v2_service" "worker" {
         value = var.project_id
       }
 
-      # ─── EDINET (P3-B で有効化) ──────────────────────────────────
+      # ─── EDINET (P3-B) ───────────────────────────────────────────
       env {
         name  = "EDINET_ENABLED"
         value = var.edinet_enabled ? "true" : "false"
+      }
+      env {
+        name  = "EDINET_CODE_CSV_PATH"
+        value = local.edinet_code_csv_uri
+      }
+      env {
+        name  = "EDINET_CACHE_BACKEND"
+        value = "gcs"
+      }
+      env {
+        name  = "EDINET_CACHE_GCS_BUCKET"
+        value = google_storage_bucket.edinet.name
+      }
+      env {
+        name  = "EDINET_CACHE_GCS_PREFIX"
+        value = "edinet/"
+      }
+      # EDINET 有効時のみ API key secret を参照 (無効時は version 不要)。
+      dynamic "env" {
+        for_each = var.edinet_enabled ? [1] : []
+        content {
+          name = "EDINET_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.edinet_api_key.secret_id
+              version = "latest"
+            }
+          }
+        }
       }
       env {
         name  = "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"
@@ -201,6 +230,8 @@ resource "google_cloud_run_v2_service" "worker" {
     google_secret_manager_secret_iam_member.service_db_password,
     google_secret_manager_secret_version.db_password,
     google_storage_bucket_iam_member.media_writer,
+    google_storage_bucket_iam_member.edinet_writer,
+    google_secret_manager_secret_iam_member.service_edinet_api_key,
     google_sql_user.stock,
     google_sql_database.stock,
   ]

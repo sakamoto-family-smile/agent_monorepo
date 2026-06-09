@@ -114,7 +114,43 @@ variable "log_level" {
 variable "edinet_enabled" {
   type        = bool
   default     = false
-  description = "EDINET 法定開示連携。P1 は false (yfinance + Brave のみ)。P3 で true + EDINET_API_KEY 投入。"
+  description = "EDINET 法定開示連携。true で worker の EDINET 経路を有効化し、index batch Job + Scheduler を作成する。前提: EDINET_API_KEY secret 投入 + Edinetcode.csv を GCS に配置。"
+}
+
+variable "edinet_code_csv_object" {
+  type        = string
+  default     = "Edinetcode.csv"
+  description = "EDINET バケット内の Edinetcode.csv オブジェクト名 (ticker→EDINET code)。"
+}
+
+variable "edinet_cache_retention_days" {
+  type        = number
+  default     = 30
+  description = "EDINET 書類 cache (PDF/XBRL) の GCS 保持日数。再取得可能なため短め。"
+}
+
+variable "edinet_job_name" {
+  type        = string
+  default     = "stock-edinet-index"
+  description = "EDINET index batch の Cloud Run Job 名。"
+}
+
+variable "edinet_job_timeout_seconds" {
+  type        = number
+  default     = 1800
+  description = "index batch Job の timeout (秒)。rolling 窓 N 日分の API 叩き。"
+}
+
+variable "edinet_index_schedule" {
+  type        = string
+  default     = "0 2 * * *"
+  description = "Cloud Scheduler の cron (Asia/Tokyo)。既定は毎日 02:00 JST。"
+}
+
+variable "edinet_daily_window_days" {
+  type        = number
+  default     = 7
+  description = "index batch の rolling 窓日数 (status 遅延変更の捕捉)。"
 }
 
 # ─────────────────────────────────────────────────────────────────────
