@@ -157,16 +157,46 @@ async def collect_filings(ticker: str) -> list[EdinetFilingResult]:
 
 
 def _build_resolver() -> EdinetCodeResolver | None:
-    """ticker → EDINET code resolver を構築する。 CSV 未設定なら None。"""
+    """ticker → EDINET code resolver を構築する。 CSV 未設定なら None。
+
+    `EDINET_CODE_CSV_PATH` は ローカルパス または `gs://bucket/object` を受ける
+    (PROPOSAL-0011 P3-B: Edinetcode.csv を GCS ホストして worker / batch から共有)。
+    """
     csv_path = settings.edinet_code_csv_path
-    if not csv_path or not Path(csv_path).exists():
+    if not csv_path:
         logger.warning(
-            "EDINET_CODE_CSV_PATH not configured or missing (path=%r), "
-            "EDINET collection will be skipped",
+            "EDINET_CODE_CSV_PATH not configured, EDINET collection will be skipped"
+        )
+        return None
+    if csv_path.startswith("gs://"):
+        data = _read_gcs_bytes(csv_path)
+        if data is None:
+            return None
+        return EdinetCodeResolver.from_csv_bytes(data)
+    if not Path(csv_path).exists():
+        logger.warning(
+            "EDINET_CODE_CSV_PATH missing (path=%r), EDINET collection will be skipped",
             csv_path,
         )
         return None
     return EdinetCodeResolver.from_csv_path(csv_path)
+
+
+def _read_gcs_bytes(gs_uri: str) -> bytes | None:
+    """`gs://bucket/object` から bytes を読む。失敗時は None。"""
+    rest = gs_uri[len("gs://") :]
+    bucket_name, _, blob_name = rest.partition("/")
+    if not bucket_name or not blob_name:
+        logger.warning("invalid gs:// URI for EDINET code CSV: %r", gs_uri)
+        return None
+    try:
+        from google.cloud import storage  # noqa: PLC0415
+
+        client = storage.Client()
+        return client.bucket(bucket_name).blob(blob_name).download_as_bytes()
+    except Exception:
+        logger.exception("failed to read EDINET code CSV from %s", gs_uri)
+        return None
 
 
 def _build_cache() -> LocalCache | GcsCache:

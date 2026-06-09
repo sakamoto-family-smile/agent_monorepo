@@ -53,3 +53,18 @@ output "media_bucket" {
   value       = google_storage_bucket.media.name
   description = "チャート/全文 media 配信用 GCS バケット。"
 }
+
+output "edinet_bucket" {
+  value       = google_storage_bucket.edinet.name
+  description = "EDINET cache + Edinetcode.csv 用 GCS バケット。"
+}
+
+output "edinet_code_csv_uri" {
+  value       = local.edinet_code_csv_uri
+  description = "worker/batch が読む Edinetcode.csv の gs:// URI。ここに CSV を手動アップロードする。"
+}
+
+output "edinet_job_name" {
+  value       = local.deploy_edinet ? google_cloud_run_v2_job.edinet_index[0].name : null
+  description = "EDINET index batch の Cloud Run Job 名 (edinet_enabled 時)。"
+}

@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | Implementing |
+| **Status** | Implemented |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-06-07 |
-| **Updated** | 2026-06-07 |
+| **Updated** | 2026-06-09 |
 | **Target** | stock-analysis-agent |
-| **Related PRs** | P1 実装 (本ブランチ) |
+| **Related PRs** | P1 #200 / P2-A #201 / P2-B #202 / P3-A #203 / P3-B (本ブランチ) |
 | **Supersedes** | — |
 | **Superseded by** | — |
 
@@ -282,6 +282,7 @@ After (P1/MVP):
 | 2026-06-07 | Draft (訂正) | LLM 認証経路を確認: **Vertex AI ではなく Anthropic OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`) 経由**（orchestrator.py）と判明。「Vertex Claude 承認」前提を撤回し、必要 Secret を LINE secret/token + `CLAUDE_CODE_OAUTH_TOKEN` + `BRAVE_API_KEY` に修正。brave-search は npx in-process（Node.js 同梱） |
 | 2026-06-07 | Draft (レビュー反映) | PR #199 のレビュー反映: ① Vertex は将来オプションと明記（§7 案D）② テキストレポートの配信方法（Flex バブル + テキスト fallback 先頭~1500字、Push）を §4.3 に追記 ③ EDINET は実装済(既定 false)→ P3 で有効化と明記 ④ DB 保存内容/履歴（reports=分析履歴、MVP は ephemeral）を §4.2 に詳述 ⑤ 1コマンド=1銘柄（複数はバッチ将来）を明記 |
 | 2026-06-07 | Draft (レビュー反映2) | 配信方法を更新: **要約=Flex / チャート=画像 / 全文=Markdown を `GET /api/line/report/{id}.md`（attachment）でホストし URL を LINE で渡す** 3点セットに（ユーザー要望「全文を DL ファイルで」）。ReportStore + エンドポイントを §4.3/§4.4 に追加 |
+| 2026-06-09 | Implemented (P3-B) | **P3-B: EDINET 有効化**。P2-B で aiosqlite 据え置きにした `edinet_documents` を **SQLAlchemy 化 + shared Cloud SQL 移行**（`EdinetDocument` model + `EdinetIndexRepo` を共有 engine 化、dialect-aware upsert、`db_path` 指定時は専用 sqlite engine でテスト互換）、alembic 0002 追加。`_build_resolver` を **GCS ホストの Edinetcode.csv 対応**（`gs://` → `from_csv_bytes`）。batch を `init_db()` に戻す（edinet_documents は core スキーマに統合）。terraform: EDINET cache + code CSV 用 GCS バケット、`EDINET_API_KEY` secret、worker に EDINET env（cache=gcs / csv=gs:// / 有効時のみ key secret を dynamic 参照）、**index batch を Cloud Run Job + Cloud Scheduler（日次 02:00 JST）**化（`edinet_enabled` で gating）。手動ステップ: API key 投入 + Edinetcode.csv を GCS アップロード + `edinet_enabled=true`。test 追加（223 passed）。**これで P1〜P3 完了**。残（将来）: Vertex AI Claude 切替（§7 案D）/ 複数銘柄バッチ |
 | 2026-06-08 | Implementing (P3-A) | **P3-A: Cloud Tasks 分散非同期 + GCS media**。分析を webhook の in-process BackgroundTasks から **Cloud Tasks queue + 別 worker Cloud Run** に委譲（流量制御 / 自動リトライ / 永続化 → webhook・worker とも min=0 可）。app: `task_queue.enqueue_analysis`、`routes/tasks.py`（worker `/api/tasks/analyze`、OIDC token を app 内検証、`X-CloudTasks-TaskRetryCount` でリトライ判定）、`media.py`（memory\|gcs。worker 複数 instance 対応のため **チャート/全文を GCS にアップロードして公開 URL を返す**）、`line_handler` は tasks_enabled 時に enqueue（失敗時 in-process フォールバック）。config に TASKS_*/MEDIA_* 追加、pyproject に google-cloud-tasks。terraform: Cloud Tasks queue + worker service（同一イメージ・public・min=0）+ media GCS バケット（public read / 1 日 TTL）+ invoker SA + IAM（enqueuer / serviceAccountUser / cloudtasks token creator / objectAdmin）。test 追加（220 passed）。残: **P3-B EDINET 有効化**（edinet_documents の Cloud SQL 移行 + index batch Job/Scheduler + Edinetcode.csv + cache GCS + EDINET_ENABLED=true、別 PR） |
 | 2026-06-07 | Implementing (P2-B) | **P2-B: SQLite → shared Cloud SQL (Postgres) 移行**。core 4 テーブル (ticker_dictionary / price_cache / reports / alerts) を **SQLAlchemy async** 化 (`db_models.py` / `db_engine.py`、`database.py` の 6 関数はシグネチャ・戻り値互換のまま内部置換)。**alembic** 導入 (env.py は `config.resolved_database_url` 再利用、0001_initial)。config に `database_url` / DB 分割指定 / `resolved_database_url` / `db_auto_create` 追加 (DATABASE_URL > DB_HOST/USER/NAME 組立 > sqlite)。Dockerfile は `RUN_MIGRATIONS=true` 時に起動時 `alembic upgrade head`。terraform で shared-pg に `stock_analysis_db` + `stock_analysis_user` (ABANDON) + DB password secret 作成、Cloud Run に Cloud SQL connector + DB env + `DB_AUTO_CREATE=false`。**EDINET (edinet_documents + edinet_index_repo) は EDINET 有効化 (P3) まで aiosqlite 据え置き** (batch は repo の `ensure_schema()` で自己完結)。test 追加 (203 passed)。手動ステップ: apply 後に `stock_analysis_user` へ schema 権限 GRANT (terraform/README.md)。これで P2 完了、残: P3 (Cloud Tasks + EDINET 有効化) |
 | 2026-06-07 | Implementing (P2-A) | P2 を 2 PR に分割し analytics 先行。**P2-A: analytics → Pub/Sub 入口切替**。`instrumentation/setup.py` を `build_sink` + `PubSubAnalyticsConfig`（backend=pubsub のとき `PubSubSink`、それ以外は従来の RotatingFileSink/uploader を温存）に。config に `analytics_pubsub_topic` / `analytics_gcp_project` 追加、pyproject を `analytics-platform[gcs,pubsub]` に（uv.lock 更新）、terraform で Cloud Run env を `ANALYTICS_STORAGE_BACKEND=pubsub` + topic/project に切替。publish 権限は analytics-platform 側 `publisher_service_account_emails` に stock SA を追記して付与（cross-module 手動ステップ、terraform/README.md 参照）。test 追加（190 passed）。残: **P2-B Cloud SQL 移行**（SQLAlchemy async + alembic、別 PR） |
