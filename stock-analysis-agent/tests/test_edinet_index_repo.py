@@ -135,6 +135,59 @@ class TestUpsertMany:
         repo = EdinetIndexRepo(db_path=str(db_path))
         assert await repo.upsert_many([]) == 0
 
+    @pytest.mark.asyncio
+    async def test_duplicate_ids_in_one_batch_are_deduped(self, db_path: Path) -> None:
+        """同一 batch 内の重複 document_id は後勝ちで 1 行に dedupe される。
+
+        EDINET 日次 INDEX には同一 doc_id が重複して現れることがあり、Postgres の
+        ON CONFLICT は 1 文内の同一行 2 回更新を拒否する (CardinalityViolation)。
+        P3-B 本番バックフィル (2025-06-10) で顕在化した regression。
+        """
+        from services.edinet_index_repo import EdinetIndexRepo
+
+        repo = EdinetIndexRepo(db_path=str(db_path))
+        n = await repo.upsert_many(
+            [
+                _meta(
+                    doc_id="DUP1",
+                    edinet_code="E12345",
+                    doc_type=DocumentType.ANNUAL_REPORT,
+                    submit=date(2026, 5, 10),
+                    withdrawn=0,
+                ),
+                _meta(
+                    doc_id="DUP1",
+                    edinet_code="E12345",
+                    doc_type=DocumentType.ANNUAL_REPORT,
+                    submit=date(2026, 5, 10),
+                    withdrawn=1,  # 後勝ちでこちらが反映される
+                ),
+            ]
+        )
+        assert n == 1
+        assert await repo.count() == 1
+        row = await repo.get_by_document_id("DUP1")
+        assert row is not None and row.withdrawal_status == 1
+
+    @pytest.mark.asyncio
+    async def test_large_batch_is_chunked(self, db_path: Path) -> None:
+        """_UPSERT_CHUNK_ROWS 超の batch も分割して全行 upsert される。"""
+        from services.edinet_index_repo import EdinetIndexRepo
+
+        repo = EdinetIndexRepo(db_path=str(db_path))
+        total = EdinetIndexRepo._UPSERT_CHUNK_ROWS + 50
+        items = [
+            _meta(
+                doc_id=f"BIG{i:05d}",
+                edinet_code="E12345",
+                doc_type=DocumentType.ANNUAL_REPORT,
+                submit=date(2026, 5, 10),
+            )
+            for i in range(total)
+        ]
+        assert await repo.upsert_many(items) == total
+        assert await repo.count() == total
+
 
 class TestListByEdinetCode:
     @pytest.mark.asyncio
