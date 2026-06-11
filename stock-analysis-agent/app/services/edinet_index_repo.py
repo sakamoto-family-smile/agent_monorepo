@@ -111,23 +111,42 @@ class EdinetIndexRepo:
             from sqlalchemy.dialects.sqlite import insert  # noqa: PLC0415
         return insert
 
+    # 1 INSERT 文あたりの行数上限。asyncpg はパラメータ数 32,767 が上限
+    # (16 列 × 2048 行 = 32,768 で超過)。有報ピーク日 (6 月上旬) は 1 日 2,000 件
+    # を超えるため、余裕を持って分割する。
+    _UPSERT_CHUNK_ROWS = 500
+
     async def upsert_many(self, items: Iterable[DocumentMetadata]) -> int:
         """`document_id` を PK として bulk upsert。戻り値は upsert 件数。
 
         既存行も毎回 UPDATE して status 系の遅延変更 (取下げ / 開示停止) を反映する
         (last_index_refreshed_at も更新)。cache 情報には触れない。
+
+        実装上の注意 (P3-B 本番バックフィルで顕在化):
+        - EDINET の日次 INDEX には同一 document_id が重複して現れることがある。
+          Postgres の `ON CONFLICT DO UPDATE` は 1 文内で同じ行を 2 回更新できない
+          (CardinalityViolation) ため、文に流す前に document_id で dedupe (後勝ち)。
+        - asyncpg のパラメータ上限 (32,767) を超えないよう chunk 分割する。
         """
         now = datetime.now().isoformat(sep=" ", timespec="seconds")
-        rows = [{**self._to_row_dict(m), "last_index_refreshed_at": now} for m in items]
+        deduped: dict[str, dict] = {}
+        for m in items:
+            row = {**self._to_row_dict(m), "last_index_refreshed_at": now}
+            deduped[row["document_id"]] = row  # 後勝ち
+        rows = list(deduped.values())
         if not rows:
             return 0
         insert = self._dialect_insert()
-        stmt = insert(EdinetDocument).values(rows)
-        set_ = {c: getattr(stmt.excluded, c) for c in _UPSERT_COLS}
-        set_["last_index_refreshed_at"] = now
-        stmt = stmt.on_conflict_do_update(index_elements=["document_id"], set_=set_)
         async with self._sm() as session:
-            await session.execute(stmt)
+            for i in range(0, len(rows), self._UPSERT_CHUNK_ROWS):
+                chunk = rows[i : i + self._UPSERT_CHUNK_ROWS]
+                stmt = insert(EdinetDocument).values(chunk)
+                set_ = {c: getattr(stmt.excluded, c) for c in _UPSERT_COLS}
+                set_["last_index_refreshed_at"] = now
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["document_id"], set_=set_
+                )
+                await session.execute(stmt)
             await session.commit()
         return len(rows)
 
