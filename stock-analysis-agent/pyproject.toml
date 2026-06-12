@@ -22,6 +22,8 @@ dependencies = [
     "line-bot-sdk>=3.13",
     # PROPOSAL-0011 P3-A: Cloud Tasks 分散非同期 (webhook → worker run)
     "google-cloud-tasks>=2.16.0",
+    # 全文レポートの HTML 化 (LINE 内蔵ブラウザ閲覧用)
+    "markdown>=3.6",
     # `[gcs]` extra で google-cloud-storage、`[pubsub]` extra で google-cloud-pubsub。
     # ANALYTICS_STORAGE_BACKEND=gcs のとき GCSPayloadWriter / GCSTransport、
     # =pubsub のとき PubSubSink (PROPOSAL-0010 P5-3) が import される。

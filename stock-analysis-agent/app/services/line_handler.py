@@ -29,7 +29,7 @@ from models.stock import (
     ScreenerRequest,
 )
 from services.access_control import get_analyze_limiter, is_user_allowed
-from services.media import store_chart_png, store_report_md
+from services.media import store_chart_png, store_report_html, store_report_md
 from services.task_queue import enqueue_analysis
 from services.line_client import (
     LineBotClient,
@@ -476,8 +476,9 @@ def _build_image_url(chart_path: str | None) -> str | None:
 async def _deliver_analysis(
     deps: HandlerDeps, *, to: str, result: AnalyzeResult
 ) -> None:
-    """(1) 要約 Flex (2) チャート画像 (3) 全文 DL リンク を Push する。"""
-    report_url = _build_report_url(result.report_text)
+    """(1) 要約 Flex (2) チャート画像 (3) 全文リンク (HTML 閲覧 + .md DL) を Push する。"""
+    html_url = store_report_html(result.report_text)
+    md_url = _build_report_url(result.report_text)
     image_url = _build_image_url(result.chart_path)
 
     label = result.company_name or result.ticker
@@ -487,11 +488,12 @@ async def _deliver_analysis(
         ticker=result.ticker,
         company_name=result.company_name,
         body_text=result.report_text,
-        report_url=report_url,
+        report_url=html_url,
+        md_url=md_url,
     )
     fallback = f"{label} ({result.ticker}) 分析結果\n\n{result.report_text[:1500]}"
-    if report_url:
-        fallback += f"\n\n📄 全文(.md): {report_url}"
+    if html_url:
+        fallback += f"\n\n📖 全文: {html_url}"
     await _push_flex_or_text(
         deps,
         to=to,

@@ -82,19 +82,29 @@ async def test_deliver_pushes_flex_and_image_with_urls(monkeypatch, tmp_path):
     assert [p["type"] for p in client.pushes] == ["flex", "image"]
 
     flex = client.pushes[0]["contents"]
-    # 全文ボタン (uri action) が付く
-    btn = flex["footer"]["contents"][0]["action"]
-    assert btn["type"] == "uri"
-    assert btn["uri"].startswith("https://stock.example/api/line/report/")
-    assert btn["uri"].endswith(".md")
+    # 全文ボタン 2 つ: [0]=HTML 閲覧 (primary), [1]=.md DL (secondary)
+    buttons = flex["footer"]["contents"]
+    assert len(buttons) == 2
+    html_btn = buttons[0]["action"]
+    md_btn = buttons[1]["action"]
+    assert html_btn["type"] == "uri"
+    assert html_btn["uri"].startswith("https://stock.example/api/line/report/")
+    assert html_btn["uri"].endswith(".html")
+    assert md_btn["uri"].endswith(".md")
 
     img_url = client.pushes[1]["url"]
     assert img_url.startswith("https://stock.example/api/line/image/")
     assert img_url.endswith(".png")
 
-    # store に実体が入っている
-    report_id = btn["uri"].rsplit("/", 1)[-1][: -len(".md")]
-    assert get_report_store().get(report_id) is not None
+    # store に実体が入っている (HTML は変換済の text/html)
+    html_id = html_btn["uri"].rsplit("/", 1)[-1][: -len(".html")]
+    html_item = get_report_store().get(html_id)
+    assert html_item is not None
+    assert html_item[1].startswith("text/html")
+    assert "トヨタ分析" in html_item[0].decode("utf-8")
+    md_id = md_btn["uri"].rsplit("/", 1)[-1][: -len(".md")]
+    md_item = get_report_store().get(md_id)
+    assert md_item is not None and md_item[1].startswith("text/markdown")
     image_id = img_url.rsplit("/", 1)[-1][: -len(".png")]
     assert get_image_store().get(image_id) == (b"\x89PNG fake bytes", "image/png")
 

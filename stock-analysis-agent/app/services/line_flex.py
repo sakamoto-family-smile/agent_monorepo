@@ -250,11 +250,13 @@ def analysis_summary_bubble(
     company_name: str | None,
     body_text: str,
     report_url: str | None = None,
+    md_url: str | None = None,
 ) -> dict:
     """個別株分析の要約 bubble。
 
-    `report_url` を渡すと footer に「📄 全文(.md)を取得」ボタン (URI action) を付け、
-    Claude 生成の全文 Markdown を DL できるようにする (PROPOSAL-0011 §4.3)。
+    - `report_url`: HTML 版全文の閲覧 URL → footer に「📖 全文を読む」ボタン
+    - `md_url`: 生 Markdown の DL URL → footer に「📄 .md を保存」ボタン (secondary)
+    どちらも None なら footer なし (PROPOSAL-0011 §4.3)。
     """
     title = company_name or ticker
     bubble: dict = {
@@ -289,23 +291,39 @@ def analysis_summary_bubble(
             ],
         },
     }
+    buttons: list[dict] = []
     if report_url:
+        buttons.append(
+            {
+                "type": "button",
+                "style": "primary",
+                "color": _HEADER_COLOR_PRIMARY,
+                "height": "sm",
+                "action": {
+                    "type": "uri",
+                    "label": "📖 全文を読む",
+                    "uri": report_url,
+                },
+            }
+        )
+    if md_url:
+        buttons.append(
+            {
+                "type": "button",
+                "style": "secondary",
+                "height": "sm",
+                "action": {
+                    "type": "uri",
+                    "label": "📄 .md を保存",
+                    "uri": md_url,
+                },
+            }
+        )
+    if buttons:
         bubble["footer"] = {
             "type": "box",
             "layout": "vertical",
             "spacing": "sm",
-            "contents": [
-                {
-                    "type": "button",
-                    "style": "primary",
-                    "color": _HEADER_COLOR_PRIMARY,
-                    "height": "sm",
-                    "action": {
-                        "type": "uri",
-                        "label": "📄 全文(.md)を取得",
-                        "uri": report_url,
-                    },
-                }
-            ],
+            "contents": buttons,
         }
     return bubble
