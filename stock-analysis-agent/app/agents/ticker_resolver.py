@@ -1,6 +1,6 @@
 import re
 import logging
-from typing import Optional
+from dataclasses import dataclass
 
 import yfinance as yf
 
@@ -8,6 +8,45 @@ from models.stock import ResolveResult
 from services.database import lookup_ticker
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TickerCandidate:
+    """曖昧な企業名入力に対する候補 1 件 (PROPOSAL-0011 follow-up)。"""
+
+    ticker: str
+    name: str | None = None
+    exchange: str | None = None
+
+
+def search_candidates(query: str, *, max_results: int = 5) -> list[TickerCandidate]:
+    """yfinance Search で候補を最大 max_results 件返す (LINE の候補提示用)。
+
+    失敗・ゼロ件は空 list (呼び出し側が「見つからない」案内を出す)。
+    """
+    try:
+        results = yf.Search(query, max_results=max_results)
+        quotes = results.quotes if hasattr(results, "quotes") else []
+    except Exception as e:
+        logger.debug("yfinance Search failed for %s: %s", query, e)
+        return []
+    candidates: list[TickerCandidate] = []
+    seen: set[str] = set()
+    for q in quotes or []:
+        symbol = (q.get("symbol") or "").strip()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        candidates.append(
+            TickerCandidate(
+                ticker=symbol,
+                name=q.get("longname") or q.get("shortname"),
+                exchange=q.get("exchDisp") or q.get("exchange"),
+            )
+        )
+        if len(candidates) >= max_results:
+            break
+    return candidates
 
 # Ticker pattern: alphanumeric + dots/hyphens, 1-10 chars
 TICKER_PATTERN = re.compile(r'^[A-Z0-9]{1,6}(\.[A-Z]{1,2})?$|^[A-Z0-9]{1,6}-[A-Z]{1,2}$')

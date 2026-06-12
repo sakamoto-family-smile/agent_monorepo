@@ -327,3 +327,60 @@ def analysis_summary_bubble(
             "contents": buttons,
         }
     return bubble
+
+
+# ---------------------------------------------------------------------------
+# 銘柄候補の選択 (曖昧な企業名入力時)
+# ---------------------------------------------------------------------------
+
+_MAX_CANDIDATE_BUTTONS = 5
+
+
+def ticker_candidates_bubble(*, query: str, candidates: list) -> dict:
+    """曖昧な企業名に対する候補選択 bubble。
+
+    candidates は `TickerCandidate` (ticker/name/exchange) の list。各ボタンは
+    message action で `分析 <ticker>` を送る → regex 確定で分析が始まる。
+    """
+    buttons: list[dict] = []
+    for c in candidates[:_MAX_CANDIDATE_BUTTONS]:
+        label_parts = [c.name or c.ticker]
+        if c.name:
+            label_parts.append(f"({c.ticker})")
+        label = _truncate(" ".join(label_parts), 40)
+        buttons.append(
+            {
+                "type": "button",
+                "style": "secondary",
+                "height": "sm",
+                "action": {
+                    "type": "message",
+                    "label": label,
+                    "text": f"分析 {c.ticker}",
+                },
+            }
+        )
+    return {
+        "type": "bubble",
+        "size": "kilo",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": _truncate(f"「{query}」の候補が複数あります", 60),
+                    "weight": "bold",
+                    "wrap": True,
+                },
+                {
+                    "type": "text",
+                    "text": "分析する銘柄を選んでください:",
+                    "size": "sm",
+                    "color": _SUBTLE_COLOR,
+                },
+                *buttons,
+            ],
+        },
+    }

@@ -51,7 +51,18 @@ def _deps(client):
 
 
 @pytest.fixture(autouse=True)
-def _reset():
+def _reset(monkeypatch):
+    # _cmd_analyze は解決ゲートで resolve_ticker を呼ぶ。既定では高確度 (regex 相当)
+    # を返すスタブにして、実 DB / yfinance に出ないようにする (候補フローのテストは
+    # 個別に低確度スタブへ差し替える)。
+    from models.stock import ResolveResult
+
+    async def _confident(query: str) -> ResolveResult:
+        return ResolveResult(
+            ticker=query.upper(), confidence=0.95, source="regex", company_name=None
+        )
+
+    monkeypatch.setattr(line_handler, "resolve_ticker", _confident)
     reset_blob_stores()
     reset_analyze_limiter()
     yield
@@ -277,3 +288,122 @@ async def test_analyze_falls_back_inline_when_enqueue_fails(monkeypatch):
     await line_handler._cmd_analyze(["トヨタ"], ev, deps)
 
     assert len(scheduled) == 1  # enqueue 失敗 → in-process にフォールバック
+
+
+# ---------------------------------------------------------------------------
+# 銘柄解決ゲート (低確度 → 候補提示、誤銘柄分析の防止)
+# ---------------------------------------------------------------------------
+
+
+def _low_confidence_resolver(monkeypatch, *, candidates):
+    from agents.ticker_resolver import TickerCandidate
+    from models.stock import ResolveResult
+
+    async def _ambiguous(query: str) -> ResolveResult:
+        return ResolveResult(
+            ticker=query.upper(), confidence=0.3, source="llm", company_name=query
+        )
+
+    monkeypatch.setattr(line_handler, "resolve_ticker", _ambiguous)
+    monkeypatch.setattr(
+        line_handler,
+        "search_candidates",
+        lambda q: [TickerCandidate(**c) for c in candidates],
+    )
+
+
+async def test_ambiguous_query_replies_candidates_without_analyzing(monkeypatch):
+    _low_confidence_resolver(
+        monkeypatch,
+        candidates=[
+            {"ticker": "7203.T", "name": "トヨタ自動車", "exchange": "東証"},
+            {"ticker": "TM", "name": "Toyota Motor ADR", "exchange": "NYSE"},
+        ],
+    )
+    scheduled, enqueued = [], []
+    monkeypatch.setattr(config.settings, "tasks_enabled", True)
+    monkeypatch.setattr(
+        line_handler, "enqueue_analysis", lambda u, t: enqueued.append(t)
+    )
+    client = _StubClient()
+    deps = line_handler.HandlerDeps(
+        line_client=client, schedule_background=lambda f: scheduled.append(f)
+    )
+    ev = LineTextEvent(
+        event_type="text", line_user_id="U_a", reply_token="rt", text="分析 とよた"
+    )
+    await line_handler._cmd_analyze(["とよた"], ev, deps)
+
+    # 分析は始まらない (enqueue も in-process も無し)
+    assert enqueued == [] and scheduled == []
+    # 候補 Flex が返る (各ボタンは `分析 <ticker>` を送る)
+    reply = client.replies[0]
+    assert reply["type"] == "flex"
+    texts = str(reply["contents"])
+    assert "分析 7203.T" in texts and "分析 TM" in texts
+
+
+async def test_ambiguous_query_with_no_candidates_replies_not_found(monkeypatch):
+    _low_confidence_resolver(monkeypatch, candidates=[])
+    client = _StubClient()
+    deps = _deps(client)
+    ev = LineTextEvent(
+        event_type="text", line_user_id="U_a", reply_token="rt", text="分析 ぞんざいしない"
+    )
+    await line_handler._cmd_analyze(["ぞんざいしない"], ev, deps)
+    assert any("見つかりませんでした" in r["text"] for r in client.replies)
+
+
+async def test_candidate_flow_does_not_consume_rate_limit(monkeypatch):
+    """候補提示はレート制限を消費しない (その後の確定分析が弾かれない)。"""
+    monkeypatch.setattr(config.settings, "analyze_rate_limit_per_day", 1)
+    reset_analyze_limiter()
+    _low_confidence_resolver(
+        monkeypatch, candidates=[{"ticker": "7203.T", "name": "トヨタ自動車"}]
+    )
+    client = _StubClient()
+    ev = LineTextEvent(
+        event_type="text", line_user_id="U_a", reply_token="rt", text="分析 とよた"
+    )
+    await line_handler._cmd_analyze(["とよた"], ev, _deps(client))  # 候補提示のみ
+
+    # 高確度に戻して確定分析 → まだ 1 回目としてスケジュールされる
+    from models.stock import ResolveResult
+
+    async def _confident(query: str) -> ResolveResult:
+        return ResolveResult(
+            ticker=query, confidence=0.95, source="regex", company_name=None
+        )
+
+    monkeypatch.setattr(line_handler, "resolve_ticker", _confident)
+    scheduled = []
+    deps2 = line_handler.HandlerDeps(
+        line_client=_StubClient(), schedule_background=lambda f: scheduled.append(f)
+    )
+    ev2 = LineTextEvent(
+        event_type="text", line_user_id="U_a", reply_token="rt", text="分析 7203.T"
+    )
+    await line_handler._cmd_analyze(["7203.T"], ev2, deps2)
+    assert len(scheduled) == 1
+
+
+async def test_confident_dict_hit_includes_name_in_ack(monkeypatch):
+    from models.stock import ResolveResult
+
+    async def _dict_hit(query: str) -> ResolveResult:
+        return ResolveResult(
+            ticker="7203.T", confidence=0.9, source="dict", company_name="トヨタ"
+        )
+
+    monkeypatch.setattr(line_handler, "resolve_ticker", _dict_hit)
+    client = _StubClient()
+    scheduled = []
+    deps = line_handler.HandlerDeps(
+        line_client=client, schedule_background=lambda f: scheduled.append(f)
+    )
+    ev = LineTextEvent(
+        event_type="text", line_user_id="U_a", reply_token="rt", text="分析 トヨタ"
+    )
+    await line_handler._cmd_analyze(["トヨタ"], ev, deps)
+    assert any("トヨタ (7203.T)" in r["text"] for r in client.replies)
+    assert len(scheduled) == 1

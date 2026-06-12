@@ -22,6 +22,7 @@ from typing import Awaitable, Callable
 from agents.fund_screener import run_fund_recommend
 from agents.orchestrator import run_analysis
 from agents.screener import run_screener
+from agents.ticker_resolver import resolve_ticker, search_candidates
 import config  # NOTE: `from config import settings` だと importlib.reload 後の
 # 新 settings を参照できず test isolation が壊れる (database.py と同方針)。
 from models.stock import (
@@ -41,6 +42,7 @@ from services.line_flex import (
     analysis_summary_bubble,
     funds_ranking_carousel,
     screener_ranking_carousel,
+    ticker_candidates_bubble,
 )
 
 logger = logging.getLogger(__name__)
@@ -406,6 +408,17 @@ async def _cmd_screen(
 # ---------------------------------------------------------------------------
 
 
+# この confidence/source なら曖昧さ無しとして分析に進む (regex=0.95 / dict=0.90)。
+# yfinance 検索 (0.75) や LLM フォールバック (0.30) は誤銘柄リスクがあるため、
+# 候補提示に切り替える (実機で「違う企業が分析された」報告への対応)。
+_CONFIDENT_SOURCES = {"regex", "dict"}
+
+ANALYZE_NOT_FOUND_TEMPLATE = (
+    "🔍 「{target}」に該当する銘柄が見つかりませんでした。\n"
+    "ティッカーで指定してみてください (例: 分析 7203.T / 分析 AAPL)。"
+)
+
+
 async def _cmd_analyze(
     args: list[str], event: LineTextEvent, deps: HandlerDeps
 ) -> None:
@@ -417,6 +430,39 @@ async def _cmd_analyze(
         return
 
     user_id = event.line_user_id
+    target = " ".join(args).strip()
+
+    # 銘柄解決ゲート: 高確度 (regex/dict) でなければ分析せず候補を提示する。
+    # 誤銘柄に Opus 分析が走るのを防ぐ。候補提示はレート制限を消費しない。
+    try:
+        resolved = await resolve_ticker(target)
+    except Exception:
+        logger.exception("resolve_ticker failed for %s (continuing as-is)", target)
+        resolved = None
+    if resolved is not None and resolved.source not in _CONFIDENT_SOURCES:
+        candidates = search_candidates(target)
+        if candidates:
+            flex = ticker_candidates_bubble(query=target, candidates=candidates)
+            fallback = (
+                f"「{target}」の候補:\n"
+                + "\n".join(
+                    f"・分析 {c.ticker} — {c.name or ''}" for c in candidates[:5]
+                )
+                + "\n上のコマンドを送ると分析を開始します。"
+            )
+            await _reply_flex_or_text(
+                deps,
+                reply_token=event.reply_token,
+                fallback_text=fallback,
+                flex_contents=flex,
+                alt_text=f"「{target}」の銘柄候補",
+            )
+        else:
+            await deps.line_client.reply_text(
+                reply_token=event.reply_token,
+                text=ANALYZE_NOT_FOUND_TEMPLATE.format(target=target),
+            )
+        return
 
     # レート制限: 1 ユーザ 1 日の分析回数上限 (Opus コスト抑制、PROPOSAL-0011 §3.4)。
     if not get_analyze_limiter().check_and_increment(user_id):
@@ -425,11 +471,13 @@ async def _cmd_analyze(
         )
         return
 
-    target = " ".join(args).strip()
-    # ack reply
+    # ack reply (解決済の銘柄名があれば併記)
+    ack_target = target
+    if resolved is not None and resolved.company_name:
+        ack_target = f"{resolved.company_name} ({resolved.ticker})"
     await deps.line_client.reply_text(
         reply_token=event.reply_token,
-        text=ANALYZE_ACK_TEMPLATE.format(target=target, eta=_analyze_eta()),
+        text=ANALYZE_ACK_TEMPLATE.format(target=ack_target, eta=_analyze_eta()),
     )
 
     # P3-A: tasks_enabled なら Cloud Tasks に委譲 (worker run が実行)。
