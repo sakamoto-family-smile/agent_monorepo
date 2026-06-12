@@ -76,7 +76,9 @@ def _help_text() -> str:
         f"■ 個別株分析 (分析開始から完了まで {_analyze_eta()})\n"
         "  ・分析 トヨタ\n"
         "  ・分析 AAPL\n"
-        "  ・分析 7203.T\n\n"
+        "  ・分析 7203.T\n"
+        "■ その他\n"
+        "  ・ID — 自分のユーザーID を表示 (利用登録用)\n\n"
         "※ 投資判断はご自身の責任でお願いします。"
     )
 
@@ -215,6 +217,15 @@ _HELP_TOKENS = {"ヘルプ", "help", "menu", "メニュー", "?", "？"}
 _RECOMMEND_TOKENS = {"おすすめ", "オススメ", "お勧め", "recommend", "funds"}
 _SCREEN_TOKENS = {"スクリーニング", "screen", "screener"}
 _ANALYZE_TOKENS = {"分析", "analyze", "analysis"}
+# 自分の userId を返すコマンド (家族/友人を allow-list に追加する登録動線)。
+# LINE アプリでは Messaging API の userId をユーザー本人が確認できないため、
+# Bot にこのコマンドを送ってもらい、返ってきた ID を管理者へ伝えてもらう。
+_WHOAMI_TOKENS = {"id", "ユーザーid", "userid", "whoami", "登録"}
+
+WHOAMI_TEMPLATE = (
+    "🪪 あなたのユーザーID:\n{user_id}\n\n"
+    "この Bot の利用登録を希望する場合は、上の ID を管理者へ伝えてください。"
+)
 
 _CATEGORY_ALIASES: dict[str, str] = {
     "米国": "us_index", "米国株": "us_index", "us": "us_index",
@@ -240,18 +251,27 @@ _MARKET_ALIASES: dict[str, str] = {
 
 
 async def _handle_text(event: LineTextEvent, deps: HandlerDeps) -> None:
+    cmd, args = _normalize_command(event.text)
+    cmd_lower = cmd.lower()
+
+    # whoami は allow-list 適用外 (新メンバーが自分の userId を知る唯一の動線)。
+    # 送信者自身の ID を返すだけで LLM も呼ばないため、開放しても実害なし。
+    if cmd and (cmd in _WHOAMI_TOKENS or cmd_lower in _WHOAMI_TOKENS):
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text=WHOAMI_TEMPLATE.format(user_id=event.line_user_id),
+        )
+        return
+
     # allow-list: FAMILY_USER_IDS 設定時は家族以外を無視 (返信せず黙殺)。
     # public webhook + Claude Opus 課金の濫用を防ぐ (PROPOSAL-0011 §3.4)。
     if not is_user_allowed(event.line_user_id):
         logger.info("ignoring message from non-allowlisted user")
         return
 
-    cmd, args = _normalize_command(event.text)
     if not cmd:
         await deps.line_client.reply_text(reply_token=event.reply_token, text=UNKNOWN_HINT)
         return
-
-    cmd_lower = cmd.lower()
 
     if cmd in _HELP_TOKENS or cmd_lower in _HELP_TOKENS:
         await deps.line_client.reply_text(reply_token=event.reply_token, text=_help_text())
