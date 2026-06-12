@@ -53,3 +53,17 @@ async def get_report(report_id: str) -> Response:
             "Cache-Control": "private, max-age=300",
         },
     )
+
+
+@router.get("/line/report/{report_id}.html")
+async def get_report_html(report_id: str) -> Response:
+    """ReportStore から HTML 版レポートを取り出し、インライン表示で返す。"""
+    item = get_report_store().get(report_id)
+    if item is None:
+        return Response(status_code=status.HTTP_404_NOT_FOUND)
+    data, content_type = item
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Cache-Control": "private, max-age=300"},
+    )

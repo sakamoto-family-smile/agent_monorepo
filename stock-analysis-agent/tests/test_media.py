@@ -52,6 +52,50 @@ def test_empty_report_returns_none(monkeypatch):
     monkeypatch.setattr(config.settings, "media_backend", "memory")
     monkeypatch.setattr(config.settings, "public_base_url", "https://x.example")
     assert media.store_report_md("") is None
+    assert media.store_report_html("") is None
+
+
+def test_md_content_type_declares_utf8(monkeypatch):
+    """LINE 内蔵ブラウザの文字化け対策: charset=utf-8 を明示する。"""
+    monkeypatch.setattr(config.settings, "media_backend", "memory")
+    monkeypatch.setattr(config.settings, "public_base_url", "https://x.example")
+    url = media.store_report_md("# 日本語")
+    rid = url.rsplit("/", 1)[-1][: -len(".md")]
+    _, ctype = get_report_store().get(rid)
+    assert ctype == "text/markdown; charset=utf-8"
+
+
+def test_html_report_renders_markdown(monkeypatch):
+    monkeypatch.setattr(config.settings, "media_backend", "memory")
+    monkeypatch.setattr(config.settings, "public_base_url", "https://x.example")
+    url = media.store_report_html("# 見出し\n\n| A | B |\n|---|---|\n| 1 | 2 |")
+    assert url.endswith(".html")
+    rid = url.rsplit("/", 1)[-1][: -len(".html")]
+    data, ctype = get_report_store().get(rid)
+    html = data.decode("utf-8")
+    assert ctype == "text/html; charset=utf-8"
+    assert '<meta charset="utf-8">' in html
+    assert "<h1>見出し</h1>" in html
+    assert "<table>" in html  # tables extension
+    assert "投資勧誘" in html  # disclaimer footer
+
+
+def test_html_falls_back_to_pre_on_conversion_error(monkeypatch):
+    monkeypatch.setattr(config.settings, "media_backend", "memory")
+    monkeypatch.setattr(config.settings, "public_base_url", "https://x.example")
+
+    def boom(*a, **k):
+        raise RuntimeError("converter broken")
+
+    import markdown as md_lib
+
+    monkeypatch.setattr(md_lib, "markdown", boom)
+    url = media.store_report_html("# <script>alert(1)</script>")
+    rid = url.rsplit("/", 1)[-1][: -len(".html")]
+    data, _ = get_report_store().get(rid)
+    html = data.decode("utf-8")
+    assert "<pre" in html
+    assert "&lt;script&gt;" in html  # escape されている
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +157,22 @@ def test_gcs_report_sets_attachment(monkeypatch):
     assert "/report/" in url and url.endswith(".md")
     blob = next(iter(fake_client._bucket.blobs.values()))
     assert blob.content_disposition.startswith("attachment;")
+
+
+def test_gcs_html_is_inline_not_attachment(monkeypatch):
+    """HTML はブラウザ表示 (inline) するため attachment を付けない。"""
+    monkeypatch.setattr(config.settings, "media_backend", "gcs")
+    monkeypatch.setattr(config.settings, "media_gcs_bucket", "media-bkt")
+    from google.cloud import storage
+
+    fake_client = _FakeClient()
+    monkeypatch.setattr(storage, "Client", lambda: fake_client)
+
+    url = media.store_report_html("# r")
+    assert url.endswith(".html")
+    blob = next(iter(fake_client._bucket.blobs.values()))
+    assert blob.content_disposition is None
+    assert blob.uploaded[1] == "text/html; charset=utf-8"
 
 
 def test_gcs_no_bucket_returns_none(monkeypatch):
