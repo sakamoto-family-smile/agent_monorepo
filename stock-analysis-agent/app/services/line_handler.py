@@ -22,7 +22,8 @@ from typing import Awaitable, Callable
 from agents.fund_screener import run_fund_recommend
 from agents.orchestrator import run_analysis
 from agents.screener import run_screener
-from config import settings
+import config  # NOTE: `from config import settings` だと importlib.reload 後の
+# 新 settings を参照できず test isolation が壊れる (database.py と同方針)。
 from models.stock import (
     AnalysisRequest,
     FundRecommendRequest,
@@ -49,25 +50,36 @@ logger = logging.getLogger(__name__)
 # コマンド文面
 # ---------------------------------------------------------------------------
 
-HELP_TEXT = (
-    "【株価分析エージェント Bot】\n"
-    "■ ヘルプ\n"
-    "  ・ヘルプ — このメッセージ\n"
-    "■ 投資信託 (ETF) のオススメ\n"
-    "  ・おすすめ — 全カテゴリ Top5\n"
-    "  ・おすすめ 米国 — S&P500 / VTI / QQQ など\n"
-    "  ・おすすめ 世界 — VT / ACWI / VEA など\n"
-    "  ・おすすめ 配当 — SCHD / VYM など\n"
-    "  ・おすすめ セクター — XLK / SOXX / XLF など\n"
-    "■ 短期上昇候補スクリーニング\n"
-    "  ・スクリーニング — 日本株を上位10件\n"
-    "  ・スクリーニング JP / US / ALL\n"
-    "■ 個別株分析 (分析開始から完了まで 30秒〜2分)\n"
-    "  ・分析 トヨタ\n"
-    "  ・分析 AAPL\n"
-    "  ・分析 7203.T\n\n"
-    "※ 投資判断はご自身の責任でお願いします。"
-)
+# 分析所要時間の目安。EDINET 有効時は有報 PDF/XBRL の取得・読解が入り長くなる。
+_ETA_WITH_EDINET = "1〜5分"
+_ETA_WITHOUT_EDINET = "30秒〜2分"
+
+
+def _analyze_eta() -> str:
+    return _ETA_WITH_EDINET if config.settings.edinet_enabled else _ETA_WITHOUT_EDINET
+
+
+def _help_text() -> str:
+    return (
+        "【株価分析エージェント Bot】\n"
+        "■ ヘルプ\n"
+        "  ・ヘルプ — このメッセージ\n"
+        "■ 投資信託 (ETF) のオススメ\n"
+        "  ・おすすめ — 全カテゴリ Top5\n"
+        "  ・おすすめ 米国 — S&P500 / VTI / QQQ など\n"
+        "  ・おすすめ 世界 — VT / ACWI / VEA など\n"
+        "  ・おすすめ 配当 — SCHD / VYM など\n"
+        "  ・おすすめ セクター — XLK / SOXX / XLF など\n"
+        "■ 短期上昇候補スクリーニング\n"
+        "  ・スクリーニング — 日本株を上位10件\n"
+        "  ・スクリーニング JP / US / ALL\n"
+        f"■ 個別株分析 (分析開始から完了まで {_analyze_eta()})\n"
+        "  ・分析 トヨタ\n"
+        "  ・分析 AAPL\n"
+        "  ・分析 7203.T\n\n"
+        "※ 投資判断はご自身の責任でお願いします。"
+    )
+
 
 UNKNOWN_HINT = "認識できない入力でした。「ヘルプ」と送るとコマンド一覧を表示します。"
 
@@ -77,7 +89,7 @@ DISCLAIMER_SHORT = (
 
 ANALYZE_ACK_TEMPLATE = (
     "📊 {target} の分析を開始しました。\n"
-    "完了まで 30秒〜2分ほどかかります。完了次第、結果をお送りします。"
+    "完了まで {eta}ほどかかります。完了次第、結果をお送りします。"
 )
 
 ANALYZE_FAIL_TEMPLATE = (
@@ -242,7 +254,7 @@ async def _handle_text(event: LineTextEvent, deps: HandlerDeps) -> None:
     cmd_lower = cmd.lower()
 
     if cmd in _HELP_TOKENS or cmd_lower in _HELP_TOKENS:
-        await deps.line_client.reply_text(reply_token=event.reply_token, text=HELP_TEXT)
+        await deps.line_client.reply_text(reply_token=event.reply_token, text=_help_text())
         return
 
     if cmd in _RECOMMEND_TOKENS or cmd_lower in _RECOMMEND_TOKENS:
@@ -397,12 +409,12 @@ async def _cmd_analyze(
     # ack reply
     await deps.line_client.reply_text(
         reply_token=event.reply_token,
-        text=ANALYZE_ACK_TEMPLATE.format(target=target),
+        text=ANALYZE_ACK_TEMPLATE.format(target=target, eta=_analyze_eta()),
     )
 
     # P3-A: tasks_enabled なら Cloud Tasks に委譲 (worker run が実行)。
     # enqueue 失敗時や dev (tasks 無効) は従来の in-process 実行にフォールバック。
-    if settings.tasks_enabled:
+    if config.settings.tasks_enabled:
         try:
             enqueue_analysis(user_id, target)
             return

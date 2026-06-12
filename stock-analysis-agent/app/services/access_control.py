@@ -13,12 +13,12 @@ from __future__ import annotations
 import threading
 import time
 
-from config import settings
+import config  # settings は毎回 lookup (test isolation / database.py と同方針)
 
 
 def is_user_allowed(user_id: str) -> bool:
     """allow-list 判定。`FAMILY_USER_IDS` 未設定なら全許可 (dev)。"""
-    allowed = settings.family_user_id_set
+    allowed = config.settings.family_user_id_set
     if not allowed:
         return True
     return user_id in allowed
@@ -66,7 +66,7 @@ _analyze_limiter: DailyRateLimiter | None = None
 def get_analyze_limiter() -> DailyRateLimiter:
     global _analyze_limiter
     if _analyze_limiter is None:
-        _analyze_limiter = DailyRateLimiter(settings.analyze_rate_limit_per_day)
+        _analyze_limiter = DailyRateLimiter(config.settings.analyze_rate_limit_per_day)
     return _analyze_limiter
 
 

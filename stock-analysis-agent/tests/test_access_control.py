@@ -6,17 +6,18 @@ config の `settings` は module-level singleton。importlib.reload すると別
 
 from __future__ import annotations
 
+import config
 import services.access_control as ac
 from services.access_control import DailyRateLimiter
 
 
 def test_allow_all_when_family_ids_empty(monkeypatch):
-    monkeypatch.setattr(ac.settings, "family_user_ids", "")
+    monkeypatch.setattr(config.settings, "family_user_ids", "")
     assert ac.is_user_allowed("U_anyone") is True
 
 
 def test_only_listed_users_allowed(monkeypatch):
-    monkeypatch.setattr(ac.settings, "family_user_ids", "U_alice, U_bob")
+    monkeypatch.setattr(config.settings, "family_user_ids", "U_alice, U_bob")
     assert ac.is_user_allowed("U_alice") is True
     assert ac.is_user_allowed("U_bob") is True
     assert ac.is_user_allowed("U_eve") is False

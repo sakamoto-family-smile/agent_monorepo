@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pytest
 
+import config
+
 from services import line_handler
 from services.access_control import reset_analyze_limiter
 from services.blob_store import get_image_store, get_report_store, reset_blob_stores
@@ -63,7 +65,7 @@ def _reset():
 
 
 async def test_deliver_pushes_flex_and_image_with_urls(monkeypatch, tmp_path):
-    monkeypatch.setattr(line_handler.settings, "public_base_url", "https://stock.example")
+    monkeypatch.setattr(config.settings, "public_base_url", "https://stock.example")
 
     chart = tmp_path / "chart.png"
     chart.write_bytes(b"\x89PNG fake bytes")
@@ -110,7 +112,7 @@ async def test_deliver_pushes_flex_and_image_with_urls(monkeypatch, tmp_path):
 
 
 async def test_deliver_without_base_url_sends_only_flex(monkeypatch, tmp_path):
-    monkeypatch.setattr(line_handler.settings, "public_base_url", "")
+    monkeypatch.setattr(config.settings, "public_base_url", "")
 
     chart = tmp_path / "chart.png"
     chart.write_bytes(b"png")
@@ -127,7 +129,7 @@ async def test_deliver_without_base_url_sends_only_flex(monkeypatch, tmp_path):
 
 
 async def test_deliver_missing_chart_skips_image(monkeypatch):
-    monkeypatch.setattr(line_handler.settings, "public_base_url", "https://x.example")
+    monkeypatch.setattr(config.settings, "public_base_url", "https://x.example")
     client = _StubClient()
     result = line_handler.AnalyzeResult(
         ticker="AAPL", company_name="Apple", report_text="text", chart_path=None
@@ -143,7 +145,7 @@ async def test_deliver_missing_chart_skips_image(monkeypatch):
 
 
 async def test_analyze_rate_limited_after_threshold(monkeypatch):
-    monkeypatch.setattr(line_handler.settings, "analyze_rate_limit_per_day", 1)
+    monkeypatch.setattr(config.settings, "analyze_rate_limit_per_day", 1)
     reset_analyze_limiter()
 
     scheduled: list = []
@@ -172,7 +174,7 @@ async def test_analyze_rate_limited_after_threshold(monkeypatch):
 
 
 async def test_non_allowlisted_user_is_ignored(monkeypatch):
-    monkeypatch.setattr(line_handler.settings, "family_user_ids", "U_ok")
+    monkeypatch.setattr(config.settings, "family_user_ids", "U_ok")
     client = _StubClient()
     ev = LineTextEvent(
         event_type="text", line_user_id="U_eve", reply_token="rt", text="ヘルプ"
@@ -182,7 +184,7 @@ async def test_non_allowlisted_user_is_ignored(monkeypatch):
 
 
 async def test_allowlisted_user_gets_help(monkeypatch):
-    monkeypatch.setattr(line_handler.settings, "family_user_ids", "U_ok")
+    monkeypatch.setattr(config.settings, "family_user_ids", "U_ok")
     client = _StubClient()
     ev = LineTextEvent(
         event_type="text", line_user_id="U_ok", reply_token="rt", text="ヘルプ"
@@ -197,7 +199,7 @@ async def test_allowlisted_user_gets_help(monkeypatch):
 
 
 async def test_analyze_enqueues_when_tasks_enabled(monkeypatch):
-    monkeypatch.setattr(line_handler.settings, "tasks_enabled", True)
+    monkeypatch.setattr(config.settings, "tasks_enabled", True)
     enqueued = []
     monkeypatch.setattr(
         line_handler, "enqueue_analysis", lambda uid, target: enqueued.append((uid, target))
@@ -218,7 +220,7 @@ async def test_analyze_enqueues_when_tasks_enabled(monkeypatch):
 
 
 async def test_analyze_falls_back_inline_when_enqueue_fails(monkeypatch):
-    monkeypatch.setattr(line_handler.settings, "tasks_enabled", True)
+    monkeypatch.setattr(config.settings, "tasks_enabled", True)
 
     def boom(uid, target):
         raise RuntimeError("tasks unavailable")
