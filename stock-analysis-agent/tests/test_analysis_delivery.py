@@ -194,6 +194,46 @@ async def test_allowlisted_user_gets_help(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# whoami (ID コマンド — allow-list 適用外の登録動線)
+# ---------------------------------------------------------------------------
+
+
+async def test_whoami_returns_user_id_even_for_non_allowlisted(monkeypatch):
+    """リスト外ユーザーでも `ID` で自分の userId を取得できる (登録動線)。"""
+    monkeypatch.setattr(config.settings, "family_user_ids", "U_ok")
+    client = _StubClient()
+    ev = LineTextEvent(
+        event_type="text", line_user_id="U_newcomer", reply_token="rt", text="ID"
+    )
+    await line_handler._handle_text(ev, _deps(client))
+    assert len(client.replies) == 1
+    assert "U_newcomer" in client.replies[0]["text"]
+    assert "管理者" in client.replies[0]["text"]
+
+
+async def test_whoami_aliases(monkeypatch):
+    monkeypatch.setattr(config.settings, "family_user_ids", "")
+    for text in ("id", "whoami", "登録", "ユーザーID"):
+        client = _StubClient()
+        ev = LineTextEvent(
+            event_type="text", line_user_id="U_me", reply_token="rt", text=text
+        )
+        await line_handler._handle_text(ev, _deps(client))
+        assert any("U_me" in r["text"] for r in client.replies), text
+
+
+async def test_non_allowlisted_other_commands_still_ignored(monkeypatch):
+    """whoami 以外 (分析等) はリスト外なら従来通り黙殺。"""
+    monkeypatch.setattr(config.settings, "family_user_ids", "U_ok")
+    client = _StubClient()
+    ev = LineTextEvent(
+        event_type="text", line_user_id="U_eve", reply_token="rt", text="分析 トヨタ"
+    )
+    await line_handler._handle_text(ev, _deps(client))
+    assert client.replies == []
+
+
+# ---------------------------------------------------------------------------
 # Cloud Tasks 委譲 (P3-A)
 # ---------------------------------------------------------------------------
 
