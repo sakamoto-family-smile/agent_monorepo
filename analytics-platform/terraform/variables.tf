@@ -151,6 +151,12 @@ variable "gcs_events_prefix" {
   default     = "events"
 }
 
+variable "payload_writer_service_account_emails" {
+  type        = list(string)
+  description = "payloads bucket への書込を許可する consumer SA email 群 (pubsub backend で inline 閾値超 content を直接 GCS に書くエージェント)。配備後に追記する。"
+  default     = []
+}
+
 variable "publisher_service_account_emails" {
   type        = list(string)
   description = "events topic への publish を許可する consumer SA email 群 (例: sa-piyolog@...)。配備後に追記する。"

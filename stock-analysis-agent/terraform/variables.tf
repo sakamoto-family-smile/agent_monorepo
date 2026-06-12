@@ -239,6 +239,12 @@ variable "analytics_pubsub_topic" {
   description = "analytics-platform の events topic 短縮名 (analytics-platform terraform の name_prefix=analytics → analytics-events)。backend=pubsub のとき必須。"
 }
 
+variable "analytics_payloads_bucket" {
+  type        = string
+  default     = "sakamomo-family-agent-analytics-payloads"
+  description = "8KB 超の message content (分析レポート本文等) を書く analytics payloads bucket。空なら payload はローカル (揮発) に落ちる。前提: analytics-platform terraform の payload_writer_service_account_emails に本 SA を追記して apply 済であること。"
+}
+
 # 前提: この SA (sa-stock-analysis-line) を analytics-platform terraform の
 # `publisher_service_account_emails` に追記して apply 済であること
 # (events topic への roles/pubsub.publisher 付与は analytics 側で行う)。

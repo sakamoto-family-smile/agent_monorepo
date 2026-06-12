@@ -139,6 +139,11 @@ resource "google_cloud_run_v2_service" "worker" {
         name  = "ANALYTICS_GCP_PROJECT"
         value = var.project_id
       }
+      # 8KB 超 content の payload 切り出し先 (pubsub backend でも GCS に永続化)
+      env {
+        name  = "ANALYTICS_GCS_BUCKET"
+        value = var.analytics_payloads_bucket
+      }
 
       # ─── EDINET (P3-B) ───────────────────────────────────────────
       env {

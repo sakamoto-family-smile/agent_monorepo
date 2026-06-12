@@ -56,6 +56,16 @@ resource "google_storage_bucket_iam_member" "uploader_payloads_admin" {
   member = "serviceAccount:${google_service_account.uploader.email}"
 }
 
+# consumer agent (pubsub backend) が inline 閾値超の payload を直接書く
+# (PROPOSAL-0010 P5-5 follow-up: ephemeral FS 落ち防止)。publisher と同様に
+# 配備後に SA email を追記して apply する。
+resource "google_storage_bucket_iam_member" "payload_writers" {
+  for_each = toset(var.payload_writer_service_account_emails)
+  bucket   = google_storage_bucket.payloads.name
+  role     = "roles/storage.objectAdmin"
+  member   = "serviceAccount:${each.value}"
+}
+
 resource "google_storage_bucket_iam_member" "uploader_dead_letter_admin" {
   bucket = google_storage_bucket.dead_letter.name
   role   = "roles/storage.objectAdmin"

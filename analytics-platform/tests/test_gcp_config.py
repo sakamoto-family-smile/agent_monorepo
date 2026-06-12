@@ -66,6 +66,35 @@ def test_build_payload_writer_returns_gcs_when_configured(tmp_path, monkeypatch)
     assert isinstance(writer, GCSPayloadWriter)
 
 
+def test_build_payload_writer_returns_gcs_for_pubsub_backend(tmp_path, monkeypatch):
+    """PROPOSAL-0010 P5-5 follow-up: pubsub backend でも bucket 指定があれば
+    payload は GCS に書く (ephemeral FS 落ち防止)。"""
+    monkeypatch.setenv("ANALYTICS_STORAGE_BACKEND", "pubsub")
+    monkeypatch.setenv("ANALYTICS_GCS_BUCKET", "b")
+    writer = gcp_config.build_payload_writer(local_root=tmp_path)
+    from analytics_platform.observability.content_gcs import GCSPayloadWriter
+
+    assert isinstance(writer, GCSPayloadWriter)
+
+
+def test_build_payload_writer_pubsub_without_bucket_stays_local(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANALYTICS_STORAGE_BACKEND", "pubsub")
+    monkeypatch.delenv("ANALYTICS_GCS_BUCKET", raising=False)
+    writer = gcp_config.build_payload_writer(local_root=tmp_path)
+    assert isinstance(writer, LocalFilePayloadWriter)
+
+
+def test_build_upload_transport_stays_local_for_pubsub_backend(tmp_path, monkeypatch):
+    """pubsub backend は raw 転送に uploader を使わない (sink が直接 publish)。
+    transport 選択は従来通り gcs backend 限定のまま。"""
+    monkeypatch.setenv("ANALYTICS_STORAGE_BACKEND", "pubsub")
+    monkeypatch.setenv("ANALYTICS_GCS_BUCKET", "b")
+    transport = gcp_config.build_upload_transport(raw_root=tmp_path)
+    from analytics_platform.uploader.local_uploader import LocalMoveTransport
+
+    assert isinstance(transport, LocalMoveTransport)
+
+
 def test_build_upload_transport_returns_local_by_default(tmp_path):
     transport = gcp_config.build_upload_transport(raw_root=tmp_path)
     from analytics_platform.uploader.local_uploader import LocalMoveTransport
