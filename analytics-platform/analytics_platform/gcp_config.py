@@ -83,23 +83,31 @@ def load_gcs_config() -> GcsAnalyticsConfig | None:
 def build_payload_writer(*, local_root: Path):
     """`ContentRouter` に渡す `PayloadWriter` を env に従って構築。
 
-    - backend=gcs + bucket 設定あり → `GCSPayloadWriter`
+    - backend が gcs **または pubsub** + `ANALYTICS_GCS_BUCKET` 設定あり →
+      `GCSPayloadWriter`
     - それ以外 → `LocalFilePayloadWriter`
+
+    pubsub backend を含める理由 (PROPOSAL-0010 P5-5 follow-up): pubsub では
+    イベント本体は topic 経由で永続化されるが、inline 閾値超の大きな content
+    (例: 分析レポート本文) は payload として切り出される。書き出し先が
+    ローカルだと Cloud Run の ephemeral FS に落ちて再起動で消えるため、
+    bucket が指定されていれば GCS に書く。
     """
     # 遅延 import で google-cloud-storage への hard 依存を避ける
-    cfg = load_gcs_config()
-    if cfg is None:
-        from .observability.content import LocalFilePayloadWriter  # noqa: PLC0415
+    backend = detect_storage_backend()
+    bucket = os.environ.get("ANALYTICS_GCS_BUCKET", "").strip()
+    if backend in {"gcs", "pubsub"} and bucket:
+        from .observability.content_gcs import GCSPayloadWriter  # noqa: PLC0415
 
-        return LocalFilePayloadWriter(root_dir=local_root)
+        return GCSPayloadWriter(
+            bucket_name=bucket,
+            key_prefix=os.environ.get("ANALYTICS_GCS_PAYLOAD_PREFIX", "payloads/"),
+            project_id=(os.environ.get("ANALYTICS_GCP_PROJECT") or None),
+        )
 
-    from .observability.content_gcs import GCSPayloadWriter  # noqa: PLC0415
+    from .observability.content import LocalFilePayloadWriter  # noqa: PLC0415
 
-    return GCSPayloadWriter(
-        bucket_name=cfg.bucket_name,
-        key_prefix=cfg.payload_prefix,
-        project_id=cfg.project_id,
-    )
+    return LocalFilePayloadWriter(root_dir=local_root)
 
 
 def build_upload_transport(*, raw_root: Path):

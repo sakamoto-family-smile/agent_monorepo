@@ -48,6 +48,12 @@ enable_pubsub = true
 
 # events topic への publish を許可する consumer SA。各 agent を Cloud Run に配備
 # (= SA 作成) してから、その SA email をここに追記して再 apply する。
+# pubsub backend のエージェントが 8KB 超 content (分析レポート本文等) を
+# payloads bucket に直接書くための writer 許可 (PROPOSAL-0010 P5-5 follow-up)。
+payload_writer_service_account_emails = [
+  "sa-stock-analysis-line@your-gcp-project-id.iam.gserviceaccount.com",
+]
+
 publisher_service_account_emails = [
   "sa-piyolog-analytics@your-gcp-project-id.iam.gserviceaccount.com",
   # PROPOSAL-0011 P2-A: stock-analysis-line を pubsub backend にする際に追記
