@@ -44,6 +44,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY stock-analysis-agent/app ./app
 COPY stock-analysis-agent/alembic ./alembic
 COPY stock-analysis-agent/alembic.ini ./alembic.ini
+# 静的な銘柄ユニバース (おすすめ ETF / スクリーニング対象)。これが無いと
+# screener / fund_recommend が 0 件になる (data/ は gcloudignore で除外されるため明示)。
+COPY stock-analysis-agent/data/universe ./data/universe
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
@@ -88,6 +91,9 @@ COPY --from=builder --chown=runner:runner /app/alembic.ini /app/alembic.ini
 RUN mkdir -p /app/data/charts /app/data/cache /app/data/reports \
       /app/data/dictionaries /app/data/analytics && \
     chown -R runner:runner /app/data
+
+# 静的ユニバース (リポジトリ同梱) を runtime にも持ち込む
+COPY --from=builder --chown=runner:runner /app/data/universe /app/data/universe
 
 USER runner
 
