@@ -17,7 +17,7 @@
 
 `stock-analysis-agent` が生成する株価分析レポートに対し、**8 観点 × 5 段階スコアリング** で品質評価する **CrewAI ベースのマルチエージェント review パイプライン** を新設する。
 
-トリガは GCS への新規レポート配置で、Cloud Tasks 経由で Cloud Run の review service が起動。CrewAI が 6 専門 reviewer + 統括 manager + 改稿 improver の構成で並列レビュー、スコア + must_fix リストを生成する。スコアに応じて **(a) 自動 publish / (b) AI 改稿 → 人間レビュー / (c) 即人間レビュー** に分岐し、Web UI で承認ワークフローを実施する。
+トリガは GCS への新規レポート配置で、**Pub/Sub push subscription** で Cloud Run の review service に直接 dispatch する (案 B 採用、§7 参照)。CrewAI が 6 専門 reviewer + 統括 manager + 改稿 improver の構成で並列レビュー、スコア + must_fix リストを生成する。スコアに応じて **(a) 自動 publish / (b) AI 改稿 → 人間レビュー / (c) 即人間レビュー** に分岐し、Web UI で承認ワークフローを実施する。
 
 LLM は **Gemini 2.5 (Pro / Flash) on Vertex AI** で統一。**学習目的** のため厳密なコンプライアンスは追求せず、表現適切性 (推奨表現回避 / 断定回避 / 免責) のチェックレベルに留める。
 
@@ -225,25 +225,28 @@ def verdict(scores: dict[str, int], must_fix: list[Issue]) -> str:
 
 ```
 [stock-analysis-agent (既存)]
-   分析完了 → SQLite に保存 (既存) + GCS に write (新規)
-                  ├─ gs://stock-reports/raw/<ticker>/<dt>.md      (本文 Markdown)
-                  └─ gs://stock-reports/raw/<ticker>/<dt>.json    (構造化データ)
+   分析完了 → SQLite に保存 (既存) + GCS に dual-write (新規)
+                  ├─ gs://stock-reports/raw/<ticker>/<dt>.md      (本文 Markdown、1番目)
+                  └─ gs://stock-reports/raw/<ticker>/<dt>.json    (構造化データ、2番目 = trigger)
                               │
                               ▼
               [GCS Object Notification]
               Pub/Sub topic: stock-report-created
+              filter: attributes.objectId LIKE '%.json'
+              (.md の通知は無視。.json は .md の後に書く順序保証で
+               レース回避)
                               │
                               ▼
-              [Cloud Run service: enqueue]
-              Pub/Sub push → Cloud Tasks
-                              │
-                              ▼
-              Cloud Tasks queue: stock-report-review
-              (max retry 3、DLQ: gs://dead/、rate: 5 req/s)
+              [Pub/Sub push subscription]
+              push endpoint: review-worker /internal/review
+              retry: 5 回 + exponential backoff (Pub/Sub native)
+              DLQ topic: stock-report-review-dlq
+              → subscription で GCS dead/ にも sink
                               │
                               ▼
               [Cloud Run service: review-worker]
               POST /internal/review { gcs_uri, ticker, dt }
+              max_instances=3 (Vertex AI quota の暫定保護、§7 参照)
                   │
                   ├── idempotency check (既に reviewed/ にあれば skip)
                   │
@@ -326,12 +329,85 @@ def _save_to_gcs(bucket, ticker, report_id, report_data):
 - `STOCK_REPORTS_GCS_BUCKET` — 未設定なら GCS 書き出し無効 (既存挙動)
 - `STOCK_REPORTS_GCS_PREFIX` — 既定 `raw/`
 
+### 3.6.1 トリガ方式の選定 (案 A vs 案 B、**案 B 採用**)
+
+GCS への新規レポート配置を review pipeline に流す方式として、2 案を検討した。
+
+#### 案 A: GCS → Pub/Sub → Cloud Tasks → review-worker (marker file 併用)
+
+```
+stock-analysis-agent → GCS:
+   raw/<ticker>/<dt>.md
+   raw/<ticker>/<dt>.json
+   raw/<ticker>/<dt>.ready   ← 空 marker file (両ファイル書き完了後に書く)
+        ↓
+   Pub/Sub (filter: .ready のみ)
+        ↓
+   enqueue-svc (Pub/Sub push 受信、Cloud Tasks にコピー)
+        ↓
+   Cloud Tasks queue (rate limit 5 req/s、retry 3、DLQ)
+        ↓
+   review-worker
+```
+
+メリット:
+- **Queue 単位の rate limit** が Cloud Tasks に設定可 (例: `--max-dispatches-per-second=5`)
+- 並列度上限を `--max-concurrent-dispatches=10` で明示制御
+- task lifetime 最大 30 日 / queue 内最大 1M タスク (個人運営規模では十分以上)
+- DLQ や retry policy が task 単位で柔軟
+
+デメリット:
+- コンポーネント増 (enqueue-svc + Cloud Tasks queue)
+- Pub/Sub 自身も retry/DLQ を持つため、二重キューで責務重複感
+- marker file 書き込みが GCS 1 件増える (微小)
+
+#### 案 B: GCS → Pub/Sub push subscription → review-worker (**採用**)
+
+```
+stock-analysis-agent → GCS:
+   raw/<ticker>/<dt>.md       (1番目)
+   raw/<ticker>/<dt>.json     (2番目、書き順を保証)
+        ↓
+   Pub/Sub (filter: attributes.objectId LIKE '%.json')
+        ↓ push subscription (OIDC 認証付き)
+   review-worker /internal/review
+```
+
+メリット:
+- **コンポーネント 2 つ削減** (enqueue-svc + Cloud Tasks queue)
+- Pub/Sub 自身が retry (最大 5 回 + 指数 backoff) と DLQ topic を持つので機能的に十分
+- 二重通知レースは subscription filter (`.json` 末尾のみ) で吸収
+- 個人運営 200 レポート/日の規模では Cloud Tasks の機能は overkill
+
+デメリット:
+- **per-queue の細かい rate limit が効かせにくい** (Pub/Sub subscription には dispatch 単位の rate limit がない)
+- Cloud Run の `max_instances` で代用するが、これは「最大並列数」であり「秒あたり dispatch 数」ではない
+
+#### 採用判断
+
+**案 B (Pub/Sub push 直接) を Phase 1 で採用**。理由:
+
+1. 個人運営の 200 レポート/日では Cloud Tasks の rate limit 機能が必須でない
+2. CrewAI 1 サイクル = 30〜90 秒なので、Cloud Run `max_instances=3` でも実効スループット 60〜180 req/分 ≒ Vertex AI quota 内
+3. コンポーネント数を最小化することで運用・debug を簡素化
+
+#### Rate limit の後追い検討 (Phase 2)
+
+以下が観測された場合、案 A (Cloud Tasks 再導入) を別 PR で検討する:
+
+- Vertex AI Gemini 429 が日次で 5% 超
+- 一過性のレポート集中 (例: 朝市場開始時に 50 件同時) で review が捌けない
+- per-ticker / per-user の優先度制御が要件化
+
+判断指標は §5.1 Monitoring で計測する `llm_call.error_rate` と `review_lag` の 2 つ。
+
 ### 3.7 Notes / Constraints / Caveats
 
 - **`stock-analysis-agent` 本体は Claude Opus 4.6 を継続**: 既存運用への影響を避け、review 側だけ Gemini に統一
-- **idempotency**: GCS object の SHA256 を review_id にし、同じ hash は再実行スキップ
+- **idempotency**: GCS object の SHA256 を review_id にし、同じ hash は再実行スキップ。Pub/Sub の at-least-once 配信 (同一メッセージが複数回 push される可能性) も同 hash check で吸収
+- **二重通知レース対策**: stock-analysis-agent は `.md` → `.json` の順で書き、Pub/Sub subscription は `attributes.objectId LIKE '%.json'` filter で `.json` の通知のみを review トリガとする (案 B、§3.6.1 参照)
 - **冗長 review の抑制**: 同銘柄・同日に複数レポートがあっても、最新の 1 つだけ review (古い方は archived)
-- **失敗時の DLQ**: Cloud Tasks 3 リトライ後 → `gs://stock-reports/dead/<ticker>/<dt>.json` に error 情報退避 + Slack 通知
+- **失敗時の DLQ**: Pub/Sub subscription の retry 5 回後 → DLQ topic `stock-report-review-dlq` に転送 → そこから GCS `gs://stock-reports/dead/<ticker>/<dt>.json` に sink + Slack 通知
 - **Cost guard**: per-day budget (¥500/day) を超えると enqueue 停止、人手承認で再開
 - **モデル選択の根拠**: Gemini 2.5 Pro は Claude Sonnet 4.6 と同等 reasoning、Flash は機械的タスクで十分。Gemini は Vertex AI native で IAM / Workload Identity が綺麗、analytics-platform との integration も既存
 - **CrewAI version pin**: 最新を採用するが `uv.lock` で pin。breaking change を CI で週次検知
@@ -344,7 +420,7 @@ def _save_to_gcs(bucket, ticker, report_id, report_data):
 | review コスト爆発 | Medium | per-day budget cap、Flash 主体のモデル選定、prompt caching |
 | 数値検証の false positive (Fact Checker 過剰) | Medium | tolerance 設定 (相対誤差 1% allow)、yfinance キャッシュタイミング考慮 |
 | Gemini の判定揺らぎ | Medium | rubric を system prompt に固定、temperature=0、reviewer 出力に JSON schema 強制 |
-| Cloud Tasks の DLQ で気付かない | Medium | DLQ 投入時に Slack / LINE 通知、`gs://dead/` を週次棚卸し |
+| Pub/Sub DLQ topic で気付かない | Medium | DLQ topic から GCS `gs://dead/` への sink subscription を張り、新規 object で Slack / LINE 通知、`gs://dead/` を週次棚卸し |
 | 人間レビューが滞留 (1 人運営) | Low | UI に「直近 7 日承認なし → notification」、auto_publish 範囲を Phase 2 で拡張 |
 | 改稿で論調が変わって元の意図と異なる | Medium | improver の system prompt に「原文の論調を維持し、must_fix のみ修正」を明記。diff を UI で見せて差し戻し可 |
 | Vertex AI Gemini の quota / 429 | Low | retry + backoff、region は us-central1 (高 quota) |
@@ -363,8 +439,7 @@ stock-report-reviewer/                         ← 新規エージェント
 ├── Dockerfile
 ├── cloudbuild.yaml
 ├── terraform/
-│   ├── pubsub.tf                              ← GCS notification → Pub/Sub
-│   ├── cloud_tasks.tf
+│   ├── pubsub.tf                              ← GCS notification + push subscription + DLQ topic
 │   ├── cloud_run.tf                           ← review-worker + review-ui (2 services)
 │   ├── cloudsql.tf                            ← 既存共有 instance に review DB 追加
 │   ├── secrets.tf
@@ -464,7 +539,7 @@ ORDER BY avg_score DESC
 ### 4.3 API
 
 `review-worker` (Cloud Run):
-- `POST /internal/review` — Cloud Tasks から呼ばれる、`{gcs_uri, ticker, dt, report_id}` を受信、CrewAI 起動
+- `POST /internal/review` — Pub/Sub push subscription から呼ばれる (envelope は Pub/Sub の `PubsubMessage` 形式)。`{gcs_uri, ticker, dt, report_id}` を抽出、CrewAI 起動。Pub/Sub の OIDC 認証 + audience 検証必須
 - `GET /healthz`
 
 `review-ui` (Cloud Run、IAP):
@@ -543,7 +618,7 @@ result = crew.kickoff(inputs={"report_markdown": ..., "report_json": ...})
     - GCS dual-write の `_save_to_gcs` モック (gcsfs)
     - idempotency: 同 hash で skip されること
 - **Integration**:
-    - Pub/Sub → Cloud Tasks → /internal/review の E2E (mock CrewAI)
+    - GCS event → Pub/Sub push → /internal/review の E2E (mock CrewAI)、`.json` filter が効くこと
     - CrewAI を実 Vertex AI Gemini で 1 サンプル走らせて scores の formatting 妥当性
 - **Manual / E2E**:
     - 故意に hallucination 入りレポートを投入 → factual_accuracy=1 が出ること
@@ -555,7 +630,7 @@ result = crew.kickoff(inputs={"report_markdown": ..., "report_json": ...})
 ### 4.6 Migration / Rollback
 
 - 新規 system のためマイグレーション最小。`stock-analysis-agent` への変更は `STOCK_REPORTS_GCS_BUCKET` env で opt-in (未設定なら既存挙動継続)
-- ロールバック: `STOCK_REPORTS_GCS_BUCKET` を unset、`stock-report-reviewer` の Cloud Run / Cloud Tasks を terraform destroy。Cloud SQL の `stock_review_db` は `deletion_policy = ABANDON` のため共有 instance に残る (手動 DROP で削除可)
+- ロールバック: `STOCK_REPORTS_GCS_BUCKET` を unset、`stock-report-reviewer` の Cloud Run / Pub/Sub topic + subscription を terraform destroy。Cloud SQL の `stock_review_db` は `deletion_policy = ABANDON` のため共有 instance に残る (手動 DROP で削除可)
 
 ### 4.7 Feature Enablement
 
@@ -600,8 +675,7 @@ result = crew.kickoff(inputs={"report_markdown": ..., "report_json": ...})
 |---|---|
 | Vertex AI Gemini 2.5 (Pro / Flash) | 全 reviewer + manager + improver |
 | Cloud Run | review-worker / review-ui |
-| Cloud Tasks | 非同期 dispatch |
-| Pub/Sub | GCS notification 受信 |
+| Pub/Sub | GCS notification 受信 + push subscription で review-worker に dispatch + DLQ topic |
 | GCS | レポート保管 (`raw/`, `reviewed/`, `improved/`, `approved/`, `archived/`, `dead/`) |
 | Cloud SQL (driving-license-bot 共有 instance) | `stock_review_db` |
 | BigQuery | scores 蓄積・分析 |
