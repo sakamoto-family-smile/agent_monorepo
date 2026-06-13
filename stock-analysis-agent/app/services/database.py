@@ -18,11 +18,17 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 import config
 from services.db_engine import get_engine, get_sessionmaker
-from services.db_models import Base, PriceCache, Report, TickerDictionary
+from services.db_models import (
+    Base,
+    PriceCache,
+    Report,
+    TickerDictionary,
+    WatchlistItem,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -223,3 +229,71 @@ async def get_reports(ticker: str, limit: int = 10) -> List[Dict]:
             }
             for r in rows
         ]
+
+
+# ---------------------------------------------------------------------------
+# watchlist (ユーザー別マイリスト, PROPOSAL-0012)
+# ---------------------------------------------------------------------------
+
+
+async def add_watchlist_item(
+    user_id: str, ticker: str, name: Optional[str] = None
+) -> bool:
+    """マイリストに 1 銘柄追加。既に存在すれば False (冪等)、追加できたら True。"""
+    sm = get_sessionmaker()
+    async with sm() as session:
+        exists = await session.scalar(
+            select(WatchlistItem.id).where(
+                WatchlistItem.user_id == user_id, WatchlistItem.ticker == ticker
+            )
+        )
+        if exists is not None:
+            return False
+        session.add(WatchlistItem(user_id=user_id, ticker=ticker, name=name))
+        await session.commit()
+        return True
+
+
+async def remove_watchlist_item(user_id: str, ticker: str) -> bool:
+    """マイリストから 1 銘柄削除。削除できたら True、不在なら False。"""
+    sm = get_sessionmaker()
+    async with sm() as session:
+        row = await session.scalar(
+            select(WatchlistItem).where(
+                WatchlistItem.user_id == user_id, WatchlistItem.ticker == ticker
+            )
+        )
+        if row is None:
+            return False
+        await session.delete(row)
+        await session.commit()
+        return True
+
+
+async def get_watchlist(user_id: str) -> List[Dict[str, Any]]:
+    """ユーザーのマイリストを新しい順で返す。"""
+    sm = get_sessionmaker()
+    async with sm() as session:
+        rows = (
+            await session.scalars(
+                select(WatchlistItem)
+                .where(WatchlistItem.user_id == user_id)
+                .order_by(WatchlistItem.created_at.desc(), WatchlistItem.id.desc())
+            )
+        ).all()
+        return [
+            {"ticker": r.ticker, "name": r.name, "created_at": r.created_at}
+            for r in rows
+        ]
+
+
+async def count_watchlist(user_id: str) -> int:
+    """ユーザーのマイリスト登録件数 (上限チェック用)。"""
+    sm = get_sessionmaker()
+    async with sm() as session:
+        n = await session.scalar(
+            select(func.count())
+            .select_from(WatchlistItem)
+            .where(WatchlistItem.user_id == user_id)
+        )
+        return int(n or 0)

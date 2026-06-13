@@ -149,3 +149,38 @@ def test_resolved_url_falls_back_to_sqlite(monkeypatch):
     monkeypatch.setattr(s, "db_host", "")
     monkeypatch.setattr(s, "db_path", "data/x.db")
     assert s.resolved_database_url == "sqlite+aiosqlite:///data/x.db"
+
+
+# ---------------------------------------------------------------------------
+# watchlist (PROPOSAL-0012)
+# ---------------------------------------------------------------------------
+
+
+async def test_watchlist_add_get_remove_roundtrip(db):
+    assert await db.add_watchlist_item("U_a", "7203.T", "トヨタ") is True
+    assert await db.add_watchlist_item("U_a", "AAPL", "Apple") is True
+    items = await db.get_watchlist("U_a")
+    assert [i["ticker"] for i in items] == ["AAPL", "7203.T"]  # 新しい順
+    assert items[0]["name"] == "Apple"
+    assert await db.count_watchlist("U_a") == 2
+
+    assert await db.remove_watchlist_item("U_a", "AAPL") is True
+    assert [i["ticker"] for i in await db.get_watchlist("U_a")] == ["7203.T"]
+
+
+async def test_watchlist_add_is_idempotent(db):
+    assert await db.add_watchlist_item("U_a", "7203.T", "トヨタ") is True
+    assert await db.add_watchlist_item("U_a", "7203.T", "トヨタ") is False  # 重複
+    assert await db.count_watchlist("U_a") == 1
+
+
+async def test_watchlist_remove_missing_returns_false(db):
+    assert await db.remove_watchlist_item("U_a", "NOPE") is False
+
+
+async def test_watchlist_is_per_user(db):
+    await db.add_watchlist_item("U_a", "7203.T", "トヨタ")
+    await db.add_watchlist_item("U_b", "AAPL", "Apple")
+    assert [i["ticker"] for i in await db.get_watchlist("U_a")] == ["7203.T"]
+    assert [i["ticker"] for i in await db.get_watchlist("U_b")] == ["AAPL"]
+    assert await db.count_watchlist("U_a") == 1

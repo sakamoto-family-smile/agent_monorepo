@@ -147,6 +147,9 @@ class Settings:
     # 1 ユーザあたりの `分析` 1 日上限 (Opus コスト抑制)。0 以下で無制限。
     analyze_rate_limit_per_day: int = int(os.getenv("ANALYZE_RATE_LIMIT_PER_DAY", "20"))
 
+    # PROPOSAL-0012: 1 ユーザーのマイリスト登録上限 (yfinance バッチ負荷抑制)
+    watchlist_max_items: int = int(os.getenv("WATCHLIST_MAX_ITEMS", "30"))
+
     @property
     def family_user_id_set(self) -> frozenset[str]:
         if not self.family_user_ids:

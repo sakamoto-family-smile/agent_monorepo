@@ -336,11 +336,14 @@ def analysis_summary_bubble(
 _MAX_CANDIDATE_BUTTONS = 5
 
 
-def ticker_candidates_bubble(*, query: str, candidates: list) -> dict:
+def ticker_candidates_bubble(
+    *, query: str, candidates: list, command: str = "分析"
+) -> dict:
     """曖昧な企業名に対する候補選択 bubble。
 
     candidates は `TickerCandidate` (ticker/name/exchange) の list。各ボタンは
-    message action で `分析 <ticker>` を送る → regex 確定で分析が始まる。
+    message action で `<command> <ticker>` を送る (既定 `分析`。PROPOSAL-0012 では
+    `追加` を渡してマイリスト登録に再利用する)。
     """
     buttons: list[dict] = []
     for c in candidates[:_MAX_CANDIDATE_BUTTONS]:
@@ -356,7 +359,7 @@ def ticker_candidates_bubble(*, query: str, candidates: list) -> dict:
                 "action": {
                     "type": "message",
                     "label": label,
-                    "text": f"分析 {c.ticker}",
+                    "text": f"{command} {c.ticker}",
                 },
             }
         )
@@ -376,11 +379,103 @@ def ticker_candidates_bubble(*, query: str, candidates: list) -> dict:
                 },
                 {
                     "type": "text",
-                    "text": "分析する銘柄を選んでください:",
+                    "text": "銘柄を選んでください:",
                     "size": "sm",
                     "color": _SUBTLE_COLOR,
                 },
                 *buttons,
+            ],
+        },
+    }
+
+
+def watchlist_bubble(*, items: list[dict]) -> dict:
+    """マイリスト一覧 bubble (PROPOSAL-0012)。
+
+    items は `{ticker, name}` の list。各銘柄に「分析 / 削除」、下部に
+    「スクリーニング」ボタンを置く (いずれも message action でテキストコマンド送信)。
+    """
+    rows: list[dict] = []
+    for it in items[:_MAX_RANK_BUBBLES]:
+        ticker = it.get("ticker", "?")
+        name = it.get("name") or ticker
+        rows.append(
+            {
+                "type": "box",
+                "layout": "horizontal",
+                "alignItems": "center",
+                "margin": "md",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": _truncate(f"{name}\n{ticker}", 40),
+                        "size": "sm",
+                        "wrap": True,
+                        "flex": 4,
+                    },
+                    {
+                        "type": "button",
+                        "style": "primary",
+                        "color": _HEADER_COLOR_PRIMARY,
+                        "height": "sm",
+                        "flex": 2,
+                        "action": {
+                            "type": "message",
+                            "label": "分析",
+                            "text": f"分析 {ticker}",
+                        },
+                    },
+                    {
+                        "type": "button",
+                        "style": "secondary",
+                        "height": "sm",
+                        "flex": 2,
+                        "action": {
+                            "type": "message",
+                            "label": "削除",
+                            "text": f"削除 {ticker}",
+                        },
+                    },
+                ],
+            }
+        )
+
+    body_contents: list[dict] = [
+        {
+            "type": "text",
+            "text": f"📋 マイリスト ({len(items)}件)",
+            "weight": "bold",
+            "size": "lg",
+            "color": _HEADER_COLOR_PRIMARY,
+        },
+        {"type": "separator", "margin": "md"},
+        *rows,
+    ]
+    return {
+        "type": "bubble",
+        "size": "giga",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": body_contents,
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": [
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "color": _HEADER_COLOR_ACCENT,
+                    "height": "sm",
+                    "action": {
+                        "type": "message",
+                        "label": "🔍 マイリストをスクリーニング",
+                        "text": "スクリーニング マイ",
+                    },
+                }
             ],
         },
     }

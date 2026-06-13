@@ -75,8 +75,11 @@ class AnalysisReport(BaseModel):
 # --- Screener models ---
 
 class ScreenerRequest(BaseModel):
-    market: str = "JP"          # "JP", "US", "ALL"
+    market: str = "JP"          # "JP", "US", "ALL", "MY"(マイリスト)
     top_n: int = Field(default=20, ge=1, le=50)
+    # 明示指定時はこの ticker 群を universe とする (PROPOSAL-0012: マイリスト)。
+    # None なら market から固定ユニバースを引く。
+    tickers: Optional[List[str]] = None
     rsi_max: float = Field(default=45.0, ge=0.0, le=100.0)   # RSI上限（売られすぎ）
     rsi_min: float = Field(default=0.0, ge=0.0, le=100.0)    # RSI下限
     volume_spike_min: float = Field(default=1.5, ge=1.0)     # 出来高スパイク倍率（直近5日平均比）

@@ -23,6 +23,12 @@ from agents.fund_screener import run_fund_recommend
 from agents.orchestrator import run_analysis
 from agents.screener import run_screener
 from agents.ticker_resolver import resolve_ticker, search_candidates
+from services.database import (
+    add_watchlist_item,
+    count_watchlist,
+    get_watchlist,
+    remove_watchlist_item,
+)
 import config  # NOTE: `from config import settings` だと importlib.reload 後の
 # 新 settings を参照できず test isolation が壊れる (database.py と同方針)。
 from models.stock import (
@@ -43,6 +49,7 @@ from services.line_flex import (
     funds_ranking_carousel,
     screener_ranking_carousel,
     ticker_candidates_bubble,
+    watchlist_bubble,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,6 +86,11 @@ def _help_text() -> str:
         "  ・分析 トヨタ\n"
         "  ・分析 AAPL\n"
         "  ・分析 7203.T\n"
+        "■ マイリスト (お気に入り銘柄)\n"
+        "  ・追加 トヨタ / 追加 AAPL — マイリストに追加\n"
+        "  ・削除 7203.T — マイリストから削除\n"
+        "  ・マイリスト — 一覧を表示\n"
+        "  ・スクリーニング マイ — マイリストをスクリーニング\n"
         "■ その他\n"
         "  ・ID — 自分のユーザーID を表示 (利用登録用)\n\n"
         "※ 投資判断はご自身の責任でお願いします。"
@@ -219,6 +231,10 @@ _HELP_TOKENS = {"ヘルプ", "help", "menu", "メニュー", "?", "？"}
 _RECOMMEND_TOKENS = {"おすすめ", "オススメ", "お勧め", "recommend", "funds"}
 _SCREEN_TOKENS = {"スクリーニング", "screen", "screener"}
 _ANALYZE_TOKENS = {"分析", "analyze", "analysis"}
+# PROPOSAL-0012: マイリスト
+_WATCHLIST_ADD_TOKENS = {"追加", "銘柄追加", "ウォッチ", "watch", "add"}
+_WATCHLIST_REMOVE_TOKENS = {"削除", "銘柄削除", "unwatch", "remove", "del"}
+_WATCHLIST_SHOW_TOKENS = {"マイリスト", "リスト", "watchlist", "お気に入り", "ウォッチリスト"}
 # 自分の userId を返すコマンド (家族/友人を allow-list に追加する登録動線)。
 # LINE アプリでは Messaging API の userId をユーザー本人が確認できないため、
 # Bot にこのコマンドを送ってもらい、返ってきた ID を管理者へ伝えてもらう。
@@ -244,6 +260,7 @@ _MARKET_ALIASES: dict[str, str] = {
     "us": "US", "米国": "US", "米国株": "US",
     "all": "ALL", "全部": "ALL",
     "growth": "GROWTH", "成長": "GROWTH",
+    "マイ": "MY", "my": "MY", "マイリスト": "MY", "watchlist": "MY",
 }
 
 
@@ -289,6 +306,18 @@ async def _handle_text(event: LineTextEvent, deps: HandlerDeps) -> None:
 
     if cmd in _ANALYZE_TOKENS or cmd_lower in _ANALYZE_TOKENS:
         await _cmd_analyze(args, event, deps)
+        return
+
+    if cmd in _WATCHLIST_ADD_TOKENS or cmd_lower in _WATCHLIST_ADD_TOKENS:
+        await _cmd_watchlist_add(args, event, deps)
+        return
+
+    if cmd in _WATCHLIST_REMOVE_TOKENS or cmd_lower in _WATCHLIST_REMOVE_TOKENS:
+        await _cmd_watchlist_remove(args, event, deps)
+        return
+
+    if cmd in _WATCHLIST_SHOW_TOKENS or cmd_lower in _WATCHLIST_SHOW_TOKENS:
+        await _cmd_watchlist_show(event, deps)
         return
 
     await deps.line_client.reply_text(reply_token=event.reply_token, text=UNKNOWN_HINT)
@@ -363,7 +392,22 @@ async def _cmd_screen(
         token = args[0].lower()
         market = _MARKET_ALIASES.get(token, _MARKET_ALIASES.get(args[0], "JP"))
 
-    req = ScreenerRequest(market=market, top_n=10)
+    # PROPOSAL-0012: market=MY はユーザーのマイリストを対象にする。
+    tickers: list[str] | None = None
+    if market == "MY":
+        items = await get_watchlist(event.line_user_id)
+        tickers = [it["ticker"] for it in items]
+        if not tickers:
+            await deps.line_client.reply_text(
+                reply_token=event.reply_token,
+                text=(
+                    "マイリストが空です。「追加 トヨタ」「追加 AAPL」のように"
+                    "銘柄を登録してから「スクリーニング マイ」をお試しください。"
+                ),
+            )
+            return
+
+    req = ScreenerRequest(market=market, top_n=10, tickers=tickers)
     try:
         result = await run_screener(req)
     except Exception as e:
@@ -400,6 +444,170 @@ async def _cmd_screen(
         fallback_text=fallback_text,
         flex_contents=flex,
         alt_text=alt_text,
+    )
+
+
+# ---------------------------------------------------------------------------
+# マイリスト (ウォッチリスト, PROPOSAL-0012)
+# ---------------------------------------------------------------------------
+
+
+def _emit_watchlist_event(action: str, *, user_id: str, ticker: str) -> None:
+    """watchlist 操作を business_event として best-effort で記録する。
+
+    instrumentation 未初期化 (テスト等) でも落とさない。
+    """
+    try:
+        from instrumentation import get_analytics_logger  # noqa: PLC0415
+
+        get_analytics_logger().emit(
+            event_type="business_event",
+            event_version="1.0.0",
+            severity="INFO",
+            fields={
+                "business_domain": "stock_analysis",
+                "action": action,
+                "resource_type": "watchlist",
+                "resource_id": ticker,
+                "attributes": {},
+            },
+            user_id=user_id,
+        )
+    except Exception:
+        logger.debug("watchlist analytics emit skipped", exc_info=True)
+
+
+async def _cmd_watchlist_add(
+    args: list[str], event: LineTextEvent, deps: HandlerDeps
+) -> None:
+    if not args:
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text="使い方: 追加 <銘柄名 or ティッカー>\n例: 追加 トヨタ / 追加 AAPL",
+        )
+        return
+
+    user_id = event.line_user_id
+    target = " ".join(args).strip()
+
+    if await count_watchlist(user_id) >= config.settings.watchlist_max_items:
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text=(
+                f"マイリストが上限 ({config.settings.watchlist_max_items}件) に達しています。"
+                "「削除 <ティッカー>」で減らしてから追加してください。"
+            ),
+        )
+        return
+
+    # 銘柄解決ゲート (分析と同じ): 高確度なら確定、低確度は候補提示 (追加コマンド)。
+    try:
+        resolved = await resolve_ticker(target)
+    except Exception:
+        logger.exception("resolve_ticker failed for %s", target)
+        resolved = None
+    if resolved is None or resolved.source not in _CONFIDENT_SOURCES:
+        candidates = search_candidates(target)
+        if candidates:
+            flex = ticker_candidates_bubble(
+                query=target, candidates=candidates, command="追加"
+            )
+            fallback = (
+                f"「{target}」の候補:\n"
+                + "\n".join(f"・追加 {c.ticker} — {c.name or ''}" for c in candidates[:5])
+                + "\n上のコマンドを送るとマイリストに追加します。"
+            )
+            await _reply_flex_or_text(
+                deps,
+                reply_token=event.reply_token,
+                fallback_text=fallback,
+                flex_contents=flex,
+                alt_text=f"「{target}」の銘柄候補",
+            )
+        else:
+            await deps.line_client.reply_text(
+                reply_token=event.reply_token,
+                text=ANALYZE_NOT_FOUND_TEMPLATE.format(target=target),
+            )
+        return
+
+    ticker = resolved.ticker
+    name = resolved.company_name
+    added = await add_watchlist_item(user_id, ticker, name)
+    label = f"{name} ({ticker})" if name else ticker
+    if added:
+        _emit_watchlist_event("watchlist_added", user_id=user_id, ticker=ticker)
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text=f"✅ マイリストに追加しました: {label}\n「マイリスト」で一覧、「スクリーニング マイ」で分析できます。",
+        )
+    else:
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text=f"すでにマイリストにあります: {label}",
+        )
+
+
+async def _cmd_watchlist_remove(
+    args: list[str], event: LineTextEvent, deps: HandlerDeps
+) -> None:
+    if not args:
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text="使い方: 削除 <ティッカー>\n例: 削除 7203.T / 削除 AAPL",
+        )
+        return
+
+    user_id = event.line_user_id
+    target = " ".join(args).strip()
+    # 高確度に解決できればその ticker、できなければ入力をそのまま ticker とみなす。
+    try:
+        resolved = await resolve_ticker(target)
+    except Exception:
+        resolved = None
+    ticker = (
+        resolved.ticker
+        if resolved is not None and resolved.source in _CONFIDENT_SOURCES
+        else target.upper()
+    )
+
+    removed = await remove_watchlist_item(user_id, ticker)
+    if removed:
+        _emit_watchlist_event("watchlist_removed", user_id=user_id, ticker=ticker)
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token, text=f"🗑️ マイリストから削除しました: {ticker}"
+        )
+    else:
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text=f"マイリストに {target} が見つかりませんでした。「マイリスト」で一覧を確認できます。",
+        )
+
+
+async def _cmd_watchlist_show(event: LineTextEvent, deps: HandlerDeps) -> None:
+    items = await get_watchlist(event.line_user_id)
+    if not items:
+        await deps.line_client.reply_text(
+            reply_token=event.reply_token,
+            text=(
+                "マイリストは空です。\n「追加 トヨタ」「追加 AAPL」のように銘柄を"
+                "登録できます。"
+            ),
+        )
+        return
+
+    flex = watchlist_bubble(items=items)
+    fallback = (
+        "📋 マイリスト\n"
+        + "\n".join(f"・{it.get('name') or it['ticker']} ({it['ticker']})" for it in items)
+        + "\n\n「分析 <ティッカー>」「削除 <ティッカー>」「スクリーニング マイ」"
+    )
+    await _reply_flex_or_text(
+        deps,
+        reply_token=event.reply_token,
+        fallback_text=fallback,
+        flex_contents=flex,
+        alt_text=f"マイリスト ({len(items)}件)",
     )
 
 
