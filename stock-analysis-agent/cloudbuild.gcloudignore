@@ -39,6 +39,11 @@
 
 # Data fixtures (image には不要、巨大化防止)
 **/data/
+# ただし stock の静的ユニバース (おすすめ / スクリーニング対象) はイメージに必要。
+# `data/*` で直下を除外しつつ universe/ だけ再包含する (gitignore 同等の構文)。
+!stock-analysis-agent/data/
+stock-analysis-agent/data/*
+!stock-analysis-agent/data/universe/
 
 # 他 agent (stock-analysis-agent image には不要)
 agent-system-1/
