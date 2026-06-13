@@ -17,7 +17,7 @@
 
 `stock-analysis-agent` が生成する株価分析レポートに対し、**8 観点 × 5 段階スコアリング** で品質評価する **CrewAI ベースのマルチエージェント review パイプライン** を新設する。
 
-トリガは GCS への新規レポート配置で、**Pub/Sub push subscription** で Cloud Run の review service に直接 dispatch する (案 B 採用、§7 参照)。CrewAI が 6 専門 reviewer + 統括 manager + 改稿 improver の構成で並列レビュー、スコア + must_fix リストを生成する。スコアに応じて **(a) 自動 publish / (b) AI 改稿 → 人間レビュー / (c) 即人間レビュー** に分岐し、Web UI で承認ワークフローを実施する。
+トリガは GCS への新規レポート配置で、**Pub/Sub push subscription** で Cloud Run の review service に直接 dispatch する (Phase 1。Cloud Tasks / Pull は Phase 2 検討候補、§3.6.1 参照)。CrewAI が 6 専門 reviewer + 統括 manager + 改稿 improver の構成で並列レビュー、スコア + must_fix リストを生成する。スコアに応じて **(a) 自動 publish / (b) AI 改稿 → 人間レビュー / (c) 即人間レビュー** に分岐し、Web UI で承認ワークフローを実施する。
 
 LLM は **Gemini 2.5 (Pro / Flash) on Vertex AI** で統一。**学習目的** のため厳密なコンプライアンスは追求せず、表現適切性 (推奨表現回避 / 断定回避 / 免責) のチェックレベルに留める。
 
@@ -329,9 +329,22 @@ def _save_to_gcs(bucket, ticker, report_id, report_data):
 - `STOCK_REPORTS_GCS_BUCKET` — 未設定なら GCS 書き出し無効 (既存挙動)
 - `STOCK_REPORTS_GCS_PREFIX` — 既定 `raw/`
 
-### 3.6.1 トリガ方式の選定 (案 A vs 案 B、**案 B 採用**)
+### 3.6.1 トリガ方式の選定 (Pub/Sub push 採用、Cloud Tasks / Pull は Phase 2 候補)
 
-GCS への新規レポート配置を review pipeline に流す方式として、2 案を検討した。
+GCS への新規レポート配置を review pipeline に流す方式として、以下 3 案を検討した:
+
+| | 案 A: GCS → Pub/Sub → Cloud Tasks | **案 B: GCS → Pub/Sub push (採用)** | 案 C: GCS → Pub/Sub pull |
+|---|---|---|---|
+| コンポーネント数 | 5 (enqueue-svc + Tasks 追加) | **3** | 3 |
+| Subscriber 起点 | Cloud Tasks → push | Pub/Sub → push | review-worker → pull |
+| Cloud Run min_instances | 0 OK | **0 OK** | **1 必須** (常時 pull) |
+| 月額 (Cloud Run idle) | ¥500 | **¥0〜500** | ¥2,500 |
+| ack deadline 上限 | task lifetime 30 日 | 600 秒 (10 分) | 600 秒/ack だが `modifyAckDeadline` で動的延長可 (実質 1 時間) |
+| Backpressure 制御 | ◎ queue rate limit | △ Cloud Run max_instances で代用 | ◎ subscriber が自分で pull pace 制御 |
+| 並列度の細かい制御 | ◎ queue 単位 | △ | ◎ subscriber コードで自由 |
+| ロングテール耐性 (タスク > 10 分) | ◎ | △ (push ack timeout の懸念) | ◎ ack 延長で対応可 |
+| 実装複雑度 | 中 | 低 | 中 (pull loop + ack 管理) |
+| 二重通知レース対策 | `.ready` marker file | `.json` filter | `.json` filter |
 
 #### 案 A: GCS → Pub/Sub → Cloud Tasks → review-worker (marker file 併用)
 
@@ -350,18 +363,10 @@ stock-analysis-agent → GCS:
    review-worker
 ```
 
-メリット:
-- **Queue 単位の rate limit** が Cloud Tasks に設定可 (例: `--max-dispatches-per-second=5`)
-- 並列度上限を `--max-concurrent-dispatches=10` で明示制御
-- task lifetime 最大 30 日 / queue 内最大 1M タスク (個人運営規模では十分以上)
-- DLQ や retry policy が task 単位で柔軟
+メリット: **queue 単位 rate limit** が `--max-dispatches-per-second` で明示制御可。並列度・retry policy が task 単位で柔軟。
+デメリット: コンポーネント増、Pub/Sub 自身も retry/DLQ を持つため二重キューで責務重複感。
 
-デメリット:
-- コンポーネント増 (enqueue-svc + Cloud Tasks queue)
-- Pub/Sub 自身も retry/DLQ を持つため、二重キューで責務重複感
-- marker file 書き込みが GCS 1 件増える (微小)
-
-#### 案 B: GCS → Pub/Sub push subscription → review-worker (**採用**)
+#### 案 B: GCS → Pub/Sub push subscription → review-worker (**Phase 1 採用**)
 
 ```
 stock-analysis-agent → GCS:
@@ -373,33 +378,44 @@ stock-analysis-agent → GCS:
    review-worker /internal/review
 ```
 
-メリット:
-- **コンポーネント 2 つ削減** (enqueue-svc + Cloud Tasks queue)
-- Pub/Sub 自身が retry (最大 5 回 + 指数 backoff) と DLQ topic を持つので機能的に十分
-- 二重通知レースは subscription filter (`.json` 末尾のみ) で吸収
-- 個人運営 200 レポート/日の規模では Cloud Tasks の機能は overkill
+メリット: **コンポーネント 2 つ削減** (enqueue-svc + Cloud Tasks queue)。Pub/Sub 自身が retry (最大 5 回 + 指数 backoff) と DLQ topic を持つので機能的に十分。Cloud Run min=0 でアイドル時コストゼロ。二重通知レースは subscription filter (`.json` 末尾のみ) で吸収。
+デメリット: per-queue の細かい rate limit が効かせにくい (Pub/Sub subscription に dispatch rate 制御がない)。Cloud Run の `max_instances` で代用するが、これは「最大並列数」であり「秒あたり dispatch 数」ではない。
 
-デメリット:
-- **per-queue の細かい rate limit が効かせにくい** (Pub/Sub subscription には dispatch 単位の rate limit がない)
-- Cloud Run の `max_instances` で代用するが、これは「最大並列数」であり「秒あたり dispatch 数」ではない
+#### 案 C: GCS → Pub/Sub pull subscription → review-worker (Phase 2 候補)
+
+```
+stock-analysis-agent → GCS:
+   raw/<ticker>/<dt>.md, .json
+        ↓
+   Pub/Sub (filter: .json)
+        ↓
+   review-worker (常時起動、google-cloud-pubsub の StreamingPull で消費)
+   - 自分の処理スループットに応じて pull pace 制御
+   - 長尺タスク中は modifyAckDeadline で ack 延長
+```
+
+メリット: **backpressure 制御がクリーン**。CrewAI が変動長 (30 秒〜10 分超) でも ack 延長で吸収。並列度を subscriber コード側で自由に制御可能。
+デメリット: Cloud Run `min_instances=1` 必須 (常時 pull するため)。月額 ¥2,500 程度の上乗せ。pull loop + ack lease 管理の実装が増える。
 
 #### 採用判断
 
 **案 B (Pub/Sub push 直接) を Phase 1 で採用**。理由:
 
-1. 個人運営の 200 レポート/日では Cloud Tasks の rate limit 機能が必須でない
-2. CrewAI 1 サイクル = 30〜90 秒なので、Cloud Run `max_instances=3` でも実効スループット 60〜180 req/分 ≒ Vertex AI quota 内
-3. コンポーネント数を最小化することで運用・debug を簡素化
+1. 個人運営の 200 レポート/日では Cloud Tasks の queue 単位 rate limit が必須でない
+2. CrewAI 1 サイクル = 30〜90 秒なので、push の ack deadline 600 秒に余裕で収まる (99 パーセンタイル想定でも 3 分以内)
+3. Cloud Run min=0 でアイドル時コストゼロ。Phase 1 のコスト目標 ¥3,500〜5,500/月 を維持するため pull の常時起動コスト ¥2,500/月 は避けたい
+4. コンポーネント数を最小化することで運用・debug を簡素化
 
-#### Rate limit の後追い検討 (Phase 2)
+#### Phase 2 で再検討する条件
 
-以下が観測された場合、案 A (Cloud Tasks 再導入) を別 PR で検討する:
+以下が観測された場合、案 A (Cloud Tasks 再導入) または 案 C (Pull 切替) を別 PR で検討する:
 
-- Vertex AI Gemini 429 が日次で 5% 超
-- 一過性のレポート集中 (例: 朝市場開始時に 50 件同時) で review が捌けない
-- per-ticker / per-user の優先度制御が要件化
+- **Vertex AI Gemini 429 が日次で 5% 超** → 案 A の queue rate limit が活きる
+- **CrewAI 実行時間が 10 分超に頻発** (ロングテール顕在化) → 案 C の ack 延長メカニズムが必要
+- **一過性のレポート集中** (例: 朝市場開始時に 50 件同時) で review が捌けない → 案 A / C どちらでも対応可、cost 比較で選定
+- **per-ticker / per-user の優先度制御が要件化** → 案 A (multi-queue) が向く
 
-判断指標は §5.1 Monitoring で計測する `llm_call.error_rate` と `review_lag` の 2 つ。
+判断指標は §5.1 Monitoring で計測する `llm_call.error_rate` と `review_lag` (受信から review 完了までの時間) の 2 つ。
 
 ### 3.7 Notes / Constraints / Caveats
 
