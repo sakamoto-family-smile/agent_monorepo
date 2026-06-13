@@ -44,8 +44,8 @@ def test_payload_actions_map_to_existing_commands():
     assert texts == [
         "分析",
         "おすすめ",
+        "マイリスト",
         "スクリーニング",
         "スクリーニング US",
-        "ID",
         "ヘルプ",
     ]
