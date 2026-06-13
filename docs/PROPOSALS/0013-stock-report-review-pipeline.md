@@ -219,6 +219,10 @@ def verdict(scores: dict[str, int], must_fix: list[Issue]) -> str:
 
 ### 3.5 アーキテクチャ (全体)
 
+> 📐 **GCP 構成図**: [`docs/diagrams/systems/stock-report-reviewer/gcp.png`](../diagrams/systems/stock-report-reviewer/gcp.png) — spec は [`spec.gcp.mjs`](../diagrams/systems/stock-report-reviewer/spec.gcp.mjs)
+>
+> ![GCP architecture](../diagrams/systems/stock-report-reviewer/gcp.png)
+
 ```
 [stock-analysis-agent (既存)]
    分析完了 → SQLite に保存 (既存) + GCS に write (新規)
