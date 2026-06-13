@@ -180,3 +180,48 @@ async def test_screen_my_uses_watchlist_tickers(db, monkeypatch):
     await line_handler._cmd_screen(["マイ"], _ev("スクリーニング マイ"), _deps(client))
     assert captured["market"] == "MY"
     assert sorted(captured["tickers"]) == ["6758.T", "7203.T"]
+
+
+# ---------------------------------------------------------------------------
+# 企業名の補完 (ティッカー追加時)
+# ---------------------------------------------------------------------------
+
+
+async def test_add_by_ticker_enriches_name(db, monkeypatch):
+    """ティッカーで追加 (名前なし解決) でも企業名が補完されて保存される。"""
+    from models.stock import ResolveResult
+
+    async def _regex(query):
+        return ResolveResult(
+            ticker="7203.T", confidence=0.95, source="regex", company_name=None
+        )
+
+    monkeypatch.setattr(line_handler, "resolve_ticker", _regex)
+    monkeypatch.setattr(line_handler, "fetch_ticker_name", lambda t: "トヨタ自動車")
+
+    client = _StubClient()
+    await line_handler._cmd_watchlist_add(["7203.T"], _ev("追加 7203.T"), _deps(client))
+
+    items = await db.get_watchlist("U_a")
+    assert items[0]["ticker"] == "7203.T"
+    assert items[0]["name"] == "トヨタ自動車"
+    assert any("トヨタ自動車" in r["text"] for r in client.replies)
+
+
+async def test_add_by_ticker_name_lookup_failure_falls_back(db, monkeypatch):
+    """名前補完が失敗 (None) でもティッカーで登録できる。"""
+    from models.stock import ResolveResult
+
+    async def _regex(query):
+        return ResolveResult(
+            ticker="ZZZZ", confidence=0.95, source="regex", company_name=None
+        )
+
+    monkeypatch.setattr(line_handler, "resolve_ticker", _regex)
+    monkeypatch.setattr(line_handler, "fetch_ticker_name", lambda t: None)
+
+    client = _StubClient()
+    await line_handler._cmd_watchlist_add(["ZZZZ"], _ev("追加 ZZZZ"), _deps(client))
+    items = await db.get_watchlist("U_a")
+    assert items[0]["ticker"] == "ZZZZ"
+    assert items[0]["name"] is None

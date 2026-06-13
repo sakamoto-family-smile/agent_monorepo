@@ -71,3 +71,14 @@ def test_resolve_result_model():
     r = ResolveResult(ticker="AAPL", confidence=0.9, source="regex")
     assert r.ticker == "AAPL"
     assert 0.0 <= r.confidence <= 1.0
+
+
+def test_fetch_ticker_name_from_local_universe():
+    """ローカルのユニバース (data/universe) からティッカー→企業名を引ける (ネット不要)。"""
+    from agents.ticker_resolver import _local_name_for_ticker
+
+    # jp.json に含まれる主力銘柄
+    assert _local_name_for_ticker("7203.T") == "トヨタ自動車"
+    assert _local_name_for_ticker("AAPL") == "Apple"
+    # 未知ティッカーは None
+    assert _local_name_for_ticker("NOSUCH.XX") is None
