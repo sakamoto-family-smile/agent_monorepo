@@ -22,7 +22,11 @@ from typing import Awaitable, Callable
 from agents.fund_screener import run_fund_recommend
 from agents.orchestrator import run_analysis
 from agents.screener import run_screener
-from agents.ticker_resolver import resolve_ticker, search_candidates
+from agents.ticker_resolver import (
+    fetch_ticker_name,
+    resolve_ticker,
+    search_candidates,
+)
 from services.database import (
     add_watchlist_item,
     count_watchlist,
@@ -533,6 +537,13 @@ async def _cmd_watchlist_add(
 
     ticker = resolved.ticker
     name = resolved.company_name
+    if not name:
+        # ティッカー直接/候補タップ等で名前が無い場合は補完 (ローカル→yfinance)
+        try:
+            name = await asyncio.to_thread(fetch_ticker_name, ticker)
+        except Exception:
+            logger.debug("fetch_ticker_name failed for %s", ticker, exc_info=True)
+            name = None
     added = await add_watchlist_item(user_id, ticker, name)
     label = f"{name} ({ticker})" if name else ticker
     if added:

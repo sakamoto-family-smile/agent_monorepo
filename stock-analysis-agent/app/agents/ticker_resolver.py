@@ -19,6 +19,49 @@ class TickerCandidate:
     exchange: str | None = None
 
 
+def fetch_ticker_name(ticker: str) -> str | None:
+    """ティッカーから企業名を best-effort で取得する (マイリスト表示用)。
+
+    優先: ローカルのユニバース/辞書 (高速・ネットワーク不要) → yfinance.info。
+    取得できなければ None (呼び出し側は ticker のみ表示にフォールバック)。
+    """
+    name = _local_name_for_ticker(ticker)
+    if name:
+        return name
+    try:
+        info = yf.Ticker(ticker).info
+    except Exception as e:  # noqa: BLE001 — 名前取得失敗で機能を止めない
+        logger.debug("yfinance name lookup failed for %s: %s", ticker, e)
+        return None
+    if not info:
+        return None
+    return info.get("longName") or info.get("shortName") or None
+
+
+def _local_name_for_ticker(ticker: str) -> str | None:
+    """data/universe/*.json と seed 銘柄からティッカー→企業名を引く (ネットワーク不要)。"""
+    t = ticker.upper()
+    try:
+        from agents.universe import _UNIVERSE_DIR  # noqa: PLC0415
+    except Exception:
+        return None
+    import json
+    from pathlib import Path
+
+    for fname in ("jp.json", "us.json", "growth.json", "funds.json"):
+        path = Path(_UNIVERSE_DIR) / fname
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for entry in data.get("tickers", []):
+            if str(entry.get("ticker", "")).upper() == t and entry.get("name"):
+                return entry["name"]
+    return None
+
+
 def search_candidates(query: str, *, max_results: int = 5) -> list[TickerCandidate]:
     """yfinance Search で候補を最大 max_results 件返す (LINE の候補提示用)。
 
