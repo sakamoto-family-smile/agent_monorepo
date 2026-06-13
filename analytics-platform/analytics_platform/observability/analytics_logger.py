@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 
 import uuid_utils.compat as uuid_utils
 
-from .context import get_current_trace_context
+from .context import get_current_trace_context, get_current_user_id
 from .schemas import Severity, validate_event
 from .sinks.file_sink import JsonlSink
 
@@ -81,7 +81,8 @@ class AnalyticsLogger:
             "environment": self._environment,
             "trace_id": ctx["trace_id"],
             "span_id": ctx["span_id"],
-            "user_id": user_id,
+            # 明示引数 > contextvar (リクエスト入口で set_current_user_id 済の場合)
+            "user_id": user_id if user_id is not None else get_current_user_id(),
             "session_id": session_id,
             "severity": severity,
             **fields,

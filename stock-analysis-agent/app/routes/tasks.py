@@ -19,6 +19,7 @@ import logging
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
 
+from analytics_platform.observability.context import set_current_user_id
 from config import settings
 from services.line_client import get_line_bot_client
 from services.line_handler import (
@@ -80,6 +81,9 @@ async def analyze_task(
         return {"status": "skipped_no_line_client"}
 
     deps = HandlerDeps(line_client=line_client, schedule_background=lambda f: None)
+
+    # ユーザー別利用統計: orchestrator 内の全イベント (llm_call / business 等) に付与
+    set_current_user_id(user_id)
 
     try:
         await run_and_deliver_analysis(deps, to=user_id, target=target)

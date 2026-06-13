@@ -139,3 +139,34 @@ def test_buffer_overflow_drops_oldest() -> None:
         )
     assert logger.buffer_size == 2
     assert logger.dropped_count == 3
+
+
+def test_emit_falls_back_to_user_id_contextvar() -> None:
+    """emit の user_id 未指定時は contextvar (set_current_user_id) を使う。"""
+    import json
+
+    from analytics_platform.observability.context import set_current_user_id
+
+    sink = _MemorySink()
+    logger = _new_logger(sink)
+    set_current_user_id("U_ctx")
+    try:
+        logger.emit(
+            event_type="conversation_event",
+            event_version="1.0.0",
+            severity="INFO",
+            fields={"conversation_phase": "started"},
+        )
+        # 明示引数が contextvar より優先される
+        logger.emit(
+            event_type="conversation_event",
+            event_version="1.0.0",
+            severity="INFO",
+            fields={"conversation_phase": "ended"},
+            user_id="U_explicit",
+        )
+    finally:
+        set_current_user_id(None)
+    events = [json.loads(line) for line in logger._buffer]
+    assert events[0]["user_id"] == "U_ctx"
+    assert events[1]["user_id"] == "U_explicit"

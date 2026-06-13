@@ -288,7 +288,12 @@ stock-analysis-agent/
 
 ### 各イベントに含まれる主要フィールド
 
-すべて [`analytics_platform.observability.schemas`](../analytics-platform/analytics_platform/observability/schemas.py) で Pydantic 検証されます。共通フィールド (`event_id` / `event_timestamp` / `service_name` / `service_version` / `environment` / `trace_id` / `span_id` / `session_id` / `severity`) に加え、種別ごとに以下が付与されます。
+すべて [`analytics_platform.observability.schemas`](../analytics-platform/analytics_platform/observability/schemas.py) で Pydantic 検証されます。共通フィールド (`event_id` / `event_timestamp` / `service_name` / `service_version` / `environment` / `trace_id` / `span_id` / `user_id` / `session_id` / `severity`) に加え、種別ごとに以下が付与されます。
+
+> **`user_id` (LINE userId)**: ユーザー別の利用統計 (誰が何回分析したか等) のため、
+> webhook / worker の入口で contextvar に設定され全イベントに付与される。LINE userId
+> は provider 固有の仮名 ID であり、allow-list 運用 (家族のみ) の本サービスでは
+> 管理者が対応関係を把握している前提で生値を保持する。
 
 #### `llm_call` — Claude Agent SDK の AssistantMessage ごと
 - `llm_provider` = `"anthropic"`
@@ -335,6 +340,7 @@ stock-analysis-agent/
 
 ### イベント間の突合キー
 
+ユーザー別の集計は `user_id`、同一リクエスト内の突合は `session_id` で行う。
 すべてのイベントには同一リクエスト由来であることを示す `session_id` (例: `analysis_aa782b9ac2da41e8`) が入ります。OTLP endpoint を設定して Phoenix / Langfuse を立てた場合は `trace_id` も入り、LLM トレース側との突合も可能になります。
 
 ### 動作モード切替

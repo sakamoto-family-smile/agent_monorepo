@@ -555,3 +555,37 @@ async def test_default_analyze_runner_aggregates_report_complete_event():
     assert result.ticker == "7203.T"
     assert result.company_name == "トヨタ"
     assert "テクニカル" in result.report_text and "ファンダ" in result.report_text
+
+
+# ---------------------------------------------------------------------------
+# analytics user_id (ユーザー別利用統計)
+# ---------------------------------------------------------------------------
+
+
+async def test_webhook_events_carry_line_user_id(client, stub, tmp_path):
+    """webhook 経由で書かれる analytics イベントに LINE userId が付与される。"""
+    import json
+    from pathlib import Path as _P
+
+    from config import settings as _s
+
+    # instrumentation は module singleton のため、先行テストの data_dir で
+    # 初期化済みの場合がある。本テストの tmp dir で再初期化する。
+    import instrumentation
+
+    instrumentation.reset_for_tests()
+    instrumentation.setup_observability()
+
+    stub.events_to_return = [_text_event("ヘルプ", user_id="U_stats_target")]
+    await _post_webhook(client)
+
+    raw_dir = _P(_s.analytics_data_dir) / "raw"
+    lines = []
+    for f in raw_dir.rglob("*.jsonl"):
+        lines += [json.loads(x) for x in f.read_text().splitlines() if x.strip()]
+    assert lines, "analytics events should be written"
+    webhook_events = [
+        e for e in lines if e.get("session_id", "").startswith("line_")
+    ]
+    assert webhook_events
+    assert all(e.get("user_id") == "U_stats_target" for e in webhook_events)

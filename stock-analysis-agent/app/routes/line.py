@@ -17,6 +17,7 @@ from typing import Awaitable, Callable
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 
+from analytics_platform.observability.context import set_current_user_id
 from analytics_platform.observability.hashing import sha256_prefixed
 from config import settings
 from instrumentation import get_analytics_logger
@@ -86,6 +87,10 @@ async def line_webhook(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid LINE signature",
         ) from e
+
+    # ユーザー別利用統計のため、以降の全イベントに LINE userId を付与する
+    # (contextvar 経由。webhook は実運用上 1 ユーザー 1 イベント)。
+    set_current_user_id(events[0].line_user_id if events else None)
 
     al = get_analytics_logger()
     session_id = f"line_{uuid.uuid4().hex[:16]}"
