@@ -262,7 +262,14 @@ stock-analysis-agent/
 
 ## 分析基盤 (analytics-platform) への送信情報
 
-このエージェントは [`../analytics-platform`](../analytics-platform/) に対して、リクエスト 1 本ごとに以下のイベントを業務ログ JSONL として書き出します。`ANALYTICS_DATA_DIR/raw/service_name=stock-analysis-agent/event_type=*/dt=YYYY-MM-DD/hour=HH/*.jsonl` に Hive パーティション形式で蓄積されます。
+このエージェントは [`../analytics-platform`](../analytics-platform/) に対して、リクエスト 1 本ごとに以下のイベントを送信します。
+
+- **本番 (`ANALYTICS_STORAGE_BACKEND=pubsub`)**: イベント行を Pub/Sub topic
+  (`sakamomo-family-agent-analytics-events`) に publish → Cloud Storage サブスクが
+  `gs://...-analytics-raw/events/` に NDJSON で蓄積 → **BigQuery external table
+  (`analytics_raw.agent_events_external`) で SQL 集計可能** (PROPOSAL-0010/0011)
+- **dev (`local`、既定)**: `ANALYTICS_DATA_DIR/raw/service_name=.../event_type=*/dt=*/hour=*/*.jsonl`
+  に Hive パーティション形式の JSONL として書き出し
 
 ### 送信されるイベント種別と発火タイミング
 
@@ -298,7 +305,7 @@ stock-analysis-agent/
 
 #### `message` — assistant 応答テキストごと
 - `message_id` / `message_role` = `"assistant"` / `message_index`
-- `content_text` (8KB 以下) **または** `content_uri` (8KB 超は `data/analytics/payloads/.../*.txt` に退避し `file://` URI を入れる)
+- `content_inline` (8KB 以下は本文をイベントに内包) **または** `content_uri` (8KB 超は payload として退避し URI 参照。`ANALYTICS_GCS_BUCKET` 設定時 = 本番は `gs://...-analytics-payloads/` に永続化、未設定時はローカル `file://` で揮発)
 - `content_hash` (`sha256:<hex>`)
 - `content_preview` (先頭 500 文字)
 - `content_size_bytes` / `content_truncated`
@@ -337,46 +344,36 @@ stock-analysis-agent/
 | `true` (既定) | `RotatingFileSink` で JSONL を書き出す |
 | `false` | `NoOpSink` に置換、JSONL は一切書かれない (テスト用 / 緊急遮断用) |
 
-### ローカル / GCP backend 切替 (Phase 5 Step 10)
+### ローカル / GCP backend 切替 (Phase 5 Step 10 / PROPOSAL-0010 P5-3)
 
 | `ANALYTICS_STORAGE_BACKEND` | 挙動 |
 |---|---|
-| `local` (既定) | JSONL は `ANALYTICS_DATA_DIR/raw/` に書かれ、`LocalUploader` が定期的に `uploaded/` へ move (本番では分析基盤側 dbt が DuckDB で読む) |
-| `gcs` | JSONL は同じく local FS にバッファされた後、`LocalUploader` が `GCSTransport` で `gs://${ANALYTICS_GCS_BUCKET}/${ANALYTICS_GCS_RAW_PREFIX}` に upload。大容量 payload も `GCSPayloadWriter` で直接 `gs://...` に書く |
+| `local` (既定) | JSONL は `ANALYTICS_DATA_DIR/raw/` に書かれ、`LocalUploader` が定期的に `uploaded/` へ move (dev 用) |
+| `pubsub` (**本番**) | イベント行を `PubSubSink` が直接 Pub/Sub topic (`ANALYTICS_PUBSUB_TOPIC`) に publish → GCS → BQ。8KB 超 payload は `ANALYTICS_GCS_BUCKET` 設定時 GCS に直接書く |
+| `gcs` | JSONL は local FS にバッファ後、`LocalUploader` が `GCSTransport` で upload (案B 互換。本 agent では未使用) |
 
-切替に必要なコード変更はゼロ。`.env` (Cloud Run なら環境変数) で:
+本番 (Cloud Run) の env は `stock-analysis-agent/terraform/` が配線済み
+(`ANALYTICS_STORAGE_BACKEND=pubsub` / `ANALYTICS_PUBSUB_TOPIC` /
+`ANALYTICS_GCP_PROJECT` / `ANALYTICS_GCS_BUCKET`)。前提となる cross-module 設定は
+analytics-platform terraform 側:
 
-```bash
-ANALYTICS_STORAGE_BACKEND=gcs
-ANALYTICS_GCS_BUCKET=analytics-raw                         # terraform output raw_bucket
-ANALYTICS_GCP_PROJECT=your-gcp-project                     # 省略時 ADC から推論
-ANALYTICS_GCS_RAW_PREFIX=uploaded/
-ANALYTICS_GCS_PAYLOAD_PREFIX=payloads/
-ANALYTICS_UPLOAD_INTERVAL_SECONDS=300
+- `publisher_service_account_emails` に stock SA → events topic への publish 許可
+- `payload_writer_service_account_emails` に stock SA → payloads bucket への書込許可
+
+#### 動作確認 (本番)
+
+```sql
+-- 日次の分析回数と Claude コスト (business_event.attributes は JSON 型)
+SELECT DATE(event_timestamp) AS day,
+       COUNT(*) AS analyses,
+       ROUND(SUM(FLOAT64(attributes.total_cost_usd)), 4) AS cost_usd
+FROM `analytics_raw.agent_events_external`
+WHERE service_name = 'stock-analysis-agent' AND action = 'claude_query_completed'
+GROUP BY day ORDER BY day;
 ```
 
-#### Cloud Run + Workload Identity デプロイ手順
-
-```bash
-# 1. analytics-platform 側で TF apply 済 + sa-uploader が作られている前提
-SA="sa-uploader@${PROJECT}.iam.gserviceaccount.com"
-
-# 2. Cloud Run service にこの SA を紐付ける
-gcloud run services update stock-analysis-agent \
-  --region=us-central1 \
-  --service-account="${SA}"
-
-# 3. env を Cloud Run に反映 (terraform output env_for_dotenv の値を流用)
-gcloud run services update stock-analysis-agent --region=us-central1 \
-  --update-env-vars=ANALYTICS_STORAGE_BACKEND=gcs,ANALYTICS_GCS_BUCKET=analytics-raw,ANALYTICS_GCP_PROJECT=${PROJECT},ANALYTICS_GCS_RAW_PREFIX=uploaded/,ANALYTICS_GCS_PAYLOAD_PREFIX=payloads/
-
-# 4. デプロイ後の動作確認
-#   - Cloud Logging で `[upload] cycle: uploaded=N dead_letter=0` が定期的に出る
-#   - GCS bucket に `uploaded/service_name=stock-analysis-agent/event_type=*/dt=*/hour=*/*.jsonl` が増える
-#   - BigQuery: SELECT COUNT(*) FROM analytics_raw.agent_events_external WHERE service_name='stock-analysis-agent'
-```
-
-`sa-uploader` には `analytics-platform/terraform/iam.tf` で raw / payloads / dead_letter bucket への `objectAdmin` が事前に紐付いている。
+GCS 直接確認: `gs://sakamomo-family-agent-analytics-raw/events/*.json` (イベント) /
+`gs://sakamomo-family-agent-analytics-payloads/payloads/...` (8KB 超の本文)。
 
 ### 実機検証スクリプト
 
