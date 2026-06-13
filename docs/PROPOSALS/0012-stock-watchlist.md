@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | Implementing |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-06-13 |
 | **Updated** | 2026-06-13 |
 | **Target** | stock-analysis-agent |
-| **Related PRs** | (none yet) |
+| **Related PRs** | 実装 (本ブランチ) |
 | **Supersedes** | — |
 | **Superseded by** | — |
 
@@ -194,4 +194,5 @@ After:
 
 | 日付 | 種別 | 内容 |
 |---|---|---|
+| 2026-06-13 | Implementing | 実装。`WatchlistItem` model + alembic 0003、`database.py` に add/remove/get/count、`ScreenerRequest.tickers` + screener 注入、`line_flex` に `watchlist_bubble` と候補 bubble の command 可変、`line_handler` に 追加/削除/マイリスト + `スクリーニング マイ` 分岐 + ヘルプ追記、business_event(watchlist_added/removed) emit。test 追加 (254 passed)。 |
 | 2026-06-13 | Draft | 初稿。PROPOSAL-0011 完了 (user_id + Cloud SQL) を前提に、ユーザー別マイリスト (追加/削除/一覧 + マイリストのスクリーニング) を提案。銘柄指定は企業名/ティッカー両対応 (低確度は候補提示を再利用)。スクリーナーに tickers 注入経路を追加 |

@@ -214,7 +214,8 @@ def _download_batch(tickers: List[str], period: str) -> dict[str, pd.DataFrame]:
 
 async def run_screener(req: ScreenerRequest) -> ScreenerResult:
     """スクリーニングを実行して結果を返す。"""
-    universe = _get_universe(req.market)
+    # PROPOSAL-0012: tickers 明示指定 (マイリスト) があればそれを universe にする。
+    universe = req.tickers if req.tickers is not None else _get_universe(req.market)
     logger.info("Screener start: market=%s, tickers=%d", req.market, len(universe))
 
     # yfinance は同期 I/O なので executor で実行

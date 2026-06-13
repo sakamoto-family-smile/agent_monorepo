@@ -71,6 +71,22 @@ class Alert(Base):
     created_at: Mapped[str] = mapped_column(String, server_default=_NOW)
 
 
+class WatchlistItem(Base):
+    """ユーザー別マイリスト 1 銘柄 (PROPOSAL-0012)。"""
+
+    __tablename__ = "watchlist"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    ticker: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, server_default=_NOW)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "ticker", name="uq_watchlist_user_ticker"),
+    )
+
+
 class EdinetDocument(Base):
     """EDINET 文書 INDEX (proposal 0006 Phase 1e / 0011 P3-B で Cloud SQL 化)。
 
@@ -115,4 +131,5 @@ __all__ = [
     "Report",
     "Alert",
     "EdinetDocument",
+    "WatchlistItem",
 ]
