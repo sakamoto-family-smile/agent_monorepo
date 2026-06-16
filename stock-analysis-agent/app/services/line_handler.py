@@ -583,6 +583,14 @@ async def _cmd_watchlist_remove(
     )
 
     removed = await remove_watchlist_item(user_id, ticker)
+    # 旧データ救済: 正規化後 ticker で一致しない場合は生入力でも試す。
+    # 例: JPX 新形式コード対応前に「285A」(.T 無し) で登録された行は、
+    # 対応後 resolve が「285A.T」を返すため正規化値では消せない。
+    if not removed:
+        raw = target.upper()
+        if raw != ticker and await remove_watchlist_item(user_id, raw):
+            removed = True
+            ticker = raw
     if removed:
         _emit_watchlist_event("watchlist_removed", user_id=user_id, ticker=ticker)
         await deps.line_client.reply_text(

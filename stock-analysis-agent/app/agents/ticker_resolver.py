@@ -97,6 +97,16 @@ TICKER_PATTERN = re.compile(r'^[A-Z0-9]{1,6}(\.[A-Z]{1,2})?$|^[A-Z0-9]{1,6}-[A-Z
 # Common Japanese ticker patterns (4-5 digit codes)
 JP_TICKER_PATTERN = re.compile(r'^\d{4,5}(\.T)?$')
 
+# JPX 新形式コード (2024-01 導入): 4 文字・先頭が数字・英字を含む英数字。
+# 例: 285A (キオクシア), 130A, 160A。yfinance では日本株は .T が必要なため
+# 旧来の全数字コードと同様に .T を付与する。英字始まりの US ティッカーは除外される。
+JP_NEW_TICKER_PATTERN = re.compile(r'^\d[0-9A-Z]{3}$')
+
+
+def _is_jp_new_code(code: str) -> bool:
+    """JPX 新形式コード (数字3桁+英字 等、先頭数字の 4 文字英数字) か判定する。"""
+    return bool(JP_NEW_TICKER_PATTERN.match(code)) and any(c.isalpha() for c in code)
+
 
 async def resolve_ticker(query: str) -> ResolveResult:
     """
@@ -115,6 +125,9 @@ async def resolve_ticker(query: str) -> ResolveResult:
         # Add .T suffix for bare Japanese codes
         ticker = upper if '.' in upper or not upper.isdigit() else f"{upper}.T"
         if JP_TICKER_PATTERN.match(upper) and '.' not in upper:
+            ticker = f"{upper}.T"
+        # JPX 新形式コード (例: 285A) も日本株として .T を付与する
+        if '.' not in upper and _is_jp_new_code(upper):
             ticker = f"{upper}.T"
         return ResolveResult(
             ticker=ticker,
