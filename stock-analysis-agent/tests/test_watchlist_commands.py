@@ -145,6 +145,23 @@ async def test_remove_missing(db, monkeypatch):
     assert any("見つかりませんでした" in r["text"] for r in client.replies)
 
 
+async def test_remove_stale_entry_by_raw_input(db, monkeypatch):
+    """正規化後 ticker と異なる旧データ (例: .T 無しの 285A) も生入力で削除できる。
+
+    JPX 新形式コード対応前に登録された「285A」は、対応後は resolve が
+    「285A.T」を返すため正規化 ticker では一致しない。生入力フォールバックで救済する。
+    """
+    # 旧データを直接投入 (.T 無し)
+    await db.add_watchlist_item("U_a", "285A", None)
+    # 対応後の resolve は 285A.T を返す
+    _stub_resolve(monkeypatch, ticker="285A.T", name="キオクシア", source="regex")
+
+    client = _StubClient()
+    await line_handler._cmd_watchlist_remove(["285A"], _ev("削除 285A"), _deps(client))
+    assert any("削除しました" in r["text"] for r in client.replies)
+    assert await db.get_watchlist("U_a") == []
+
+
 async def test_show_empty_guides(db):
     client = _StubClient()
     await line_handler._cmd_watchlist_show(_ev("マイリスト"), _deps(client))

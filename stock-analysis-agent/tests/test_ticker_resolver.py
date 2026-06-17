@@ -42,6 +42,44 @@ async def test_resolve_jp_ticker_by_regex():
 
 
 @pytest.mark.asyncio
+async def test_resolve_jp_new_format_code_by_regex():
+    """JPX 新形式コード (数字3桁+英字, 2024-) も日本株として .T を付与する (例: 285A=キオクシア)。"""
+    from agents.ticker_resolver import resolve_ticker
+
+    for code in ("285A", "130A", "160A"):
+        result = await resolve_ticker(code)
+        assert result.ticker == f"{code}.T", f"{code} should resolve to {code}.T"
+        assert result.source == "regex"
+
+
+@pytest.mark.asyncio
+async def test_resolve_jp_new_format_code_lowercase():
+    """小文字入力でも新形式コードを正規化する。"""
+    from agents.ticker_resolver import resolve_ticker
+
+    result = await resolve_ticker("285a")
+    assert result.ticker == "285A.T"
+
+
+@pytest.mark.asyncio
+async def test_resolve_jp_new_format_code_with_suffix_kept():
+    """既に .T 付きなら二重付与しない。"""
+    from agents.ticker_resolver import resolve_ticker
+
+    result = await resolve_ticker("285A.T")
+    assert result.ticker == "285A.T"
+
+
+@pytest.mark.asyncio
+async def test_resolve_us_ticker_not_treated_as_jp():
+    """英字始まりの US ティッカーには .T を付けない (誤判定防止)。"""
+    from agents.ticker_resolver import resolve_ticker
+
+    result = await resolve_ticker("AAPL")
+    assert result.ticker == "AAPL"
+
+
+@pytest.mark.asyncio
 async def test_resolve_toyota_by_dict():
     from agents.ticker_resolver import resolve_ticker
     result = await resolve_ticker("トヨタ")
