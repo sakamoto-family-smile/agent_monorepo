@@ -9,23 +9,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..contracts import DecidedField, Decision, ExtractionResult
-from ..schema import FieldType, field_type_of
+from ..schema import FieldType
 from ..synth.generator import GoldSample
-from ..validate.grounding import normalize_amount, normalize_date
+from ..validate.grounding import canonical_number, normalize_amount, normalize_date
 
 
 def canonicalize(field_type: FieldType, value: str) -> str | None:
     """接地が出力する canonical と同じ正規形に値を寄せる。"""
     if field_type in (FieldType.AMOUNT, FieldType.NUMERIC):
         n = normalize_amount(value)
-        return str(n) if n is not None else None
+        return canonical_number(n) if n is not None else None
     if field_type is FieldType.DATE:
         return normalize_date(value)
     return value.strip()
 
 
 def gold_canonical(sample: GoldSample, field_id: str) -> str | None:
-    ftype = field_type_of(field_id)
+    ftype = sample.field_types[field_id]
     return canonicalize(ftype, sample.gold_value(field_id))
 
 
@@ -99,8 +99,7 @@ def compute_metrics(
             m.n_fields += 1
             gold = gold_canonical(sample, d.field_id)
             ext = ext_by_id.get(d.field_id)
-            ftype = field_type_of(d.field_id)
-            ext_canon = canonicalize(ftype, ext.value) if ext else None
+            ext_canon = canonicalize(ext.field_type, ext.value) if ext else None
             extraction_correct = ext_canon is not None and ext_canon == gold
 
             if extraction_correct:

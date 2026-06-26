@@ -11,7 +11,13 @@ from dataclasses import dataclass
 
 from ..contracts import CharInterval, DecidedField, Decision, ExtractionResult
 from .grounding import ground
-from .labels import attribution_ok, find_label_occurrences
+from .labels import (
+    INVOICE_LABELS,
+    LabelLexicon,
+    attribution_ok,
+    find_label_occurrences,
+    labeled_fields,
+)
 
 _DEFAULT_TAU = 0.5
 
@@ -26,6 +32,7 @@ def decide_field(
     text: str,
     label_occs: list,
     config: ValidationConfig,
+    labeled: frozenset[str],
 ) -> DecidedField:
     votes: list[str] = []
 
@@ -38,7 +45,7 @@ def decide_field(
     interval = CharInterval(g.start, g.end)  # type: ignore[arg-type]
 
     # ③ 帰属チェック (C2: スロット取り違え)。
-    if not attribution_ok(result.field_id, g.start, label_occs):  # type: ignore[arg-type]
+    if not attribution_ok(result.field_id, g.start, label_occs, labeled):  # type: ignore[arg-type]
         votes.append("attribution:reject")
         return DecidedField(result.field_id, None, interval, 0.0, Decision.REJECT, votes)
     votes.append("attribution:ok")
@@ -65,8 +72,14 @@ def validate_results(
     results: list[ExtractionResult],
     text: str,
     config: ValidationConfig | None = None,
+    label_lexicon: LabelLexicon | None = None,
 ) -> list[DecidedField]:
-    """ExtractionResult[] を検証して DecidedField[] にする。"""
+    """ExtractionResult[] を検証して DecidedField[] にする。
+
+    label_lexicon でドメインのラベル辞書を注入する (既定は請求書)。
+    """
     cfg = config or ValidationConfig()
-    occs = find_label_occurrences(text)
-    return [decide_field(r, text, occs, cfg) for r in results]
+    lexicon = INVOICE_LABELS if label_lexicon is None else label_lexicon
+    occs = find_label_occurrences(text, lexicon)
+    labeled = labeled_fields(lexicon)
+    return [decide_field(r, text, occs, cfg, labeled) for r in results]

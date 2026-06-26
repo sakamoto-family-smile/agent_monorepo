@@ -14,7 +14,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
-from ..schema import Invoice, LineItem
+from ..schema import FieldType, Invoice, LineItem, field_type_of
 
 _ISSUERS = [
     ("株式会社XYZ製作所", "東京都千代田区丸の内1-2-3"),
@@ -45,12 +45,17 @@ class LabelOccurrence:
 
 @dataclass
 class GoldSample:
-    """生成された 1 サンプル。"""
+    """生成された 1 サンプル。
+
+    ドメイン非依存の評価/抽出のために、各フィールドの型を ``field_types`` に保持する
+    (metrics・mock 抽出器はこれを参照し、ドメイン固有の解決関数に依存しない)。
+    """
 
     sample_id: int
     text: str
-    record: Invoice
     spans: dict[str, tuple[int, int]]  # field_id -> (start, end) 正解span
+    field_types: dict[str, FieldType] = field(default_factory=dict)
+    record: object | None = None  # ドメインの pydantic レコード (任意)
     labels: list[LabelOccurrence] = field(default_factory=list)
 
     def gold_value(self, field_id: str) -> str:
@@ -181,8 +186,9 @@ def generate_sample(sample_id: int) -> GoldSample:
     return GoldSample(
         sample_id=sample_id,
         text=b.text(),
-        record=record,
         spans=b.spans,
+        field_types={fid: field_type_of(fid) for fid in b.spans},
+        record=record,
         labels=b.labels,
     )
 

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 
@@ -15,9 +16,21 @@ from rapidfuzz import fuzz
 from ..schema import FieldType
 
 # 全角→半角 (長さ保存。オフセットがずれない)。
-_ZEN2HAN = str.maketrans("０１２３４５６７８９，．－", "0123456789,.-")
+_ZEN2HAN = str.maketrans("０１２３４５６７８９，．－％", "0123456789,.-%")
 
-_NUM_TOKEN = re.compile(r"(?<![0-9.])[0-9][0-9,]*(?:\.[0-9]+)?(?![0-9])")
+# 金額スケール単位。長いものから順に判定する (百万円 を 円 より先に)。
+_SCALE_UNITS: tuple[tuple[str, float], ...] = (
+    ("百万円", 1e6),
+    ("億円", 1e8),
+    ("千円", 1e3),
+    ("万円", 1e4),
+    ("円", 1.0),
+    ("%", 1.0),
+)
+_UNIT_ALT = "|".join(re.escape(u) for u, _ in _SCALE_UNITS)
+# 符号(△▲) + 数字 + 任意のスケール単位 を 1 トークンとして捕捉する。
+# 数値だけを切り出すと「1,200百万円」を 1200 と誤読するため、単位込みで照合する。
+_NUM_TOKEN = re.compile(rf"(?<![0-9.])[△▲]?[0-9][0-9,]*(?:\.[0-9]+)?(?:{_UNIT_ALT})?")
 _DATE_PATTERNS = [
     re.compile(r"(\d{4})年(\d{1,2})月(\d{1,2})日"),
     re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})"),
@@ -43,16 +56,39 @@ _NOT_FOUND = GroundResult(found=False)
 _AMBIGUOUS = GroundResult(found=False, ambiguous=True)
 
 
-def normalize_amount(s: str) -> int | None:
-    h = s.translate(_ZEN2HAN)
-    h = re.sub(r"[¥￥$,，\s円]", "", h)
-    if not re.fullmatch(r"-?\d+(?:\.\d+)?", h):
+def normalize_amount(s: str) -> float | None:
+    """金額・数量を数値へ正規化する。
+
+    対応: 全角、カンマ・通貨記号、スケール単位 (百万円/億円/千円/万円/円)、
+    パーセント、△▲ および () による負数。財務資料のスケール (百万円→1e6 等) を
+    畳み込んで実数の絶対値を返すため、`1,200百万円` と `1200000000` は一致する。
+    請求書のように単位を持たない値はスケール 1 でそのまま扱う (後方互換)。
+    """
+    h = s.translate(_ZEN2HAN).strip()
+    if not h:
         return None
-    try:
-        f = float(h)
-    except ValueError:
+    neg = False
+    if h[0] in "△▲":
+        neg, h = True, h[1:]
+    elif h.startswith("(") and h.endswith(")"):
+        neg, h = True, h[1:-1]
+    scale = 1.0
+    for unit, sc in _SCALE_UNITS:
+        if h.endswith(unit):
+            scale, h = sc, h[: -len(unit)]
+            break
+    h = re.sub(r"[¥￥$,\s]", "", h)
+    if not re.fullmatch(r"\d+(?:\.\d+)?", h):
         return None
-    return int(f) if f.is_integer() else None
+    v = float(h) * scale
+    return -v if neg else v
+
+
+def canonical_number(v: float) -> str:
+    """正規化済み数値を比較・出力用の文字列に整える (整数なら小数点を付けない)。"""
+    if float(v).is_integer():
+        return str(int(v))
+    return str(round(v, 6))
 
 
 def normalize_date(s: str) -> str | None:
@@ -114,9 +150,10 @@ def ground_numeric(value: str, text: str, evidence_span: str) -> GroundResult:
     hw = text.translate(_ZEN2HAN)
     candidates: list[tuple[int, int]] = []
     for m in _NUM_TOKEN.finditer(hw):
-        if normalize_amount(m.group()) == target:
+        cand = normalize_amount(m.group())
+        if cand is not None and math.isclose(cand, target, rel_tol=1e-9, abs_tol=1e-6):
             candidates.append((m.start(), m.end()))
-    return _pick(candidates, _evidence_region(text, evidence_span), str(target))
+    return _pick(candidates, _evidence_region(text, evidence_span), canonical_number(target))
 
 
 def ground_date(value: str, text: str, evidence_span: str) -> GroundResult:

@@ -12,13 +12,31 @@ LLM クレデンシャル無しで決定的に回せる形に落とした実装�
 検証層は完全に LLM 非依存・決定的(設計ガイド 4.7「コア検証は LLM 非依存」)。実 LLM 抽出器は同じ
 `Extractor` Protocol の差し替えとして後から挿せる(`extract/llm_extractor.py`)。
 
-## 結果 (test split 30件, `python -m attachment_pipeline.eval.run`)
+## 検証ドメイン
+
+2 ドメインで「抽出のみ vs 抽出+検証」を比較。検証層 (接地/帰属/τ) は共通で、ドメイン
+固有部分 (スキーマ・生成器・ラベル辞書) だけ差し替える。
+
+### 請求書 (test 30件, `python -m attachment_pipeline.eval.run`)
 
 | 構成 | precision | coverage | recall | 誤採用(FP) | 誤り捕捉 |
 |---|---|---|---|---|---|
 | 検証なし(baseline) | 0.805 | 1.000 | 1.000 | **128** | 0 / 128 |
 | 検証あり(τ=0.5) | **1.000** | 0.711 | 0.883 | **0** | 128 / 128 |
 | 検証あり(τ=0.0) | **1.000** | 0.805 | 1.000 | **0** | 128 / 128 |
+
+### 財務/有価証券報告書 (test 30件, `python -m attachment_pipeline.eval.run_financial`)
+
+| 構成 | precision | coverage | recall | 誤採用(FP) | 誤り捕捉 |
+|---|---|---|---|---|---|
+| 抽出のみ(baseline) | 0.617 | 1.000 | 1.000 | **241** | 0 / 241 |
+| 抽出+検証(τ=0.5) | **1.000** | 0.533 | 0.864 | **0** | 241 / 241 |
+| 抽出+検証(τ=0.0) | **1.000** | 0.617 | 1.000 | **0** | 241 / 241 |
+
+財務固有の誤り (**スケール忘れ `1,495,000百万円→1,495,000` / 符号反転 `△12,345→12,345` /
+当期↔前期の列取り違え**) を、スケール対応接地・符号正規化・期間ラベル帰属で全捕捉。
+baseline precision が請求書より低い (0.617) のは、スケール/符号/期間という財務特有の
+誤りが多く混入するため。検証層はいずれも τ=0 でも FP=0・recall=1.0 を達成。
 
 - **誤採用(FP)を 128 → 0** に。「絶対に誤った値を入れない」要件を満たす。
 - τ=0.0(確信度しきい値オフ)でも FP=0・recall=1.0 ── **接地＋帰属だけで全注入誤りを捕捉**でき、
@@ -39,28 +57,34 @@ LLM クレデンシャル無しで決定的に回せる形に落とした実装�
 
 ```
 attachment_pipeline/
-├── schema.py          # 所定スキーマ(Invoice)＋型別接地レジストリ(FieldType)
-├── contracts.py       # ExtractionResult / DecidedField (抽出↔検証の唯一の境界, 4.7.2)
-├── synth/generator.py # 合成-but-grounded 生成器(正解span＋ラベル位置を記録)
+├── schema.py            # 請求書スキーマ＋型別接地レジストリ(FieldType)
+├── schema_financial.py  # 財務スキーマ・型・期間ラベル辞書(当期/前期)
+├── contracts.py         # ExtractionResult / DecidedField (抽出↔検証の唯一の境界, 4.7.2)
+├── synth/
+│   ├── generator.py     # 請求書 合成-but-grounded 生成器(正解span＋ラベル位置)
+│   └── financial.py     # 財務 生成器(百万円スケール/△負数/当期前期列)
 ├── extract/
-│   ├── base.py            # Extractor Protocol
-│   ├── mock_extractor.py  # 誤り注入モック(誤りには高確信度を付与)
-│   └── llm_extractor.py   # 実LLM抽出器スケルトン(llm-client差し替え)
-├── validate/          # 検証パイプライン(LLM非依存・決定的)
-│   ├── grounding.py   # 型別接地＋正規化＋数値再検証(int等価)
-│   ├── labels.py      # ラベル辞書＋帰属チェック(原文から再検出, goldに非依存)
-│   └── decide.py      # 検証チェーン: 接地→帰属→τ棄却 → DecidedField
+│   ├── base.py             # Extractor Protocol
+│   ├── mock_extractor.py   # 請求書 誤り注入モック(部分一致罠/スロット入替/捏造)
+│   ├── financial_mock.py   # 財務 誤り注入モック(scale_drop/sign_flip/wrong_period)
+│   └── llm_extractor.py    # 実LLM抽出器スケルトン(llm-client差し替え)
+├── validate/            # 検証パイプライン(LLM非依存・決定的, ドメイン共通)
+│   ├── grounding.py     # 型別接地＋正規化(スケール/符号/全角)＋数値再検証
+│   ├── labels.py        # ラベル辞書＋帰属チェック(lexicon注入式, goldに非依存)
+│   └── decide.py        # 検証チェーン: 接地→帰属→τ棄却 → DecidedField
 └── eval/
-    ├── metrics.py     # precision@coverage / recall / 誤り捕捉率
-    └── run.py         # 統合ハーネス(baseline vs 検証あり, τ掃引)
+    ├── metrics.py          # precision@coverage / recall / 誤り捕捉率
+    ├── run.py              # 請求書ハーネス(baseline vs 検証あり, τ掃引)
+    └── run_financial.py    # 財務ハーネス
 ```
 
 ## 使い方
 
 ```bash
 uv venv --python 3.12 && uv pip install -e . pytest ruff
-uv run python -m attachment_pipeline.eval.run   # 精度レポート
-uv run pytest -q                                # 回帰テスト(17件)
+uv run python -m attachment_pipeline.eval.run             # 請求書 精度レポート
+uv run python -m attachment_pipeline.eval.run_financial   # 財務 精度レポート
+uv run pytest -q                                          # 回帰テスト(26件)
 ```
 
 ## v1 の対象外 (後続フェーズ)
