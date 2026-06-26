@@ -137,8 +137,11 @@ def _pick(
     if region is not None:
         rs, re_ = region
         inside = [c for c in candidates if rs <= c[0] and c[1] <= re_]
-        if inside:
-            scoped = inside
+        # evidence 領域を特定できたのに該当が領域内に無い = LLM の主張箇所に値が無い。
+        # 遠方の同値トークンを拾うと長文で誤接地→誤採用を招くため信頼せず棄却する。
+        if not inside:
+            return _NOT_FOUND
+        scoped = inside
     chosen = scoped[0]
     return GroundResult(True, chosen[0], chosen[1], canonical=canonical)
 

@@ -38,6 +38,23 @@ LLM クレデンシャル無しで決定的に回せる形に落とした実装�
 baseline precision が請求書より低い (0.617) のは、スケール/符号/期間という財務特有の
 誤りが多く混入するため。検証層はいずれも τ=0 でも FP=0・recall=1.0 を達成。
 
+### 長文/実物スケール有報 (test 30件・平均約20,000字, `python -m attachment_pipeline.eval.run_financial_long`)
+
+定性記述・脚注・**数値が衝突する撹乱テーブル**(セグメント/四半期)で gold ブロックを
+囲んで実物スケール化し、逆引きの曖昧性を増やしたストレステスト。
+
+| 構成 | precision | coverage | recall | 誤採用(FP) |
+|---|---|---|---|---|
+| 抽出のみ(baseline) | 0.617 | 1.000 | 1.000 | **241** |
+| 抽出+検証(τ=0.5) | **1.000** | 0.533 | 0.864 | **0** |
+
+平均20,393字・チャンク平均12.4個。**数値衝突があっても evidence_span 絞り込み＋接地の
+precision硬化(evidence領域外の遠方一致は棄却)で誤接地ゼロ**、clean の過棄却も0を維持。
+チャンク分割は global offset を保存(`validate/chunking.py`、テストで復元を検証)。
+
+> 限界: mock 抽出器は gold span を知るため、長文での**取りこぼし(lost in the middle)は
+> 未再現**。長文での抽出側劣化は実 LLM 抽出器でのみ評価できる。
+
 - **誤採用(FP)を 128 → 0** に。「絶対に誤った値を入れない」要件を満たす。
 - τ=0.0(確信度しきい値オフ)でも FP=0・recall=1.0 ── **接地＋帰属だけで全注入誤りを捕捉**でき、
   素朴な確信度しきい値に依存しないことを実証(設計ガイド 3.2「自信を持って間違える」への対処)。
@@ -61,8 +78,9 @@ attachment_pipeline/
 ├── schema_financial.py  # 財務スキーマ・型・期間ラベル辞書(当期/前期)
 ├── contracts.py         # ExtractionResult / DecidedField (抽出↔検証の唯一の境界, 4.7.2)
 ├── synth/
-│   ├── generator.py     # 請求書 合成-but-grounded 生成器(正解span＋ラベル位置)
-│   └── financial.py     # 財務 生成器(百万円スケール/△負数/当期前期列)
+│   ├── generator.py      # 請求書 合成-but-grounded 生成器(正解span＋ラベル位置)
+│   ├── financial.py      # 財務 生成器(百万円スケール/△負数/当期前期列)
+│   └── financial_long.py # 財務 長文生成器(定性記述+撹乱テーブルで実物スケール化)
 ├── extract/
 │   ├── base.py             # Extractor Protocol
 │   ├── mock_extractor.py   # 請求書 誤り注入モック(部分一致罠/スロット入替/捏造)
@@ -71,20 +89,23 @@ attachment_pipeline/
 ├── validate/            # 検証パイプライン(LLM非依存・決定的, ドメイン共通)
 │   ├── grounding.py     # 型別接地＋正規化(スケール/符号/全角)＋数値再検証
 │   ├── labels.py        # ラベル辞書＋帰属チェック(lexicon注入式, goldに非依存)
+│   ├── chunking.py      # チャンク分割(構造境界+overlap, global offset保存)
 │   └── decide.py        # 検証チェーン: 接地→帰属→τ棄却 → DecidedField
 └── eval/
-    ├── metrics.py          # precision@coverage / recall / 誤り捕捉率
-    ├── run.py              # 請求書ハーネス(baseline vs 検証あり, τ掃引)
-    └── run_financial.py    # 財務ハーネス
+    ├── metrics.py             # precision@coverage / recall / 誤り捕捉率
+    ├── run.py                 # 請求書ハーネス(baseline vs 検証あり, τ掃引)
+    ├── run_financial.py       # 財務ハーネス
+    └── run_financial_long.py  # 長文(実物スケール)財務ハーネス
 ```
 
 ## 使い方
 
 ```bash
 uv venv --python 3.12 && uv pip install -e . pytest ruff
-uv run python -m attachment_pipeline.eval.run             # 請求書 精度レポート
-uv run python -m attachment_pipeline.eval.run_financial   # 財務 精度レポート
-uv run pytest -q                                          # 回帰テスト(26件)
+uv run python -m attachment_pipeline.eval.run                 # 請求書 精度レポート
+uv run python -m attachment_pipeline.eval.run_financial       # 財務 精度レポート
+uv run python -m attachment_pipeline.eval.run_financial_long  # 長文(実物スケール)財務
+uv run pytest -q                                              # 回帰テスト(32件)
 ```
 
 ## v1 の対象外 (後続フェーズ)

@@ -27,6 +27,11 @@ _COMPANIES = [
 ]
 _MILLION = 1_000_000
 
+# field_id → 所有ラベル (全ラベルが単一フィールド所有なので一意に逆引きできる)。
+_LABEL_OF: dict[str, str] = {
+    next(iter(owners)): label for label, owners in FINANCIAL_LABELS.items()
+}
+
 # metric → (表示単位サフィックス, スケール, 値生成レンジ, 小数桁)
 _AMOUNT_METRICS = ("net_sales", "operating_income", "ordinary_income", "net_income",
                    "total_assets", "net_assets")
@@ -63,17 +68,22 @@ def _fmt_million(yen: int) -> str:
     return f"{sign}{millions:,}百万円"
 
 
-def generate_sample(sample_id: int) -> GoldSample:
-    rng = random.Random(sample_id * 31 + 1)
-    b = _Builder()
+def compute_displays(rng: random.Random) -> tuple[dict[str, str], dict[str, str], dict[str, int]]:
+    """単独フィールド・指標フィールドの表示文字列を生成する。
 
+    戻り値: (singletons, metrics, amount_values_yen)。amount_values_yen は長文版が
+    距離撹乱 (distractor) の数値を作るのに使う。
+    """
     company = rng.choice(_COMPANIES)
-    edinet = f"E{rng.randint(1, 99999):05d}"
-    sec_code = f"{rng.randint(1000, 9999)}"
     fy_year = 2024 + rng.randint(0, 2)
-    submit_day = rng.randint(10, 28)
+    singletons = {
+        "company_name": company,
+        "edinet_code": f"E{rng.randint(1, 99999):05d}",
+        "securities_code": f"{rng.randint(1000, 9999)}",
+        "fiscal_year_end": f"{fy_year}年3月31日",
+        "submission_date": f"{fy_year}年6月{rng.randint(10, 28)}日",
+    }
 
-    # 当期/前期の金額 (円)。前期は当期の 0.8〜1.1 倍。営業/経常/純利益は赤字もあり得る。
     values_yen: dict[str, int] = {}
     for metric in _AMOUNT_METRICS:
         base = rng.randint(50, 2000) * 1000 * _MILLION  # 数百億〜2兆規模
@@ -87,52 +97,47 @@ def generate_sample(sample_id: int) -> GoldSample:
         values_yen[f"{metric}_current"] = cur
         values_yen[f"{metric}_prior"] = prior
 
-    equity_ratio = {"current": round(rng.uniform(30, 65), 1),
-                    "prior": round(rng.uniform(30, 65), 1)}
-    eps = {"current": round(rng.uniform(50, 400), 2),
-           "prior": round(rng.uniform(50, 400), 2)}
+    metrics: dict[str, str] = {fid: _fmt_million(v) for fid, v in values_yen.items()}
+    for period in ("current", "prior"):
+        metrics[f"equity_ratio_{period}"] = f"{round(rng.uniform(30, 65), 1)}%"
+        metrics[f"eps_{period}"] = f"{round(rng.uniform(50, 400), 2):.2f}円"
+    return singletons, metrics, values_yen
 
-    # ── テキスト組み立て ──
-    b.add("有価証券報告書\n\n")
-    b.add_label("会社名", FINANCIAL_LABELS["会社名"])
-    b.add(": ")
-    b.add_field("company_name", company)
-    b.add("\n")
-    b.add_label("EDINETコード", FINANCIAL_LABELS["EDINETコード"])
-    b.add(": ")
-    b.add_field("edinet_code", edinet)
-    b.add("\n")
-    b.add_label("証券コード", FINANCIAL_LABELS["証券コード"])
-    b.add(": ")
-    b.add_field("securities_code", sec_code)
-    b.add("\n")
-    b.add_label("事業年度末", FINANCIAL_LABELS["事業年度末"])
-    b.add(": ")
-    b.add_field("fiscal_year_end", f"{fy_year}年3月31日")
-    b.add("\n")
-    b.add_label("提出日", FINANCIAL_LABELS["提出日"])
-    b.add(": ")
-    b.add_field("submission_date", f"{fy_year}年6月{submit_day}日")
-    b.add("\n\n主要な経営指標等の推移:\n")
 
-    def emit_metric(metric: str, render_current: str, render_prior: str) -> None:
+def emit_header(b: _Builder, singletons: dict[str, str]) -> None:
+    """表紙ヘッダ (会社名・コード・日付) を出力。"""
+    for fid in ("company_name", "edinet_code", "securities_code", "fiscal_year_end",
+                "submission_date"):
+        label = _LABEL_OF[fid]
+        b.add_label(label, FINANCIAL_LABELS[label])
+        b.add(": ")
+        b.add_field(fid, singletons[fid])
+        b.add("\n")
+
+
+def emit_summary(b: _Builder, metrics: dict[str, str]) -> None:
+    """「主要な経営指標等の推移」ブロックを出力。"""
+    order = list(_AMOUNT_METRICS) + ["equity_ratio", "eps"]
+    for metric in order:
         mlabel = METRIC_LABELS[metric]
-        for period, render in (("current", render_current), ("prior", render_prior)):
+        for period in ("current", "prior"):
             label = f"{PERIOD_LABELS[period]}{mlabel}"
             b.add("  ")
             b.add_label(label, FINANCIAL_LABELS[label])
             b.add(": ")
-            b.add_field(f"{metric}_{period}", render)
+            b.add_field(f"{metric}_{period}", metrics[f"{metric}_{period}"])
             b.add("\n")
 
-    for metric in _AMOUNT_METRICS:
-        emit_metric(
-            metric,
-            _fmt_million(values_yen[f"{metric}_current"]),
-            _fmt_million(values_yen[f"{metric}_prior"]),
-        )
-    emit_metric("equity_ratio", f"{equity_ratio['current']}%", f"{equity_ratio['prior']}%")
-    emit_metric("eps", f"{eps['current']:.2f}円", f"{eps['prior']:.2f}円")
+
+def generate_sample(sample_id: int) -> GoldSample:
+    rng = random.Random(sample_id * 31 + 1)
+    singletons, metrics, _ = compute_displays(rng)
+
+    b = _Builder()
+    b.add("有価証券報告書\n\n")
+    emit_header(b, singletons)
+    b.add("\n主要な経営指標等の推移:\n")
+    emit_summary(b, metrics)
 
     return GoldSample(
         sample_id=sample_id,
