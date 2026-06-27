@@ -11,7 +11,7 @@ dependencies = [
 [project.optional-dependencies]
 # 実LLM抽出器を使う場合のみ。検証層・合成データ・モック抽出器は LLM 非依存で動く。
 llm = [
-    "llm-client",
+    "anthropic>=0.40.0",
 ]
 
 [build-system]

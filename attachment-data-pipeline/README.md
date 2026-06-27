@@ -60,6 +60,28 @@ precision硬化(evidence領域外の遠方一致は棄却)で誤接地ゼロ**�
   素朴な確信度しきい値に依存しないことを実証(設計ガイド 3.2「自信を持って間違える」への対処)。
 - coverage/recall 低下は precision を買うための棄却コスト(risk–coverage で可視化)。
 
+## 実 LLM 抽出 (`extract/llm_extractor.py`, `eval/run_llm.py`)
+
+ここまでの精度数値は**検証層の判別力**を測るための誤り注入モックによるもの。実モデルの
+『本物の誤り分布』で評価するための実 LLM 抽出経路も用意している。
+
+- `LLMExtractor` は `complete(system, user) -> str` を満たす任意のクライアントを受け取る
+  (anthropic SDK / llm-client / テスト用フェイク)。長文は `chunk_text` で分割し field_id で
+  マージ。出力は ` ```json ` フェンスや前後の散文を許容して解析。
+- `build_anthropic_client()` が anthropic SDK 経由の同期クライアントを返す。実行は
+  `ANTHROPIC_API_KEY` を設定して `python -m attachment_pipeline.eval.run_llm`
+  (環境変数 `LLM_EVAL_N` / `LLM_EVAL_LONG=1` / `LLM_EVAL_MODEL` で制御)。
+- 認証が無い環境では graceful skip。LLM 経路自体はフェイククライアントで end-to-end
+  テスト済み (`tests/test_llm_extractor.py`: 正値は採用 / スケール欠落・捏造は棄却)。
+
+**実 LLM (Claude) による実抽出の実測** — 短文有報1件 (21フィールド) を実モデルが
+原文どおり抽出 → 21/21 正確 → 検証層は全採用 (precision/recall=1.0, 過棄却0)。実モデルの
+正しい出力を検証層が取りこぼさないことを確認。誤り捕捉側 (スケール欠落・捏造の棄却) は
+フェイククライアントテストと誤り注入モックで担保。
+
+> 大規模な実 LLM 実測 (多数文書・取りこぼし含む真の誤り分布) は API キーが要る。コードは
+> 即実行できる状態。
+
 ## 注入する誤りと、それを捕捉する関門
 
 | 誤りモード | 例 | 捕捉する関門 |
@@ -85,7 +107,7 @@ attachment_pipeline/
 │   ├── base.py             # Extractor Protocol
 │   ├── mock_extractor.py   # 請求書 誤り注入モック(部分一致罠/スロット入替/捏造)
 │   ├── financial_mock.py   # 財務 誤り注入モック(scale_drop/sign_flip/wrong_period)
-│   └── llm_extractor.py    # 実LLM抽出器スケルトン(llm-client差し替え)
+│   └── llm_extractor.py    # 実LLM抽出器(sync/chunk/JSON解析, anthropic差し替え)
 ├── validate/            # 検証パイプライン(LLM非依存・決定的, ドメイン共通)
 │   ├── grounding.py     # 型別接地＋正規化(スケール/符号/全角)＋数値再検証
 │   ├── labels.py        # ラベル辞書＋帰属チェック(lexicon注入式, goldに非依存)
@@ -95,7 +117,8 @@ attachment_pipeline/
     ├── metrics.py             # precision@coverage / recall / 誤り捕捉率
     ├── run.py                 # 請求書ハーネス(baseline vs 検証あり, τ掃引)
     ├── run_financial.py       # 財務ハーネス
-    └── run_financial_long.py  # 長文(実物スケール)財務ハーネス
+    ├── run_financial_long.py  # 長文(実物スケール)財務ハーネス
+    └── run_llm.py             # 実LLM抽出ハーネス(ANTHROPIC_API_KEYで実行)
 ```
 
 ## 使い方
@@ -105,7 +128,9 @@ uv venv --python 3.12 && uv pip install -e . pytest ruff
 uv run python -m attachment_pipeline.eval.run                 # 請求書 精度レポート
 uv run python -m attachment_pipeline.eval.run_financial       # 財務 精度レポート
 uv run python -m attachment_pipeline.eval.run_financial_long  # 長文(実物スケール)財務
-uv run pytest -q                                              # 回帰テスト(32件)
+ANTHROPIC_API_KEY=... uv run --extra llm \
+  python -m attachment_pipeline.eval.run_llm                  # 実LLM抽出(要APIキー)
+uv run pytest -q                                              # 回帰テスト(34件)
 ```
 
 ## v1 の対象外 (後続フェーズ)
