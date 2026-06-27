@@ -52,6 +52,13 @@ class Settings:
     # Cache settings
     price_cache_ttl_hours: int = int(os.getenv("PRICE_CACHE_TTL_HOURS", "24"))
 
+    # 価格予測 (モンテカルロ・ファンチャート)。統計シミュレーションであり投資助言ではない。
+    forecast_enabled: bool = os.getenv("FORECAST_ENABLED", "true").lower() == "true"
+    forecast_horizon_days: int = int(os.getenv("FORECAST_HORIZON_DAYS", "21"))
+    # Ceiling guards the (synchronous) simulation from blocking the event loop.
+    forecast_n_paths: int = min(int(os.getenv("FORECAST_N_PATHS", "2000")), 20000)
+    forecast_seed: int = int(os.getenv("FORECAST_SEED", "42"))
+
     # Finnhub（未設定の場合はJSONユニバースのみを使用）
     finnhub_api_key: str = os.getenv("FINNHUB_API_KEY", "")
 

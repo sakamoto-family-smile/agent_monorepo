@@ -157,7 +157,7 @@ async def test_run_analysis_emits_full_lifecycle(monkeypatch, sink, tmp_path: Pa
     async def _fake_save_report(*, ticker, company_name, report_data):
         return 42
 
-    def _fake_chart(ticker, ohlcv, charts_dir):
+    def _fake_chart(ticker, ohlcv, charts_dir, forecast=None):
         return None
 
     monkeypatch.setattr(orchestrator, "resolve_ticker", _fake_resolve)

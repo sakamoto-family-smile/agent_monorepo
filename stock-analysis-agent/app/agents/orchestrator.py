@@ -16,6 +16,7 @@ from agents.ticker_resolver import resolve_ticker
 from agents.data_collection import fetch_ohlcv, fetch_fundamentals
 from agents.technical_analysis import compute_indicators
 from agents.chart_generator import generate_chart
+from agents.forecast import MonteCarloForecaster, ForecastResult
 from agents.edinet_collector import EdinetFilingResult, collect_filings
 from instrumentation import get_analytics_logger, get_content_router, get_tracer
 from services.database import save_report
@@ -33,6 +34,33 @@ logger = logging.getLogger(__name__)
 _INTER_MESSAGE_TIMEOUT = int(os.getenv("AGENT_MESSAGE_TIMEOUT_SECONDS", "300"))
 
 
+_FORECAST_DISCLAIMER = (
+    "この予測は過去の値動きから推計したモンテカルロ・シミュレーション（統計的試算）であり、"
+    "将来の株価を保証するものでも投資助言でもありません。投資判断は自己責任で行ってください。"
+)
+
+
+def _format_forecast_summary(forecast: "ForecastResult | None") -> str:
+    """Render the simulated percentile bands as factual text for the LLM.
+
+    These numbers come from the simulation; the prompt instructs the model to use
+    them verbatim and never fabricate price targets.
+    """
+    if forecast is None or not forecast.bands:
+        return ""
+    bands = forecast.bands
+    end = forecast.dates[-1] if forecast.dates else ""
+    lines = [
+        f"予測期間: 翌営業日〜{forecast.horizon_days}営業日先（最終日: {end}）",
+        f"起点価格（現在値）: {forecast.last_price:.2f}",
+        f"{forecast.horizon_days}営業日先の予測レンジ:",
+    ]
+    for p in sorted(bands.keys()):
+        lines.append(f"  P{p}: {bands[p][-1]:.2f}")
+    lines.append(f"（注）{_FORECAST_DISCLAIMER}")
+    return "\n".join(lines)
+
+
 def _build_analysis_prompt(
     ticker: str,
     company_name: Optional[str],
@@ -40,8 +68,24 @@ def _build_analysis_prompt(
     technical_summary: str,
     fundamental_summary: str,
     edinet_section: str = "",
+    forecast_summary: str = "",
 ) -> str:
     name = company_name or ticker
+    forecast_block = (
+        f"\n\n## 価格予測（モンテカルロ統計シミュレーション）\n{forecast_summary}"
+        if forecast_summary
+        else ""
+    )
+    # Number this instruction after the (optional) EDINET item: 6 normally, 7 if EDINET present.
+    forecast_item_no = 7 if edinet_section else 6
+    forecast_instr = (
+        f"\n{forecast_item_no}. **価格予測の解説**: 上記「価格予測」のパーセンタイル値（P10〜P90）を"
+        "**この prompt に記載された数値のみ**を用いて解説してください。"
+        "新たな価格目標を自分で計算・創作してはいけません。"
+        f"解説の最後に必ず次の免責文を含めてください: 「{_FORECAST_DISCLAIMER}」"
+        if forecast_summary
+        else ""
+    )
     edinet_block = f"\n\n## EDINET 法定開示\n{edinet_section}" if edinet_section else ""
     edinet_instr = (
         "\n6. **EDINET 法定開示の活用**: 上記の有価証券報告書 / 四半期報告書を活用してください。 "
@@ -60,14 +104,14 @@ def _build_analysis_prompt(
 {technical_summary}
 
 ## ファンダメンタルズ
-{fundamental_summary}{edinet_block}
+{fundamental_summary}{edinet_block}{forecast_block}
 
 ## 分析指示
 1. **テクニカル分析**: トレンド、サポート/レジスタンス、オシレーター（RSI, MACD）、ボリンジャーバンドの状態を分析してください
 2. **ファンダメンタル分析**: バリュエーション（PER, PBR）、収益性、財務健全性を評価してください
 3. **センチメント分析**: Brave Searchを使って最新ニュースを検索し、市場センチメントを分析してください（キーワード: "{name} 株価 ニュース"）
 4. **総合評価**: 強気/中立/弱気の判断と、その根拠を明確に示してください
-5. **リスク要因**: 主要なダウンサイドリスクを列挙してください{edinet_instr}
+5. **リスク要因**: 主要なダウンサイドリスクを列挙してください{edinet_instr}{forecast_instr}
 
 レポートは投資家が意思決定に使えるよう、具体的かつ客観的に記述してください。"""
 
@@ -365,6 +409,23 @@ async def run_analysis(request: AnalysisRequest) -> AsyncIterator[dict]:
                 logger.exception("analytics flush failed (non-fatal)")
 
 
+def _build_forecast(ticker: str, ohlcv) -> ForecastResult | None:
+    """Best-effort Monte Carlo forecast. Returns None on any failure (skip overlay).
+
+    Kept behind the swappable Forecaster abstraction so the model can be replaced
+    without touching the chart or delivery layers.
+    """
+    try:
+        forecaster = MonteCarloForecaster(
+            n_paths=settings.forecast_n_paths,
+            seed=settings.forecast_seed,
+        )
+        return forecaster.forecast(ohlcv, horizon_days=settings.forecast_horizon_days)
+    except Exception:  # noqa: BLE001 — 予測失敗で分析全体を落とさない
+        logger.exception("Forecast generation failed for %s (continuing without it)", ticker)
+        return None
+
+
 async def _run_analysis_inner(
     request: AnalysisRequest,
     *,
@@ -416,8 +477,10 @@ async def _run_analysis_inner(
     if "technical" in request.analysis_types:
         technical = compute_indicators(ohlcv)
 
-    # Step 4: Generate chart
-    chart_path = generate_chart(ticker, ohlcv, settings.charts_dir)
+    # Step 4: Generate chart (optionally with a Monte Carlo forecast fan overlay).
+    # 予測は統計シミュレーションであり投資助言ではない。失敗しても分析全体は止めない。
+    forecast = _build_forecast(ticker, ohlcv) if settings.forecast_enabled else None
+    chart_path = generate_chart(ticker, ohlcv, settings.charts_dir, forecast=forecast)
 
     # Step 5: Build report data
     report = AnalysisReport(
@@ -453,6 +516,7 @@ async def _run_analysis_inner(
         technical_summary=_format_technical_summary(technical),
         fundamental_summary=_format_fundamental_summary(fundamentals),
         edinet_section=edinet_section,
+        forecast_summary=_format_forecast_summary(forecast),
     )
 
     options = ClaudeAgentOptions(
