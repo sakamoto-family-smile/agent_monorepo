@@ -5,6 +5,8 @@
 設計ガイド `high_precision_extraction.md`(「絶対に誤った値を入れない」要件)の **精度検証フェーズ** を、
 LLM クレデンシャル無しで決定的に回せる形に落とした実装。スコープ確定の根拠は [docs/DESIGN.md](docs/DESIGN.md)。
 
+関連ドキュメント: [docs/DESIGN.md](docs/DESIGN.md)(スコープ) / [docs/citation-audit.md](docs/citation-audit.md)(引用監査) / [docs/check-loop-design.md](docs/check-loop-design.md)(チェック処理のループ設計)
+
 ## 何を検証するか
 
 請求書ドメイン(数値中心)で、**合成-but-grounded** データ(既知レコード→原文を生成し正解spanを記録)に対し、
