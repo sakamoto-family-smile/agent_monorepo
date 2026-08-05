@@ -134,12 +134,14 @@ class AnalyzeResult:
 
     report_text は Claude が生成した全文 (Markdown)、chart_path は mplfinance が
     出力したローソク足 PNG のローカルパス (無い場合は None)。
+    recommendation は `BuyRecommendation.model_dump()` (パース不能時は None)。
     """
 
     ticker: str
     company_name: str | None
     report_text: str
     chart_path: str | None = None
+    recommendation: dict | None = None
 
 
 # AnalyzeRunner: テストで差し替えやすいよう、orchestrator の呼び出しを
@@ -797,6 +799,7 @@ async def _deliver_analysis(
         body_text=result.report_text,
         report_url=html_url,
         md_url=md_url,
+        recommendation=result.recommendation,
     )
     fallback = f"{label} ({result.ticker}) 分析結果\n\n{result.report_text[:1500]}"
     if html_url:
@@ -832,6 +835,7 @@ async def _default_analyze_runner(req: AnalysisRequest) -> AnalyzeResult:
     ticker = req.query
     company_name: str | None = None
     chart_path: str | None = None
+    recommendation: dict | None = None
     async for event in run_analysis(req):
         et = event.get("type") if isinstance(event, dict) else None
         if et == "report_complete":
@@ -839,6 +843,7 @@ async def _default_analyze_runner(req: AnalysisRequest) -> AnalyzeResult:
             company_name = event.get("company_name") or company_name
             report = event.get("report") or {}
             chart_path = report.get("chart_path") or chart_path
+            recommendation = report.get("recommendation") or recommendation
             text = report.get("report_text") or ""
             if text:
                 parts.append(text)
@@ -851,6 +856,7 @@ async def _default_analyze_runner(req: AnalysisRequest) -> AnalyzeResult:
         company_name=company_name,
         report_text=body,
         chart_path=chart_path,
+        recommendation=recommendation,
     )
 
 

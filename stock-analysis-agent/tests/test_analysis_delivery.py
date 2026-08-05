@@ -139,6 +139,27 @@ async def test_deliver_without_base_url_sends_only_flex(monkeypatch, tmp_path):
     assert "footer" not in client.pushes[0]["contents"]
 
 
+async def test_deliver_includes_recommendation_badge(monkeypatch):
+    """投資判断つきの結果は要約 Flex にバッジ (例: 🟢 買い検討) が入る。"""
+    monkeypatch.setattr(config.settings, "public_base_url", "")
+    client = _StubClient()
+    result = line_handler.AnalyzeResult(
+        ticker="7203.T",
+        company_name="トヨタ",
+        report_text="# 分析\n## 投資判断\n判定: 買い検討",
+        chart_path=None,
+        recommendation={
+            "rating": "buy_candidate",
+            "label": "買い検討",
+            "reasons": ["割安"],
+            "disclaimer": "※ 投資判断は自己責任で。",
+        },
+    )
+    await line_handler._deliver_analysis(_deps(client), to="U_a", result=result)
+    flex_text = str(client.pushes[0]["contents"])
+    assert "🟢" in flex_text and "買い検討" in flex_text
+
+
 async def test_deliver_missing_chart_skips_image(monkeypatch):
     monkeypatch.setattr(config.settings, "public_base_url", "https://x.example")
     client = _StubClient()
