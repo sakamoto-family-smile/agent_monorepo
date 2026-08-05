@@ -59,6 +59,27 @@ class AnalysisRequest(BaseModel):
     period: str = "3mo"  # yfinance period
 
 
+# 購入推奨は投資助言と誤認されやすいため、投信ランキング (FundRecommendResult) や
+# モンテカルロ予測と同じく免責文をモデル自体に持たせて配信経路で必ず表示する。
+BUY_RECOMMENDATION_DISCLAIMER = (
+    "本判定は情報提供のみを目的としており、投資勧誘や個別の投資助言ではありません。"
+    "投資判断はご自身の責任で行ってください。"
+)
+
+
+class BuyRecommendation(BaseModel):
+    """レポート末尾の「## 投資判断」セクションを構造化したもの。
+
+    rating はレポート本文の判定ラベルから orchestrator がパースする。
+    断定的な「買え/売れ」ではなく 3 段階の検討度合いにとどめる。
+    """
+
+    rating: str  # "buy_candidate" | "hold" | "avoid"
+    label: str   # 表示用: "買い検討" | "様子見" | "見送り"
+    reasons: List[str] = []
+    disclaimer: str = BUY_RECOMMENDATION_DISCLAIMER
+
+
 class AnalysisReport(BaseModel):
     ticker: str
     company_name: Optional[str] = None
@@ -70,6 +91,7 @@ class AnalysisReport(BaseModel):
     chart_path: Optional[str] = None
     report_text: str = ""
     summary: str = ""
+    recommendation: Optional[BuyRecommendation] = None
 
 
 # --- Screener models ---

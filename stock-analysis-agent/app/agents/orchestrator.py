@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from datetime import datetime
@@ -11,7 +12,13 @@ from typing import AsyncIterator, Optional
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 from analytics_platform.observability.hashing import sha256_prefixed
-from models.stock import AnalysisRequest, AnalysisReport, SentimentData
+from models.stock import (
+    BUY_RECOMMENDATION_DISCLAIMER,
+    AnalysisRequest,
+    AnalysisReport,
+    BuyRecommendation,
+    SentimentData,
+)
 from agents.ticker_resolver import resolve_ticker
 from agents.data_collection import fetch_ohlcv, fetch_fundamentals
 from agents.technical_analysis import compute_indicators
@@ -86,6 +93,19 @@ def _build_analysis_prompt(
         if forecast_summary
         else ""
     )
+    # 投資判断 (購入推奨) は常に最後の指示項目。EDINET / 予測の有無で項番がずれる。
+    reco_item_no = 6 + (1 if edinet_section else 0) + (1 if forecast_summary else 0)
+    reco_instr = f"""
+{reco_item_no}. **投資判断**: 上記の分析を総合し、現時点で購入を検討できる状況かを判定してください。レポートの末尾に必ず次の書式のセクションを出力してください（見出しと「判定:」の書式を変えないこと）:
+
+## 投資判断
+判定: 「買い検討」「様子見」「見送り」のいずれか 1 つ
+根拠:
+- （箇条書き 2〜4 点。テクニカル / ファンダメンタル / センチメントそれぞれの寄与を明示）
+反対シナリオ:
+- （判定が外れるとしたらどのような場合か 1〜2 点）
+
+「必ず買うべき」等の断定的な表現は避け、セクション末尾に必ず次の免責文をそのまま含めてください: 「{BUY_RECOMMENDATION_DISCLAIMER}」"""
     edinet_block = f"\n\n## EDINET 法定開示\n{edinet_section}" if edinet_section else ""
     edinet_instr = (
         "\n6. **EDINET 法定開示の活用**: 上記の有価証券報告書 / 四半期報告書を活用してください。 "
@@ -111,9 +131,71 @@ def _build_analysis_prompt(
 2. **ファンダメンタル分析**: バリュエーション（PER, PBR）、収益性、財務健全性を評価してください
 3. **センチメント分析**: Brave Searchを使って最新ニュースを検索し、市場センチメントを分析してください（キーワード: "{name} 株価 ニュース"）
 4. **総合評価**: 強気/中立/弱気の判断と、その根拠を明確に示してください
-5. **リスク要因**: 主要なダウンサイドリスクを列挙してください{edinet_instr}{forecast_instr}
+5. **リスク要因**: 主要なダウンサイドリスクを列挙してください{edinet_instr}{forecast_instr}{reco_instr}
 
 レポートは投資家が意思決定に使えるよう、具体的かつ客観的に記述してください。"""
+
+
+# ---------------------------------------------------------------------------
+# 投資判断セクションのパース (report_text → BuyRecommendation)
+# ---------------------------------------------------------------------------
+
+_RATING_BY_LABEL = {
+    "買い検討": "buy_candidate",
+    "様子見": "hold",
+    "見送り": "avoid",
+}
+
+_RECO_SECTION_RE = re.compile(
+    r"^##\s*投資判断\s*$(?P<body>.*?)(?=^##\s|\Z)", re.MULTILINE | re.DOTALL
+)
+_VERDICT_RE = re.compile(r"^判定[:：]\s*(?P<verdict>.+)$", re.MULTILINE)
+_BULLET_RE = re.compile(r"^[\-\*・•]\s*(?P<item>.+)$")
+
+
+def _parse_buy_recommendation(report_text: str) -> BuyRecommendation | None:
+    """レポート末尾の「## 投資判断」セクションを構造化する。
+
+    LLM 出力が指示書式から外れていた場合は None を返し、自由テキストのみの
+    従来動作にフォールバックする (分析全体は落とさない)。
+
+    判定ラベルは **完全一致** のみ受理する (括弧書きの注釈は除去)。
+    「見送りに近い様子見」のようなヘッジ表現を部分一致で拾うと本文と逆の
+    バッジを自信ありげに表示してしまうため、曖昧なら fail-closed で None。
+    """
+    if not isinstance(report_text, str) or not report_text:
+        return None
+    section_match = _RECO_SECTION_RE.search(report_text)
+    if not section_match:
+        return None
+    section = section_match.group("body")
+
+    verdict_match = _VERDICT_RE.search(section)
+    if not verdict_match:
+        return None
+    verdict = verdict_match.group("verdict").strip().strip("「」*")
+    # 「様子見（買い材料不足）」のような括弧注釈のみ許容し、残りは完全一致を要求
+    label = re.split(r"[（(]", verdict, maxsplit=1)[0].strip().strip("「」*")
+    if label not in _RATING_BY_LABEL:
+        return None
+
+    reasons: list[str] = []
+    in_reasons = False
+    for line in section.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("根拠"):
+            in_reasons = True
+            continue
+        if stripped.startswith("反対シナリオ"):
+            break
+        if in_reasons:
+            bullet = _BULLET_RE.match(stripped)
+            if bullet:
+                reasons.append(bullet.group("item").strip())
+
+    return BuyRecommendation(
+        rating=_RATING_BY_LABEL[label], label=label, reasons=reasons
+    )
 
 
 def _format_ohlcv_summary(ohlcv) -> str:
@@ -618,6 +700,7 @@ async def _run_analysis_inner(
 
     # Save report
     report.report_text = "\n".join(report_text_parts)
+    report.recommendation = _parse_buy_recommendation(report.report_text)
     report_id = await save_report(
         ticker=ticker,
         company_name=company_name,
@@ -637,6 +720,9 @@ async def _run_analysis_inner(
                 "ticker": ticker,
                 "company_name": company_name,
                 "report_text_chars": len(report.report_text or ""),
+                "recommendation_rating": (
+                    report.recommendation.rating if report.recommendation else None
+                ),
             },
         },
         session_id=session_id,
