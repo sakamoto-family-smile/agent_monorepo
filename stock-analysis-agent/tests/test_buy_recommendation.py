@@ -150,6 +150,25 @@ def test_parse_verdict_with_trailing_note():
     assert reco.rating == "hold"
 
 
+def test_parse_hedged_verdict_fails_closed():
+    """ラベルの部分一致で逆判定を拾わない。曖昧な判定行は None (自由テキストへ
+    フォールバック) とし、誤ったバッジを自信ありげに表示しない。"""
+    from agents.orchestrator import _parse_buy_recommendation
+
+    assert _parse_buy_recommendation("## 投資判断\n判定: 見送りに近い様子見\n") is None
+    assert (
+        _parse_buy_recommendation("## 投資判断\n判定: 見送りではなく様子見と考えた\n")
+        is None
+    )
+
+
+def test_parse_non_string_input_returns_none():
+    from agents.orchestrator import _parse_buy_recommendation
+
+    assert _parse_buy_recommendation(None) is None  # type: ignore[arg-type]
+    assert _parse_buy_recommendation(12345) is None  # type: ignore[arg-type]
+
+
 # ---------------------------------------------------------------------------
 # モデル: AnalysisReport への組み込み
 # ---------------------------------------------------------------------------

@@ -158,8 +158,12 @@ def _parse_buy_recommendation(report_text: str) -> BuyRecommendation | None:
 
     LLM 出力が指示書式から外れていた場合は None を返し、自由テキストのみの
     従来動作にフォールバックする (分析全体は落とさない)。
+
+    判定ラベルは **完全一致** のみ受理する (括弧書きの注釈は除去)。
+    「見送りに近い様子見」のようなヘッジ表現を部分一致で拾うと本文と逆の
+    バッジを自信ありげに表示してしまうため、曖昧なら fail-closed で None。
     """
-    if not report_text:
+    if not isinstance(report_text, str) or not report_text:
         return None
     section_match = _RECO_SECTION_RE.search(report_text)
     if not section_match:
@@ -170,11 +174,9 @@ def _parse_buy_recommendation(report_text: str) -> BuyRecommendation | None:
     if not verdict_match:
         return None
     verdict = verdict_match.group("verdict").strip().strip("「」*")
-    # 「様子見（買い材料不足）」のような注釈付きに備え、まず先頭一致で判定する
-    label = next((lb for lb in _RATING_BY_LABEL if verdict.startswith(lb)), None)
-    if label is None:
-        label = next((lb for lb in _RATING_BY_LABEL if lb in verdict), None)
-    if label is None:
+    # 「様子見（買い材料不足）」のような括弧注釈のみ許容し、残りは完全一致を要求
+    label = re.split(r"[（(]", verdict, maxsplit=1)[0].strip().strip("「」*")
+    if label not in _RATING_BY_LABEL:
         return None
 
     reasons: list[str] = []
