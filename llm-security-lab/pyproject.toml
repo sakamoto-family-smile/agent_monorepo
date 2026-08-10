@@ -1,0 +1,52 @@
+[project]
+name = "llm-security-lab"
+version = "0.1.0"
+description = "OWASP LLM Top 10 (2025) 体験学習ラボ (proposal 0008)"
+requires-python = ">=3.12"
+# Phase 0a (本 PR) は scaffold のみ。 主要依存は Phase 0b/0c で追加:
+#   - llm-client (path dep): Phase 0b で `shared/llm_runtime/` から利用
+#   - deepteam: Phase 0c で `shared/attacks/deepteam_runner.py` から利用
+#   - pyrit: Phase 0c で `shared/attacks/pyrit_runner.py` から利用
+#   - fastapi: 各章 (Phase 1+) の vulnerable_app/ から利用
+#   - jupyter: docker image 側にバンドル (Dockerfile.jupyter)
+dependencies = []
+
+[project.optional-dependencies]
+# Phase 0b で `shared/llm_runtime/vertex_client.py` を入れる際に活性化予定
+vertex = []
+# Phase 0c で DeepTeam / PyRIT を入れる際に活性化予定
+redteam = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["shared"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+ignore = ["E501"]
+
+[tool.uv]
+# Phase 0b 以降の path dep / 開発依存を追加していく。
+# 本 Phase 0a では scaffold が import エラーなくロードできることだけを保証する。
+dev-dependencies = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.6.0",
+]
+
+# 本 monorepo の規約に従い、 他パッケージへの path dep は `tool.uv.sources` で記述。
+# Phase 0b で llm-client、 Phase 0c 以降で analytics-platform 等を追加予定。
+[tool.uv.sources]
+# (Phase 0b で activate)
+# llm-client = { path = "../llm-client" }

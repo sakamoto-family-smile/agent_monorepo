@@ -1,0 +1,63 @@
+# OWASP LLM Top 10 体験学習ラボ docker-compose (proposal 0008 §4.4)
+#
+# Phase 0a (本 PR) は Ollama + JupyterLab の最低限。 各章の vulnerable app
+# (`vulnerable-app-NN`) は Phase 1+ で profile ベースで追加される。
+#
+# セキュリティ前提 (proposal 0008 §3.9 Risks):
+#   - ports は host 側 `127.0.0.1` のみにバインドし外部 expose しない
+#   - JupyterLab token は .env で 32 文字ランダム値を指定する (`.env.example` 参照)、
+#     `JUPYTER_TOKEN=localdev` のまま起動した場合は jupyter 側起動 log で警告予定
+#     (Phase 0b で Dockerfile.jupyter に entrypoint 実装)
+#
+# 起動方法:
+#   make setup-base   # Ollama + Jupyter のみ起動
+#   make jupyter      # 同上 (alias)
+#
+# (Phase 1 以降):
+#   docker compose --profile chapter-01 up   # 01 章 vulnerable app も起動
+#   docker compose --profile all up           # 全章一括
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: llm-security-lab-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    # ports: 内部ネットワーク (jupyter / vulnerable-app-*) からのみアクセス可能。
+    # host から CLI で叩きたい場合は明示的に下記コメント解除 (debug 用途のみ推奨)。
+    # ports:
+    #   - "127.0.0.1:11434:11434"
+    expose:
+      - "11434"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  jupyter:
+    build:
+      context: .
+      dockerfile: shared/Dockerfile.jupyter
+    container_name: llm-security-lab-jupyter
+    volumes:
+      - .:/workspace:rw
+    # 必ず 127.0.0.1 にバインド (外部 expose 防止、 proposal §3.9)。
+    # 0.0.0.0:8888 にしないこと。
+    ports:
+      - "127.0.0.1:8888:8888"
+    environment:
+      # .env でランダム値に上書きすること (`.env.example` を参照)
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:-localdev}
+      - OLLAMA_HOST=http://ollama:11434
+      - LLM_RUNTIME=${LLM_RUNTIME:-ollama}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+    name: llm-security-lab-ollama-data
