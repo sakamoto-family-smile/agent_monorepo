@@ -76,6 +76,7 @@ docs/PROPOSALS/NNNN-short-kebab-title.md
 | [0010](0010-analytics-platform-phase5-event-persistence.md) | analytics-platform Phase 5 完遂（Pub/Sub 入口 + 本番イベントの GCS 永続化） | cross-agent (analytics-platform + 稼働中エージェント) | Implementing |
 | [0011](0011-stock-analysis-agent-line-gcp.md) | stock-analysis-agent を LINE 経由で使えるよう GCP に配備 | stock-analysis-agent | Implemented |
 | [0012](0012-stock-watchlist.md) | stock-analysis-agent ユーザー別マイリスト (ウォッチリスト) | stock-analysis-agent | Implementing |
+| [0013](0013-stock-accuracy-monitoring.md) | stock-analysis-agent 予測精度モニタリングと改善ループ（市場データ蓄積基盤を含む） | stock-analysis-agent + analytics-platform | Draft |
 
 新しい提案を作るたびに上記表に 1 行追加する (forget-me-not)。
 
