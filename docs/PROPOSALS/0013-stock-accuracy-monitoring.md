@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | In Review |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-10-08 |
-| **Updated** | 2026-10-08 |
+| **Updated** | 2026-10-15 |
 | **Target** | stock-analysis-agent（+ analytics-platform の BigQuery / dbt） |
 | **Related PRs** | (none yet) |
 | **Supersedes** | — |
@@ -329,6 +329,7 @@ stock-analysis-agent の出力（価格予測バンド、LLM の強気／中立�
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-10-08 | Draft | 初稿 |
+| 2026-10-15 | In Review | 設計レビュー PR 作成 |
 
 ### 実装フェーズ案
 
