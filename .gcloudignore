@@ -47,7 +47,7 @@ agent-system-2/
 hotcook-agent/
 kanie-lab-agent/
 lifeplanner-agent/
-llm-client/
+# llm-client/  ← driving-license-bot が path dep として参照するため除外しない。
 # piyolog-analytics/  ← piyolog の Cloud Build が同 .gcloudignore を参照するため除外しない。
 #                        他 agent (driving-license-bot 等) の image には Dockerfile.dockerignore 側で弾かれる。
 security-platform/
