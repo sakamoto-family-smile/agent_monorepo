@@ -44,10 +44,14 @@ async def lifespan(app: FastAPI):
         await dispose_engine()
 
 
+_docs_enabled = settings.enable_api_docs
 app = FastAPI(
     title="株価分析エージェント API",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
 )
 
 app.add_middleware(
@@ -66,10 +70,12 @@ from routes.reports import router as reports_router
 from routes.screener import router as screener_router
 from routes.tasks import router as tasks_router
 
-app.include_router(analysis_router, prefix="/api")
-app.include_router(reports_router, prefix="/api")
-app.include_router(screener_router, prefix="/api")
-app.include_router(funds_router, prefix="/api")
+# 旧 Web フロントエンド向け API は認証がないため、本番 (LINE 専用運用) ではマウントしない。
+if settings.enable_web_api:
+    app.include_router(analysis_router, prefix="/api")
+    app.include_router(reports_router, prefix="/api")
+    app.include_router(screener_router, prefix="/api")
+    app.include_router(funds_router, prefix="/api")
 app.include_router(line_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
 app.include_router(tasks_router, prefix="/api")

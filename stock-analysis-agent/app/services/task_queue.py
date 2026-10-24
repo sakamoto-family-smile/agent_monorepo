@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+from urllib.parse import urlsplit
 
 import config
 
@@ -45,7 +46,7 @@ def enqueue_analysis(user_id: str, target: str) -> None:
     if s.tasks_invoker_sa:
         http_request["oidc_token"] = {
             "service_account_email": s.tasks_invoker_sa,
-            "audience": s.tasks_worker_url,
+            "audience": worker_audience(s.tasks_worker_url),
         }
 
     task: dict = {"http_request": http_request}
@@ -53,4 +54,14 @@ def enqueue_analysis(user_id: str, target: str) -> None:
     logger.info("enqueued analysis task for target=%s", target)
 
 
-__all__ = ["enqueue_analysis"]
+def worker_audience(worker_url: str) -> str:
+    """OIDC token の audience = worker サービスの URL (scheme://host)。
+
+    Cloud Run の IAM 認証は audience にサービス URL を要求するため、
+    エンドポイントのパスは含めない。
+    """
+    parts = urlsplit(worker_url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+__all__ = ["enqueue_analysis", "worker_audience"]
