@@ -5,8 +5,9 @@
 #
 # - min=0 / max>1: タスク到着時にスケール、アイドルで 0。並列度は queue の
 #   max_concurrent_dispatches が制御。
-# - public (allUsers): media (/api/line/image|report) を LINE が取得するため。
-#   /api/tasks/analyze は app 内で OIDC token を検証して保護する。
+# - 非公開: invoker は Cloud Tasks の invoker SA のみ。Cloud Run が OIDC token
+#   (audience = worker のサービス URL) を検証し、app でも email を再確認する。
+#   media は GCS の署名付き URL で配信するため worker を公開する必要はない。
 # - request timeout を長め (EDINET 有効化で 1〜5 分。P3-B) に取る。
 # - media は GCS backend (複数 instance でも 404 にならない)。
 # - スキーマ migration は webhook 側が担当 (RUN_MIGRATIONS=false)。
@@ -106,7 +107,7 @@ resource "google_cloud_run_v2_service" "worker" {
         name  = "LOG_LEVEL"
         value = var.log_level
       }
-      # worker は OIDC 検証のため invoker SA を知る (audience は email 検証で代替)。
+      # worker は OIDC 検証のため invoker SA を知る (audience は Cloud Run の IAM が検証)。
       env {
         name  = "TASKS_INVOKER_SA"
         value = google_service_account.tasks_invoker.email
@@ -242,13 +243,13 @@ resource "google_cloud_run_v2_service" "worker" {
   ]
 }
 
-# media を LINE が取得するため public。/api/tasks/analyze は app 内 OIDC 検証で保護。
-resource "google_cloud_run_v2_service_iam_member" "worker_public_invoker" {
+# Cloud Tasks (invoker SA の OIDC token) からのみ呼び出せる。
+resource "google_cloud_run_v2_service_iam_member" "worker_tasks_invoker" {
   count = local.deploy_worker ? 1 : 0
 
   project  = var.project_id
   location = google_cloud_run_v2_service.worker[0].location
   name     = google_cloud_run_v2_service.worker[0].name
   role     = "roles/run.invoker"
-  member   = "allUsers"
+  member   = "serviceAccount:${google_service_account.tasks_invoker.email}"
 }

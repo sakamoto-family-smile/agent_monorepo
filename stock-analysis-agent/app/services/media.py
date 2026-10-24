@@ -3,8 +3,9 @@
 backend:
   - memory (既定): プロセス内 BlobStore + `public_base_url` でアプリ自身が配信
     (`/api/line/image/{id}.png` / `/api/line/report/{id}.md`)。単一 instance 用。
-  - gcs: GCS にアップロードして公開 URL を返す。worker が複数 instance に増えても
-    LINE が確実に取得できる (P3-A: Cloud Tasks worker は並列 = 複数 instance)。
+  - gcs: 非公開の GCS バケットにアップロードし、V4 署名付き URL を返す。worker が
+    複数 instance に増えても LINE が確実に取得できる (P3-A: Cloud Tasks worker は
+    並列 = 複数 instance)。URL は `MEDIA_SIGNED_URL_TTL_SECONDS` で失効する。
 
 返り値は LINE にそのまま渡せる **完全な HTTPS URL**。未設定/失敗時は None
 (呼び出し側は media なしで要約のみ配信)。
@@ -134,7 +135,7 @@ def _store_memory(data: bytes, *, content_type: str, kind: str, ext: str) -> str
 
 
 # ---------------------------------------------------------------------------
-# gcs backend (公開バケットにアップロード)
+# gcs backend (非公開バケット + 署名付き URL)
 # ---------------------------------------------------------------------------
 
 
@@ -161,8 +162,35 @@ def _store_gcs(data: bytes, *, content_type: str, kind: str, ext: str) -> str | 
     except Exception:
         logger.exception("GCS media upload failed (bucket=%s)", bucket_name)
         return None
-    base = config.settings.media_gcs_public_base
-    return f"{base}/{bucket_name}/{blob_name}"
+    try:
+        return _signed_url(blob)
+    except Exception:
+        logger.exception("GCS signed URL generation failed (bucket=%s)", bucket_name)
+        return None
+
+
+def _signed_url(blob) -> str:
+    """blob の V4 署名付き GET URL を返す。
+
+    Cloud Run の runtime SA は秘密鍵を持たないため、IAM signBlob で署名する
+    (runtime SA 自身に roles/iam.serviceAccountTokenCreator が必要)。
+    """
+    import datetime  # noqa: PLC0415
+
+    import google.auth  # noqa: PLC0415
+    from google.auth.transport import requests as grequests  # noqa: PLC0415
+
+    credentials, _ = google.auth.default()
+    if not credentials.valid:
+        credentials.refresh(grequests.Request())
+    return blob.generate_signed_url(
+        version="v4",
+        expiration=datetime.timedelta(seconds=config.settings.media_signed_url_ttl_seconds),
+        method="GET",
+        service_account_email=credentials.service_account_email,
+        access_token=credentials.token,
+        api_access_endpoint=config.settings.media_gcs_public_base,
+    )
 
 
 __all__ = ["store_chart_png", "store_report_md", "store_report_html"]

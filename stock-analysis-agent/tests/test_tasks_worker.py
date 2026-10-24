@@ -121,3 +121,45 @@ async def test_failure_at_limit_notifies(monkeypatch, _no_oidc):
     )
     assert resp["status"] == "failed_notified"
     assert any("失敗" in p["text"] for p in _no_oidc.pushes)
+
+
+# ---------------------------------------------------------------------------
+# OIDC 検証 (_verify_oidc)
+# 他テストが config を reload するため、route が参照する settings を直接 patch する。
+# ---------------------------------------------------------------------------
+
+
+async def test_missing_invoker_sa_rejected_outside_local(monkeypatch):
+    """本番等で TASKS_INVOKER_SA が未設定なら検証 skip せず 503 (fail-closed)。"""
+    monkeypatch.setattr(tasks_route.settings, "tasks_invoker_sa", "")
+    monkeypatch.setattr(tasks_route.settings, "app_env", "prod")
+    with pytest.raises(HTTPException) as ei:
+        tasks_route._verify_oidc("Bearer x")
+    assert ei.value.status_code == 503
+
+
+async def test_missing_bearer_401(monkeypatch):
+    monkeypatch.setattr(tasks_route.settings, "tasks_invoker_sa", "inv@p.iam.gserviceaccount.com")
+    with pytest.raises(HTTPException) as ei:
+        tasks_route._verify_oidc(None)
+    assert ei.value.status_code == 401
+
+
+async def test_oidc_audience_is_service_url_and_email_checked(monkeypatch):
+    from google.oauth2 import id_token
+
+    monkeypatch.setattr(tasks_route.settings, "tasks_invoker_sa", "inv@p.iam.gserviceaccount.com")
+    monkeypatch.setattr(
+        tasks_route.settings, "tasks_worker_url", "https://worker.example/api/tasks/analyze"
+    )
+    seen = {}
+
+    def _verify(token, request, audience=None):
+        seen["audience"] = audience
+        return {"email": "other@p.iam.gserviceaccount.com"}
+
+    monkeypatch.setattr(id_token, "verify_oauth2_token", _verify)
+    with pytest.raises(HTTPException) as ei:
+        tasks_route._verify_oidc("Bearer tok")
+    assert ei.value.status_code == 403
+    assert seen["audience"] == "https://worker.example"

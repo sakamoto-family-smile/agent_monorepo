@@ -133,6 +133,11 @@ class Settings:
     media_gcs_public_base: str = os.getenv(
         "MEDIA_GCS_PUBLIC_BASE", "https://storage.googleapis.com"
     ).rstrip("/")
+    # gcs backend の V4 署名付き URL の有効期限 (秒)。バケットは非公開で、LINE / 本人は
+    # この URL でのみ取得できる。バケットの lifecycle (1 日) に合わせて既定 24 時間。
+    media_signed_url_ttl_seconds: int = int(
+        os.getenv("MEDIA_SIGNED_URL_TTL_SECONDS", str(24 * 3600))
+    )
 
     # ── PROPOSAL-0011 P3-A: Cloud Tasks 分散非同期 ──
     # true のとき webhook は分析を Cloud Tasks に enqueue し、worker run が実行する。
@@ -197,11 +202,30 @@ class Settings:
     # 入れない場合は false にする (parse は警告ログだけ出して skip)。
     edinet_enable_xbrl: bool = os.getenv("EDINET_ENABLE_XBRL", "true").lower() == "true"
 
+    # 旧 Web フロントエンド向け API (/api/analyze, /api/reports, /api/screen,
+    # /api/funds, /api/resolve-ticker) は認証を持たないため、明示的に有効化したときだけ
+    # マウントする。既定はローカル開発 (APP_ENV=local) のみ有効。
+    @property
+    def enable_web_api(self) -> bool:
+        return _env_flag("ENABLE_WEB_API", default=self.app_env == "local")
+
+    # FastAPI の /docs・/redoc・/openapi.json。既定はローカル開発のみ公開。
+    @property
+    def enable_api_docs(self) -> bool:
+        return _env_flag("ENABLE_API_DOCS", default=self.app_env == "local")
+
     @property
     def cors_origins(self):
         if self.app_env == "local":
             return ["http://localhost:3000", "http://127.0.0.1:3000"]
         return [os.getenv("FRONTEND_URL", "")]
+
+
+def _env_flag(name: str, *, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() == "true"
 
 
 settings = Settings()

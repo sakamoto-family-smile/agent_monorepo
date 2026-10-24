@@ -4,9 +4,10 @@
 同期実行して LINE Push する。webhook (stock-analysis-line) は enqueue するだけ。
 
 認証:
-- worker は media 配信のため public Cloud Run だが、本エンドポイントは Cloud Tasks
-  が付与する OIDC token を app 内で検証する (audience=worker URL, email=invoker SA)。
-- `TASKS_INVOKER_SA` 未設定 (dev/local) のときは検証を skip。
+- worker は非公開 Cloud Run (invoker は Cloud Tasks の invoker SA のみ)。Cloud Run が
+  OIDC token の署名・audience を検証したうえで、app でも email=invoker SA を確認する。
+- `TASKS_INVOKER_SA` 未設定時に検証を skip するのはローカル開発 (APP_ENV=local) のみ。
+  それ以外の環境で未設定なら設定漏れとして 503 で拒否する (fail-closed)。
 
 リトライ:
 - 分析失敗時は Cloud Tasks の `X-CloudTasks-TaskRetryCount` を見て、上限未満なら
@@ -22,6 +23,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from analytics_platform.observability.context import set_current_user_id
 from config import settings
 from services.line_client import get_line_bot_client
+from services.task_queue import worker_audience
 from services.line_handler import (
     HandlerDeps,
     push_analysis_failure,
@@ -34,9 +36,14 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 def _verify_oidc(authorization: str | None) -> None:
-    """Cloud Tasks の OIDC token を検証する。invoker SA 未設定なら skip (dev)。"""
+    """Cloud Tasks の OIDC token を検証する。invoker SA 未設定ならローカルのみ skip。"""
     if not settings.tasks_invoker_sa:
-        return
+        if settings.app_env == "local":
+            return
+        logger.error("TASKS_INVOKER_SA 未設定のため worker タスクを拒否します")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="worker auth not configured"
+        )
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="missing bearer token")
     token = authorization.split(" ", 1)[1]
@@ -44,9 +51,8 @@ def _verify_oidc(authorization: str | None) -> None:
         from google.auth.transport import requests as grequests  # noqa: PLC0415
         from google.oauth2 import id_token  # noqa: PLC0415
 
-        claims = id_token.verify_oauth2_token(
-            token, grequests.Request(), audience=settings.tasks_worker_url or None
-        )
+        audience = worker_audience(settings.tasks_worker_url) if settings.tasks_worker_url else None
+        claims = id_token.verify_oauth2_token(token, grequests.Request(), audience=audience)
     except Exception as e:
         logger.warning("OIDC verify failed: %s", e)
         raise HTTPException(
