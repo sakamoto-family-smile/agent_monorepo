@@ -18,7 +18,7 @@ dependencies = [
     # 価格予測 (モンテカルロ GBM, agents/forecast.py) が直接 import する。
     "numpy>=1.26",
     "rapidfuzz>=3.0.0",
-    "claude-agent-sdk",
+    "claude-agent-sdk>=0.2.174",
     "mplfinance>=0.12.9b0",
     "matplotlib>=3.9.0",
     "line-bot-sdk>=3.13",
