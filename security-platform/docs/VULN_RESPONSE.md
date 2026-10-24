@@ -10,6 +10,113 @@ PR まで自動で進める (B) ためのフレームワーク。まずはロー
 | L1 | A1: OSV 全エコシステム (全量 + 差分)、CISA KEV、FIRST EPSS、名寄せ、変化検知、ブートストラップ。分析: 鮮度・リードタイム・エコシステム別・KEV カバレッジ | ✅ |
 | L2 | A2: lockfile からの SBOM、osv-scanner (オフライン) での照合、優先度、LINE / GitHub Issues 通知、取得停止のアラート | ⬜ |
 | L3 | B: git worktree での決定的更新、差分検査、PR 作成 | ⬜ |
+| L4 | A1 の非構造ソース: IPA・JPCERT 注意喚起、ベンダー告知、セキュリティニュース、VulnerableMCP。LLM で根拠付き抽出し、一次情報が見つからないものは `unconfirmed` として照合に使わない | ⬜ |
+
+## アーキテクチャ
+
+実線が実装済み (L0 / L1)、点線が今後の段階。
+
+```mermaid
+flowchart LR
+  subgraph EXT["外部情報源"]
+    OSV["OSV.dev<br/>GHSA・PYSEC・Debian ほか全エコシステム"]
+    KEV["CISA KEV"]
+    EPSS["FIRST EPSS"]
+    NEWS["注意喚起・ベンダー告知・ニュース<br/>(L4)"]
+  end
+
+  subgraph HOST["ローカル (docker compose)"]
+    subgraph INTEL["intel サービス — A1"]
+      COL["Collector<br/>osv / kev / epss"] --> NRM["正規化・CVE で名寄せ"]
+      NRM --> CHG["変化検知"]
+      LLM["LLM 抽出<br/>(L4)"]
+    end
+
+    RAW[("data/raw/<br/>生データ (不変)")]
+    IDB[("data/intel.db<br/>Advisory・KEV・EPSS<br/>履歴・events")]
+    OSVDB[("data/osv-db/<br/>osv-scanner 用")]
+
+    subgraph DET["detection サービス — A2 (L2)"]
+      SBOM["SBOM 生成<br/>lockfile → syft"] --> MAT["照合<br/>osv-scanner offline"]
+      MAT --> TRI["優先度・Triage"]
+    end
+    DDB[("data/detection.db<br/>Finding・events")]
+
+    subgraph REM["remediation サービス — B (L3)"]
+      WK["決定的更新<br/>git worktree"] --> GUARD["差分検査"]
+    end
+    RDB[("data/remediation.db")]
+
+    subgraph AN["analytics サービス"]
+      DBT["dbt-duckdb<br/>security_build.duckdb → 差し替え"]
+    end
+    DUCK[("data/security.duckdb<br/>staging / marts / history")]
+    EVJ[("data/events/*.jsonl<br/>イベントの保管")]
+  end
+
+  REPO["モノレポの lockfile<br/>config/services.yaml"]
+  NOTIFY["LINE / GitHub Issues"]
+  PR["GitHub PR<br/>(マージは人)"]
+  UI["DuckDB UI<br/>make duck-ui"]
+
+  OSV --> COL
+  KEV --> COL
+  EPSS --> COL
+  COL --> RAW
+  COL --> OSVDB
+  CHG --> IDB
+  IDB --> EVJ
+  NEWS -.-> LLM
+  LLM -.-> NRM
+
+  REPO -.-> SBOM
+  IDB -. "v_advisories (読み取り専用)" .-> MAT
+  IDB -. "advisory.changed" .-> MAT
+  OSVDB -.-> MAT
+  TRI -.-> DDB
+  TRI -.-> NOTIFY
+  DDB -. "finding.remediate" .-> WK
+  GUARD -.-> PR
+  WK -.-> RDB
+
+  IDB -- "ATTACH (読み取り専用)" --> DBT
+  DDB -.-> DBT
+  RDB -.-> DBT
+  DBT --> DUCK
+  DUCK --> UI
+
+  classDef planned stroke-dasharray: 5 5
+  class NEWS,LLM,SBOM,MAT,TRI,DDB,WK,GUARD,RDB,NOTIFY,PR planned
+  style DET stroke-dasharray: 5 5
+  style REM stroke-dasharray: 5 5
+```
+
+境界の決まりは 3 つ。
+
+- 運用 DB 1 ファイルにつき書き込むサービスは 1 つ。他のサービスの DB は `mode=ro` で開く
+- サービス間はイベントでつなぐ。発行側 DB の `events` を受信側がカーソル付きで読む (GCP では Pub/Sub に置き換える)
+- 分析は運用 DB を読み取り専用で ATTACH するだけで、運用側に書き戻さない
+
+### 毎時の差分取り込み (intel)
+
+途中で落ちても取りこぼさないよう、トランザクションの区切りを次のようにしている。
+
+```mermaid
+flowchart TD
+  A["modified_id.csv を新しい順に読む<br/>カーソルの 2 時間前まで"] --> B{"同じ modified で<br/>取り込み済み?"}
+  B -- yes --> SKIP["取得しない"]
+  B -- no --> C{"1 エコシステムで<br/>3,000 件超?"}
+  C -- yes --> Z["そのエコシステムの all.zip を取得"]
+  C -- no --> D["レコードを個別取得"]
+  Z --> RAW["data/raw/ に保存 (読み取り専用)"]
+  D --> RAW
+  RAW --> T1["トランザクション 1 (1,000 件ごと)<br/>osv_records 書き込み<br/>+ advisories_dirty に積む"]
+  T1 --> T2["トランザクション 2 (1,000 件ごと)<br/>dirty を再集計 → 変化検知<br/>→ advisory_history + events → dirty から消す"]
+  T2 --> J["commit 後に events を JSONL へ追記"]
+  J --> CUR["カーソルを進める"]
+  T1 -. "ここで落ちても" .-> NEXT["次の実行の最初に dirty を回収"]
+  NEXT -.-> T2
+```
 
 ## 使い方
 
