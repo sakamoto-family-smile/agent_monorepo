@@ -1,0 +1,25 @@
+# security-platform 分析 DB (DuckDB)。
+# 運用 DB (SQLite) は sqlite 拡張で読み取り専用に ATTACH する。
+# パスは src/analytics/build.py が環境変数で渡す (SEC_DUCKDB_PATH は差し替え前の一時ファイル security_build.duckdb)。
+security_platform:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      path: "{{ env_var('SEC_DUCKDB_PATH') }}"
+      extensions:
+        - sqlite
+      attach:
+        - path: "{{ env_var('SEC_DATA_DIR') }}/intel.db"
+          alias: intel
+          type: sqlite
+          read_only: true
+        - path: "{{ env_var('SEC_DATA_DIR') }}/detection.db"
+          alias: detection
+          type: sqlite
+          read_only: true
+        - path: "{{ env_var('SEC_DATA_DIR') }}/remediation.db"
+          alias: remediation
+          type: sqlite
+          read_only: true
+      threads: 4

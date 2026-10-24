@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+.coverage
 *.egg-info/
 
 # Sensitive config - copy from .env.example
@@ -13,9 +14,21 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 
+# 脆弱性対応: 生データ・イベントログ・分析 DB・osv-scanner DB (すべて再取得/再構築できる)
+data/raw/
+data/events/
+data/osv-db/
+data/.dbt/
+data/*.duckdb
+data/*.duckdb.wal
+data/.analytics_last_success
+
 # Logs (generated)
 logs/*.jsonl
 logs/*.log
 logs/*.json
 logs/*.html
 !logs/.gitkeep
+
+# dbt が自動生成する匿名 ID
+dbt/.user.yml

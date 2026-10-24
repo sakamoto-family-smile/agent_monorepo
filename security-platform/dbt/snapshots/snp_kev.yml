@@ -1,0 +1,9 @@
+snapshots:
+  - name: snp_kev
+    description: KEV 掲載状況の履歴 (掲載・削除の時刻を残す)
+    relation: source('intel', 'kev_entries')
+    config:
+      unique_key: cve
+      strategy: check
+      check_cols: [date_added, due_date, ransomware]
+      hard_deletes: invalidate

@@ -1,0 +1,131 @@
+# 脆弱性対応フレームワーク (ローカル優先)
+
+外部の脆弱性情報を取り込み (A1)、社内資産と照合し (A2)、依存ライブラリの改修を
+PR まで自動で進める (B) ためのフレームワーク。まずはローカルで常駐させ、
+情報を運用 DB (SQLite) に集約し、分析用に DuckDB へ蓄積する。
+
+| 段階 | 範囲 | 状態 |
+|---|---|---|
+| L0 | `data/` レイアウト、SQLite 3 ファイル + Alembic、イベント (outbox + JSONL)、dbt 雛形、`services.yaml`、docker compose | ✅ |
+| L1 | A1: OSV 全エコシステム (全量 + 差分)、CISA KEV、FIRST EPSS、名寄せ、変化検知、ブートストラップ。分析: 鮮度・リードタイム・エコシステム別・KEV カバレッジ | ✅ |
+| L2 | A2: lockfile からの SBOM、osv-scanner (オフライン) での照合、優先度、LINE / GitHub Issues 通知、取得停止のアラート | ⬜ |
+| L3 | B: git worktree での決定的更新、差分検査、PR 作成 | ⬜ |
+
+## 使い方
+
+Docker Compose v2.24 以降が必要。コンテナはホストの UID で動く (`make up` が `HOST_UID` / `HOST_GID` を渡す)。
+
+```bash
+cd security-platform
+make up                           # mkdir -p data && docker compose up -d --build。初回はブートストラップから
+docker compose logs -f intel      # = make logs-vuln
+make duck-ui                      # ホストで DuckDB UI を開く (http://localhost:4213)
+```
+
+コンテナを使わずに単発で動かす場合:
+
+```bash
+make vuln-migrate        # data/{intel,detection,remediation}.db を作成
+make intel-bootstrap     # 初回全量 (中断しても続きから再開)
+make intel-osv           # OSV 差分 / intel-osv-full / intel-kev / intel-epss
+make intel-health        # 情報源ごとの最終成功時刻 (古いものがあれば exit 1)
+make analytics           # dbt build → data/security.duckdb を差し替え
+```
+
+`OSV_ECOSYSTEMS=PyPI,npm` を `config/.env` に書くと対象エコシステムを絞れる (空なら全エコシステム)。
+
+## データの持ち方
+
+| 層 | 場所 | 書き込み元 | 役割 |
+|---|---|---|---|
+| 生データ | `data/raw/<source>/dt=YYYY-MM-DD/` | intel | 取得したものを改変せず保存 (書き込み後は読み取り専用)。OSV 全量は新しい 2 世代を保持 |
+| 運用 DB | `data/intel.db` | intel のみ | Advisory・KEV・EPSS・変化履歴・取得記録・イベント |
+| | `data/detection.db` / `data/remediation.db` | (L2 / L3) | スキーマのみ作成済み |
+| イベント | 各 DB の `events` + `data/events/type=*/dt=*/<producer>.jsonl` | 発行側 | 受信側は発行側 DB を読み取り専用で開き、自分の `event_cursors` で位置を持つ |
+| 分析 DB | `data/security.duckdb` | analytics | dbt で組み立てる。スキーマ `staging` / `marts` / `history` |
+| osv-scanner DB | `data/osv-db/osv-scanner/<ecosystem>/all.zip` | intel | A2 (L2) のオフライン照合用。OSV 全量取得のたびに更新 |
+
+DuckDB を運用 DB にしないのは、同時に書き込めるのが 1 プロセスだけで、書き込み中は他から
+開けないため。dbt は `security_build.duckdb` に作ってから `security.duckdb` に置き換えるので、
+UI で開いたままでも更新は止まらない (開き直すと新しい内容が見える)。
+
+## A1 の取り込み
+
+| 情報源 | ジョブ | 間隔 | 方法 |
+|---|---|---|---|
+| OSV (GHSA・PYSEC・各ディストリビューション等を含む) | `osv` | 1 時間 | ルートの `modified_id.csv` (新しい順) をカーソルまで読み、変更レコードを個別取得。1 エコシステムで 3,000 件を超えたらそのエコシステムは `all.zip` で取り直す |
+| | `osv_full` | 7 日 | 全エコシステムの `all.zip` を再取得 (取りこぼしの回収と osv-scanner DB の更新) |
+| CISA KEV | `kev` | 1 時間 | 全件 JSON |
+| FIRST EPSS | `epss` | 1 日 | 全件 CSV.gz |
+
+ブートストラップ (初回) はエコシステム単位で進捗を記録するので、中断しても続きから再開する。
+差分カーソルの起点は最初に開始した時点の値に固定するので、再開までの間の更新も取りこぼさない。
+差分取得はカーソルの 2 時間前から読み (エクスポートの遅れ対策)、同じ `modified` で取り込み済みのものは取得しない。
+レコードの書き込みと同じトランザクションで「再集計待ち (`advisories_dirty`)」を積むので、
+再集計の途中で落ちても次の実行で回収される。形式の壊れたレコードは飛ばして `source_runs.skipped` に数える。
+KEV のスナップショットが既存件数の半分未満なら壊れているとみなして反映しない。
+ブートストラップ中は `advisory.changed` も履歴も書かず、取り込み結果を変化検知の基準値にする。
+完了時に `advisory.bootstrap_completed` を 1 件だけ発行する。全エコシステムの全量は
+数 GB のダウンロードと、マシンによって数十分〜1 時間程度の処理になる見込み
+(PyPI 単体で約 2.7 万件 / 40 秒を確認)。
+
+### 名寄せ (Advisory)
+
+OSV レコードを CVE 番号で 1 件の Advisory にまとめる (`src/intel/grouping.py`)。
+
+- CVE がちょうど 1 つ → その CVE 番号が `advisory_id` (GHSA・PYSEC・DEBIAN-CVE などが合流)
+- CVE が 2 つ以上 (USN・DSA などのまとめ告知) → 連鎖的な合流を避けるため自分の ID で独立
+- CVE なし → エイリアス先の既存レコードに合流、無ければ自分の ID
+
+KEV・EPSS は Advisory 行に持たず、`v_advisories` ビューで含む CVE から都度引く。
+KEV にだけ載っている CVE (主に製品の脆弱性) は、パッケージ情報の無い Advisory として作る。
+
+### 変化の種類 (`advisory.changed` の `change_types`)
+
+`created` / `removed` (別 Advisory に合流) / `withdrawn` / `reinstated` /
+`fixed_version_published` / `affected_changed` / `severity_changed` / `aliases_changed` /
+`kev_added` / `kev_removed` / `epss_increased` (0.1 以上の上昇)。
+1 回の実行で同じ Advisory に複数の変化があっても 1 イベントにまとめる。
+
+## A2・B への読み取り契約
+
+`data/intel.db` を `mode=ro` で開き、次のビューだけを使う (テーブルを直接読まない)。
+
+| ビュー | 内容 |
+|---|---|
+| `v_advisories` | Advisory + `kev` / `kev_date_added` / `epss` / `epss_percentile` |
+| `v_advisory_affected` | 影響パッケージ (ecosystem / name / purl / ranges / fixed) |
+| `v_advisory_aliases` | 別名 (GHSA・PYSEC・DSA など) |
+
+## 分析 DB の中身
+
+| スキーマ.テーブル | 内容 |
+|---|---|
+| `marts.mart_source_freshness` | 情報源ごとの最終成功時刻、経過時間、24 時間の実行・失敗件数 |
+| `marts.mart_advisory_lead_time` | 同じ CVE が各情報源 (GHSA / PYSEC / KEV ...) に載った時刻と最初からの遅れ |
+| `marts.mart_advisories_by_ecosystem` | エコシステム別の件数と深刻度・KEV・修正版ありの内訳 |
+| `marts.mart_kev_coverage` | KEV 掲載 CVE のうちパッケージ単位で照合できるもの |
+| `marts.mart_daily_changes` | 日別・変化の種類別の件数 |
+| `history.snp_advisories` / `history.snp_kev` | dbt snapshot による変更履歴 (SCD2)。EPSS は毎日ほぼ全件動くので対象外 |
+| `staging.*` | 運用 DB を型付けしたもの |
+
+```sql
+-- 例: 情報源の鮮度
+SELECT source, hours_since_success, last_status, failures_24h FROM marts.mart_source_freshness;
+-- 例: どの情報源が一番早く載るか
+SELECT source_db, count(*) FILTER (WHERE is_first) AS firsts, median(lag_hours) AS median_lag_h
+FROM marts.mart_advisory_lead_time GROUP BY 1 ORDER BY firsts DESC;
+```
+
+DuckDB の `sqlite` 拡張を使う。初回に extensions.duckdb.org から自動で入る
+(Docker イメージにはビルド時に同梱)。
+
+## 既知の制約
+
+- 取得停止のアラート (FR-I07) は `make intel-health` と `mart_source_freshness` で確認できるが、通知は L2 で LINE 通知と一緒に入れる
+- osv-scanner DB は全量取得 (7 日ごと) のタイミングでしか更新されない。L2 で差分の反映方法を決める
+- NVD・JVN・ランタイムのリリース情報・OneCRL・非構造ソース (注意喚起・ニュース) は未対応
+- 既存の `src/collector/` / `src/analyzer/` (data/security.db) は当面そのまま残し、L2 で置き換える
+- CVE の無いレコード同士の合流は取り込み順に依存し、別名の連鎖は 1 段までしか付け直さない (CVE のあるものは順序に依存しない)
+- dbt は運用 DB を ATTACH して読むため、取り込み中に build するとテーブルごとに読む時点が少しずれることがある
+- イベントの JSONL ミラーは commit 後に書くので、その間に落ちると JSONL だけ欠ける (正本は各 DB の `events`)

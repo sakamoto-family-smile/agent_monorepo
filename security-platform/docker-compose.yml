@@ -1,0 +1,49 @@
+# 脆弱性対応フレームワーク (ローカル常駐)。Docker Compose v2.24 以降が必要 (env_file の required)
+#
+#   make up                          # 起動 (= mkdir -p data && HOST_UID/HOST_GID を渡して docker compose up -d --build)
+#                                    # 初回は intel がブートストラップから始める
+#   docker compose logs -f intel
+#   make duck-ui                     # ホスト側で DuckDB UI を開く
+#
+# SQLite の書き込みプロセスは 1 ファイルにつき 1 つ (intel.db は intel サービスだけが書く)。
+# data/ はホストにバインドするので、DuckDB はホストから直接開ける。
+x-app: &app
+  build:
+    context: .
+    dockerfile: infra/Dockerfile
+  image: security-platform-vuln:local
+  # ./data の所有者と揃える (make up が HOST_UID/HOST_GID を渡す。未指定なら 1000)
+  user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+  volumes:
+    - ./data:/app/data
+  env_file:
+    - path: config/.env
+      required: false
+  environment:
+    DATA_DIR: /app/data
+
+services:
+  migrate:
+    <<: *app
+    command: ["python", "-m", "src.common.migrate"]
+    restart: "no"
+
+  intel:
+    <<: *app
+    command: ["python", "-m", "src.intel", "serve"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  analytics:
+    <<: *app
+    command: ["python", "-m", "src.analytics", "serve"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # L2 / L3 で追加:
+  # detection:   python -m src.detection serve    (detection.db の唯一の書き込み元)
+  # remediation: python -m src.remediation serve  (remediation.db の唯一の書き込み元)

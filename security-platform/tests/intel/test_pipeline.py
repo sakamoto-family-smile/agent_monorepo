@@ -1,0 +1,321 @@
+"""A1 パイプラインの結合テスト (ネットワークなし。OSV・KEV・EPSS は偽物を差し込む)。"""
+from __future__ import annotations
+
+import copy
+import gzip
+import io
+import json
+import zipfile
+from typing import Any
+
+import pytest
+from sqlalchemy import text
+
+from src.common.db import make_engine
+from src.common.migrate import upgrade_all
+from src.common.paths import DataPaths
+from src.common.raw_store import RawStore
+from src.intel import changes as changes_mod
+from src.intel.pipeline import IntelPipeline
+from src.intel.sources.osv import ModifiedEntry
+
+KEV_URL = "https://kev.test/kev.json"
+EPSS_URL = "https://epss.test/epss.csv.gz"
+
+
+def ghsa(fixed: str = "2.4.3", withdrawn: str | None = None) -> dict[str, Any]:
+    rec: dict[str, Any] = {
+        "id": "GHSA-aaaa-bbbb-cccc",
+        "modified": "2026-10-01T00:00:00Z",
+        "published": "2026-09-01T00:00:00Z",
+        "aliases": ["CVE-2026-1111"],
+        "summary": "RCE in examplelib",
+        "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+        "affected": [{
+            "package": {"ecosystem": "PyPI", "name": "examplelib", "purl": "pkg:pypi/examplelib"},
+            "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": fixed}]}],
+        }],
+    }
+    if withdrawn:
+        rec["withdrawn"] = withdrawn
+    return rec
+
+
+PYSEC = {
+    "id": "PYSEC-2026-1", "modified": "2026-08-01T00:00:00Z", "published": "2026-08-15T00:00:00Z",
+    "aliases": ["CVE-2026-1111", "GHSA-aaaa-bbbb-cccc"],
+    "affected": [{"package": {"ecosystem": "PyPI", "name": "examplelib"},
+                  "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.4.3"}]}]}],
+}
+NPM_NO_CVE = {
+    "id": "GHSA-nnnn-nnnn-nnnn", "modified": "2026-10-01T00:00:00Z",
+    "affected": [{"package": {"ecosystem": "npm", "name": "leftish"}, "ranges": []}],
+}
+DSA_BUNDLE = {
+    "id": "DSA-5999-1", "modified": "2026-10-01T00:00:00Z",
+    "upstream": ["CVE-2026-2001", "CVE-2026-2002"],
+    "affected": [{"package": {"ecosystem": "Debian:12", "name": "openssl"}, "ranges": []}],
+}
+
+
+class FakeOsv:
+    def __init__(self) -> None:
+        self.zips: dict[str, list[dict[str, Any]]] = {
+            "PyPI": [ghsa(), PYSEC], "npm": [NPM_NO_CVE], "Debian": [DSA_BUNDLE],
+        }
+        self.records: dict[str, dict[str, Any]] = {}
+        self.modified: list[ModifiedEntry] = []
+        self.head = "2026-10-20T00:00:00.000000001Z"
+        self.fail_on: str | None = None
+        self.downloaded: list[str] = []
+
+    def list_ecosystems(self) -> list[str]:
+        return list(self.zips)
+
+    def latest_modified(self) -> str:
+        return self.head
+
+    def modified_since(self, cursor: str) -> list[ModifiedEntry]:
+        return list(self.modified)
+
+    def fetch_record(self, ecosystem: str, record_id: str) -> dict[str, Any] | None:
+        return copy.deepcopy(self.records.get(record_id))
+
+    def download_all_zip(self, ecosystem: str, store: RawStore, name: str):
+        if ecosystem == self.fail_on:
+            raise RuntimeError(f"download failed: {ecosystem}")
+        self.downloaded.append(ecosystem)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for rec in self.zips[ecosystem]:
+                zf.writestr(f"{rec['id']}.json", json.dumps(rec))
+        with store.open_new("osv", name) as (f, path):
+            f.write(buf.getvalue())
+        return path
+
+
+def kev_body(*cves: str) -> bytes:
+    return json.dumps({"vulnerabilities": [
+        {"cveID": c, "vendorProject": "v", "product": "p", "vulnerabilityName": f"{c} vuln",
+         "dateAdded": "2026-10-10"} for c in cves
+    ]}).encode()
+
+
+def epss_body(rows: dict[str, float]) -> bytes:
+    lines = ["#model_version:v2025.03.14,score_date:2026-10-23T00:00:00Z", "cve,epss,percentile"]
+    lines += [f"{c},{s},0.9" for c, s in rows.items()]
+    return gzip.compress("\n".join(lines).encode())
+
+
+@pytest.fixture
+def env(tmp_path):
+    paths = DataPaths(tmp_path / "data")
+    upgrade_all(paths)
+    osv = FakeOsv()
+    remote = {KEV_URL: kev_body("CVE-2026-1111", "CVE-2026-9999"),
+              EPSS_URL: epss_body({"CVE-2026-1111": 0.2, "CVE-2026-2001": 0.05})}
+    pipeline = IntelPipeline(
+        make_engine(paths.sqlite_path("intel")), paths, osv, remote.__getitem__,
+        kev_url=KEV_URL, epss_url=EPSS_URL, epss_delta=0.1,
+        incremental_max_per_ecosystem=2, full_snapshots_kept=2,
+    )
+    return pipeline, osv, remote, paths
+
+
+def q(pipeline: IntelPipeline, sql: str, **params: Any) -> list[tuple]:
+    with pipeline.engine.connect() as conn:
+        return [tuple(r) for r in conn.execute(text(sql), params).all()]
+
+
+def events(pipeline: IntelPipeline, type_: str = "advisory.changed") -> list[dict[str, Any]]:
+    rows = q(pipeline, "SELECT payload FROM events WHERE type = :t ORDER BY seq", t=type_)
+    return [json.loads(r[0]) for r in rows]
+
+
+def test_bootstrap_builds_advisories_without_change_events(env):
+    pipeline, osv, _, paths = env
+    assert pipeline.bootstrap() is True
+    advisories = dict(q(pipeline, "SELECT advisory_id, record_count FROM advisories"))
+    assert advisories == {
+        "CVE-2026-1111": 2,           # GHSA と PYSEC が CVE で合流
+        "GHSA-nnnn-nnnn-nnnn": 1,     # CVE なし
+        "DSA-5999-1": 1,              # まとめ告知は独立
+        "CVE-2026-9999": 0,           # KEV だけに載っている
+    }
+    view = {r[0]: r[1:] for r in q(pipeline, "SELECT advisory_id, kev, epss, severity FROM v_advisories")}
+    assert view["CVE-2026-1111"] == (1, 0.2, "CRITICAL")
+    assert view["DSA-5999-1"] == (0, 0.05, None)  # 含む CVE の EPSS を引く
+    assert events(pipeline) == []
+    assert len(events(pipeline, "advisory.bootstrap_completed")) == 1
+    assert pipeline.osv_cursor() == osv.head
+    assert (paths.osv_db_dir / "osv-scanner/PyPI/all.zip").exists()
+    assert pipeline.bootstrap() is False
+
+
+def test_bootstrap_resumes_after_failure(env):
+    pipeline, osv, _, _ = env
+    osv.fail_on = "Debian"
+    with pytest.raises(RuntimeError):
+        pipeline.bootstrap()
+    assert q(pipeline, "SELECT status FROM source_runs WHERE source = 'osv_full'") == [("failed",)]
+    osv.fail_on = None
+    osv.downloaded.clear()
+    assert pipeline.bootstrap() is True
+    assert osv.downloaded == ["Debian"]
+
+
+def test_incremental_emits_one_event_per_change(env):
+    pipeline, osv, _, _ = env
+    pipeline.bootstrap()
+    updated = ghsa(fixed="2.4.4") | {"modified": "2026-10-21T00:00:00Z"}
+    new = {"id": "GHSA-new0-new0-new0", "modified": "2026-10-21T00:00:00Z", "aliases": ["CVE-2026-3333"],
+           "affected": [{"package": {"ecosystem": "PyPI", "name": "other", "purl": "pkg:pypi/other"},
+                         "ranges": []}]}
+    osv.records = {updated["id"]: updated, new["id"]: new}
+    osv.modified = [ModifiedEntry("2026-10-21T00:00:00.5Z", "PyPI", new["id"]),
+                    ModifiedEntry("2026-10-21T00:00:00.1Z", "PyPI", updated["id"])]
+    pipeline.run_osv_incremental()
+    got = {e["advisory_id"]: e for e in events(pipeline)}
+    assert got["CVE-2026-1111"]["change_types"] == ["fixed_version_published", "affected_changed"]
+    assert got["CVE-2026-1111"]["affected_purls"] == ["PyPI:examplelib", "pkg:pypi/examplelib"]
+    assert got["CVE-2026-1111"]["current"]["kev"] is True
+    assert got["CVE-2026-3333"]["change_types"] == ["created"]
+    assert pipeline.osv_cursor() == "2026-10-21T00:00:00.5Z"
+    assert q(pipeline, "SELECT COUNT(*) FROM advisory_history")[0][0] == 2
+
+
+def test_unchanged_records_are_skipped(env):
+    pipeline, osv, _, _ = env
+    pipeline.bootstrap()
+    osv.records = {"GHSA-aaaa-bbbb-cccc": ghsa()}
+    osv.modified = [ModifiedEntry("2026-10-21T00:00:00Z", "PyPI", "GHSA-aaaa-bbbb-cccc")]
+    pipeline.run_osv_incremental()
+    assert events(pipeline) == []
+
+
+def test_withdrawn_and_bulk_fallback(env):
+    pipeline, osv, _, _ = env
+    pipeline.bootstrap()
+    osv.zips["PyPI"] = [ghsa(withdrawn="2026-10-21T00:00:00Z") | {"modified": "2026-10-21T00:00:00Z"},
+                        PYSEC | {"withdrawn": "2026-10-21T00:00:00Z", "modified": "2026-10-21T00:00:00Z"}]
+    osv.modified = [ModifiedEntry(f"2026-10-21T00:00:0{i}Z", "PyPI", f"X-{i}") for i in range(3)]
+    osv.downloaded.clear()
+    pipeline.run_osv_incremental()  # 3 件 > 上限 2 件なので PyPI は全量取得に切り替わる
+    assert osv.downloaded == ["PyPI"]
+    (event,) = events(pipeline)
+    assert event["advisory_id"] == "CVE-2026-1111" and "withdrawn" in event["change_types"]
+
+
+def test_cveless_record_merges_when_alias_gains_cve(env):
+    pipeline, osv, _, _ = env
+    osv.zips = {"PyPI": [{"id": "PYSEC-2026-7", "modified": "2026-10-01T00:00:00Z",
+                          "aliases": ["GHSA-late-late-late"]}]}
+    pipeline.bootstrap()
+    assert q(pipeline, "SELECT advisory_id FROM osv_records") == [("PYSEC-2026-7",)]
+    late = {"id": "GHSA-late-late-late", "modified": "2026-10-21T00:00:00Z",
+            "aliases": ["CVE-2026-4444", "PYSEC-2026-7"]}
+    osv.records = {late["id"]: late}
+    osv.modified = [ModifiedEntry("2026-10-21T00:00:00Z", "PyPI", late["id"])]
+    pipeline.run_osv_incremental()
+    assert set(q(pipeline, "SELECT advisory_id FROM osv_records")) == {("CVE-2026-4444",)}
+    got = {e["advisory_id"]: e["change_types"] for e in events(pipeline)}
+    assert got == {"CVE-2026-4444": ["created"], "PYSEC-2026-7": ["removed"]}
+
+
+def test_kev_and_epss_signals_after_bootstrap(env):
+    pipeline, _, remote, _ = env
+    pipeline.bootstrap()
+    remote[KEV_URL] = kev_body("CVE-2026-1111", "CVE-2026-9999", "CVE-2026-2002")
+    pipeline.run_kev()
+    remote[EPSS_URL] = epss_body({"CVE-2026-1111": 0.25, "CVE-2026-2001": 0.6})
+    pipeline.run_epss()
+    got = [(e["advisory_id"], e["change_types"]) for e in events(pipeline)]
+    assert got == [("DSA-5999-1", ["kev_added"]), ("DSA-5999-1", ["epss_increased"])]
+    assert q(pipeline, "SELECT epss FROM epss_scores WHERE cve = 'CVE-2026-1111'") == [(0.25,)]
+
+
+def test_kev_removal_drops_kev_only_advisory(env):
+    pipeline, _, remote, _ = env
+    pipeline.bootstrap()
+    remote[KEV_URL] = kev_body("CVE-2026-1111")
+    pipeline.run_kev()
+    assert q(pipeline, "SELECT 1 FROM advisories WHERE advisory_id = 'CVE-2026-9999'") == []
+    got = [(e["advisory_id"], e["change_types"]) for e in events(pipeline)]
+    assert got == [("CVE-2026-9999", ["removed", "kev_removed"])]
+
+
+def test_incremental_requires_bootstrap(env):
+    pipeline, *_ = env
+    with pytest.raises(RuntimeError, match="bootstrap"):
+        pipeline.run_osv_incremental()
+
+
+def test_last_success(env):
+    pipeline, *_ = env
+    assert pipeline.last_success("kev") is None
+    pipeline.run_kev()
+    assert pipeline.last_success("kev") is not None
+
+
+# ── レビュー指摘の回帰テスト ─────────────────────────────────────────────
+
+
+def test_rollup_crash_is_recovered_on_next_run(env, monkeypatch):
+    """レコード書き込み後・再集計前に落ちても、次の実行で再集計とイベントが出る。"""
+    pipeline, osv, _, _ = env
+    pipeline.bootstrap()
+    updated = ghsa(fixed="2.4.4") | {"modified": "2026-10-21T00:00:00Z"}
+    osv.records = {updated["id"]: updated}
+    osv.modified = [ModifiedEntry("2026-10-21T00:00:00Z", "PyPI", updated["id"])]
+    real = changes_mod.apply
+    monkeypatch.setattr(changes_mod, "apply", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError):
+        pipeline.run_osv_incremental()
+    assert q(pipeline, "SELECT advisory_id FROM advisories_dirty") == [("CVE-2026-1111",)]
+    monkeypatch.setattr(changes_mod, "apply", real)
+    pipeline.run_osv_incremental()  # レコードは取り込み済み (ハッシュ同一) でも dirty から回収される
+    assert [e["advisory_id"] for e in events(pipeline)] == ["CVE-2026-1111"]
+    assert q(pipeline, "SELECT COUNT(*) FROM advisories_dirty") == [(0,)]
+
+
+def test_bootstrap_resume_keeps_first_head(env):
+    pipeline, osv, _, _ = env
+    osv.fail_on = "Debian"
+    with pytest.raises(RuntimeError):
+        pipeline.bootstrap()
+    first_head = osv.head
+    osv.head = "2026-10-22T00:00:00Z"  # 再開までに時間が経った
+    osv.fail_on = None
+    pipeline.bootstrap()
+    assert pipeline.osv_cursor() == first_head
+
+
+def test_incremental_reads_overlap_but_skips_known_records(env):
+    pipeline, osv, _, _ = env
+    pipeline.bootstrap()
+    seen: list[str] = []
+    osv.modified_since = lambda cursor: seen.append(cursor) or [  # type: ignore[method-assign]
+        ModifiedEntry("2026-10-01T00:00:00Z", "PyPI", "GHSA-aaaa-bbbb-cccc"),  # 取り込み済みと同じ modified
+    ]
+    fetched: list[str] = []
+    osv.fetch_record = lambda eco, rid: fetched.append(rid)  # type: ignore[method-assign]
+    pipeline.run_osv_incremental()
+    assert seen == ["2026-10-19T22:00:00.000000Z"]  # カーソル (head) の 2 時間前から
+    assert fetched == []
+
+
+def test_malformed_record_is_skipped_not_fatal(env):
+    pipeline, osv, _, _ = env
+    osv.zips = {"PyPI": [{"id": "BAD-1", "affected": ["not-a-dict"]}, ghsa()]}
+    pipeline.bootstrap()
+    assert q(pipeline, "SELECT record_id FROM osv_records") == [("GHSA-aaaa-bbbb-cccc",)]
+    assert q(pipeline, "SELECT skipped FROM source_runs WHERE source = 'osv_full'") == [(1,)]
+
+
+def test_suspiciously_small_kev_snapshot_is_refused(env):
+    pipeline, _, remote, _ = env
+    pipeline.bootstrap()
+    remote[KEV_URL] = json.dumps({"vulnerabilities": []}).encode()
+    with pytest.raises(ValueError, match="too small"):
+        pipeline.run_kev()
+    assert q(pipeline, "SELECT COUNT(*) FROM kev_entries") == [(2,)]

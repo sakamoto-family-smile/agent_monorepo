@@ -1,0 +1,17 @@
+version: 2
+
+sources:
+  - name: intel
+    description: A1 情報取得の運用 DB (data/intel.db、読み取り専用で ATTACH)
+    database: intel
+    schema: main
+    tables:
+      - name: advisories
+      - name: advisory_cves
+      - name: advisory_history
+      - name: osv_records
+      - name: record_affected
+      - name: kev_entries
+      - name: epss_scores
+      - name: source_runs
+      - name: events

@@ -149,6 +149,11 @@ jobs:
               "security-platform/src/collector/": "tests/collector/",
               "security-platform/src/db/":        "tests/db/",
               "security-platform/src/notifier/":  "tests/notifier/",
+              "security-platform/src/common/":    "tests/common/ tests/intel/ tests/analytics/",
+              "security-platform/src/intel/":     "tests/intel/",
+              "security-platform/src/analytics/": "tests/analytics/",
+              "security-platform/migrations/":    "tests/common/ tests/intel/",
+              "security-platform/config/services.yaml": "tests/common/",
           }
           FULL_SUITE_TRIGGERS = [
               "security-platform/src/config.py",
