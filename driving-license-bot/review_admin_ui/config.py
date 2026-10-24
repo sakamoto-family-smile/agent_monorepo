@@ -12,6 +12,9 @@ app/config.py と分離する理由:
 
 from __future__ import annotations
 
+import os
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,6 +59,47 @@ class AdminSettings(BaseSettings):
     # OAuth callback の絶対 URL。Cloud Run URL + /auth/callback。
     # OAuth client の Authorized redirect URIs と一致する必要がある
     oauth_redirect_url: str = ""
+
+    # FastAPI の /docs・/redoc・/openapi.json を公開するか (env: ADMIN_ENABLE_API_DOCS)。
+    # 既定 (false) ではローカル開発 (ADMIN_ENV=local かつ Cloud Run 外) のときだけ公開。
+    enable_api_docs: bool = False
+
+    @property
+    def is_local_env(self) -> bool:
+        """ローカル開発 / テスト環境か。
+
+        Cloud Run は予約済み env `K_SERVICE` を必ず注入するため、ADMIN_ENV の
+        設定漏れがあっても Cloud Run 上では本番相当として扱う (fail-closed)。
+        """
+        if os.environ.get("K_SERVICE"):
+            return False
+        return self.env.strip().lower() == "local"
+
+    @property
+    def api_docs_enabled(self) -> bool:
+        return self.enable_api_docs or self.is_local_env
+
+    @property
+    def dev_bypass_active(self) -> bool:
+        """dev_bypass が実際に有効か。本番相当では常に False (多重防御)。"""
+        return self.dev_bypass and self.is_local_env
+
+    @model_validator(mode="after")
+    def _validate_production_safety(self) -> AdminSettings:
+        """本番相当 (ADMIN_ENV != local または Cloud Run 上) で危険な設定なら起動を拒否する。"""
+        if self.is_local_env:
+            return self
+        if not self.session_secret_key.strip():
+            raise ValueError(
+                "ADMIN_SESSION_SECRET_KEY is required outside local env "
+                f"(ADMIN_ENV={self.env!r}). Refusing to start with the insecure fallback key."
+            )
+        if self.dev_bypass:
+            raise ValueError(
+                "ADMIN_DEV_BYPASS=true is not allowed outside local env "
+                f"(ADMIN_ENV={self.env!r}). Refusing to start."
+            )
+        return self
 
 
 settings = AdminSettings()

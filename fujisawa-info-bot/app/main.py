@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.config import settings
+from app.config import Settings, settings
 from app.graph import GraphDependencies
 from app.kb import build_knowledge_backend
 from app.llm import build_llm_client
@@ -54,16 +54,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await pool.close()
 
 
-app = FastAPI(
-    title="fujisawa-info-bot",
-    description="藤沢市公式 HP を一次ソースとする LINE Bot エージェント",
-    version="0.1.0",
-    lifespan=lifespan,
-)
-app.include_router(line_routes.router)
-
-
-@app.get("/health")
 async def health() -> dict[str, str]:
     """Cloud Run startup probe + 監視用の最小 endpoint。"""
     return {"status": "ok"}
+
+
+def create_app(app_settings: Settings | None = None) -> FastAPI:
+    """FastAPI app を組み立てる。
+
+    本番 (Cloud Run) では /docs・/redoc・/openapi.json を公開しない
+    (`Settings.api_docs_enabled`)。
+    """
+    cfg = app_settings or settings
+    docs_enabled = cfg.api_docs_enabled
+    application = FastAPI(
+        title="fujisawa-info-bot",
+        description="藤沢市公式 HP を一次ソースとする LINE Bot エージェント",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+    )
+    application.include_router(line_routes.router)
+    application.add_api_route("/health", health, methods=["GET"])
+    return application
+
+
+app = create_app()

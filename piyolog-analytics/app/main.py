@@ -39,10 +39,15 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    # 本番 (Cloud Run / APP_ENV=prod) では API スキーマを公開しない。
+    docs_enabled = settings.api_docs_enabled
     app = FastAPI(
         title="piyolog-analytics",
         version=settings.service_version,
         lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
     )
     app.include_router(health_router)
     app.include_router(line_router, prefix="/api")
