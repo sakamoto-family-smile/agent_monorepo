@@ -71,6 +71,7 @@
   {% if item.stored.status == "needs_review" %}
     <section style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border); display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap;">
       <form method="post" action="/questions/{{ item.question_id }}/approve">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button type="submit"
                 style="padding: 8px 24px; background: #2e7d32; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
           ✓ Approve (publish)
@@ -78,6 +79,7 @@
       </form>
       <form method="post" action="/questions/{{ item.question_id }}/reject"
             style="display: flex; gap: 8px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <select name="reason_tag"
                 style="padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--fg);">
           <option value="factual_error">factual_error</option>

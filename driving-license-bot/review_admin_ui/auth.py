@@ -12,7 +12,8 @@ Cloud Run direct IAP は個人 GCP project (組織所属なし) では OAuth cli
     5. /logout で cookie をクリア
 
 `ADMIN_DEV_BYPASS=true` で OAuth flow をスキップ（テスト・ローカル開発用）。
-本番 (Cloud Run) では必ず false。
+本番相当 (ADMIN_ENV != local / Cloud Run 上) では config の validator が起動を拒否し、
+さらに `settings.dev_bypass_active` で二重に無効化する。
 """
 
 from __future__ import annotations
@@ -55,10 +56,10 @@ def is_email_allowed(email: str) -> bool:
 async def require_admin(request: Request) -> AdminUser:
     """FastAPI Depends 用のガード。
 
-    - dev_bypass=true → 即 dev email
+    - dev_bypass=true かつローカル環境 → 即 dev email
     - 本番 → session cookie 必須、未ログインなら /login にリダイレクト
     """
-    if settings.dev_bypass:
+    if settings.dev_bypass_active:
         logger.warning("ADMIN_DEV_BYPASS=true: skipping OAuth (dev only)")
         return AdminUser(email=settings.dev_bypass_email)
 

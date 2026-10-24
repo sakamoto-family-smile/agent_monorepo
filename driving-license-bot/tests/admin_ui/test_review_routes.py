@@ -6,6 +6,7 @@ ADMIN_DEV_BYPASS=true で IAP 認証はスキップ。
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -55,6 +56,21 @@ def _make_question(qid: str = "q_test_1") -> Question:
             )
         ],
     )
+
+
+_CSRF_INPUT_RE = re.compile(r'name="csrf_token" value="([^"]+)"')
+
+
+async def _csrf_token(client: TestClient, qid: str = "q_csrf_seed") -> str:
+    """detail 画面の hidden input から CSRF token を取り出す (session cookie も確立される)。"""
+    bank = client.app.state.test_bank
+    if await bank.get(qid) is None:
+        await bank.add(_make_stored(qid))
+    resp = client.get(f"/questions/{qid}")
+    assert resp.status_code == 200
+    match = _CSRF_INPUT_RE.search(resp.text)
+    assert match is not None, "csrf_token hidden input not rendered"
+    return match.group(1)
 
 
 @pytest.fixture
@@ -132,8 +148,9 @@ async def test_detail_404_when_missing(client: TestClient) -> None:
 async def test_approve_transitions_to_published(client: TestClient) -> None:
     bank = client.app.state.test_bank
     await bank.add(_make_stored("q3"))
+    token = await _csrf_token(client, "q3")
 
-    resp = client.post("/questions/q3/approve", follow_redirects=False)
+    resp = client.post("/questions/q3/approve", data={"csrf_token": token}, follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == "/"
 
@@ -146,10 +163,11 @@ async def test_approve_transitions_to_published(client: TestClient) -> None:
 async def test_reject_transitions_to_rejected(client: TestClient) -> None:
     bank = client.app.state.test_bank
     await bank.add(_make_stored("q4"))
+    token = await _csrf_token(client, "q4")
 
     resp = client.post(
         "/questions/q4/reject",
-        data={"reason_tag": "factual_error"},
+        data={"reason_tag": "factual_error", "csrf_token": token},
         follow_redirects=False,
     )
     assert resp.status_code == 303
@@ -161,8 +179,77 @@ async def test_reject_transitions_to_rejected(client: TestClient) -> None:
 
 @pytest.mark.asyncio
 async def test_approve_404_when_missing(client: TestClient) -> None:
-    resp = client.post("/questions/nope/approve", follow_redirects=False)
+    token = await _csrf_token(client)
+    resp = client.post(
+        "/questions/nope/approve", data={"csrf_token": token}, follow_redirects=False
+    )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_detail_renders_csrf_token_in_both_forms(client: TestClient) -> None:
+    bank = client.app.state.test_bank
+    await bank.add(_make_stored("q_forms"))
+    resp = client.get("/questions/q_forms")
+    assert resp.status_code == 200
+    tokens = _CSRF_INPUT_RE.findall(resp.text)
+    assert len(tokens) == 2  # approve / reject
+    assert len(set(tokens)) == 1
+    # 同一 session では token は安定 (再描画で変わらない)
+    again = client.get("/questions/q_forms")
+    assert _CSRF_INPUT_RE.findall(again.text) == tokens
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["approve", "reject"])
+async def test_post_without_csrf_token_returns_403(client: TestClient, action: str) -> None:
+    bank = client.app.state.test_bank
+    await bank.add(_make_stored("q_nocsrf"))
+    await _csrf_token(client, "q_nocsrf")  # session には token がある状態
+
+    resp = client.post(
+        f"/questions/q_nocsrf/{action}",
+        data={"reason_tag": "other"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 403
+
+    after = await bank.get("q_nocsrf")
+    assert after is not None
+    assert after.status == "needs_review"  # 状態は変わらない
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["approve", "reject"])
+async def test_post_with_wrong_csrf_token_returns_403(client: TestClient, action: str) -> None:
+    bank = client.app.state.test_bank
+    await bank.add(_make_stored("q_badcsrf"))
+    await _csrf_token(client, "q_badcsrf")
+
+    resp = client.post(
+        f"/questions/q_badcsrf/{action}",
+        data={"csrf_token": "forged-token", "reason_tag": "other"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 403
+
+    after = await bank.get("q_badcsrf")
+    assert after is not None
+    assert after.status == "needs_review"
+
+
+@pytest.mark.asyncio
+async def test_post_without_session_token_returns_403(client: TestClient) -> None:
+    """session に token が無い (別ブラウザ等からの POST) 場合も 403。"""
+    bank = client.app.state.test_bank
+    await bank.add(_make_stored("q_nosession"))
+
+    resp = client.post(
+        "/questions/q_nosession/approve",
+        data={"csrf_token": "anything"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio

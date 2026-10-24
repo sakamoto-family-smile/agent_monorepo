@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +21,11 @@ class Settings(BaseSettings):
     service_version: str = "0.1.0"
     env: str = "local"
     log_level: str = "INFO"
+
+    # FastAPI の /docs・/redoc・/openapi.json を公開するか。
+    # 既定 (false) では「ローカル開発 (ENV=local かつ Cloud Run 外)」のときだけ公開する。
+    # 本番 (ENV=gcp) で一時的に見たい場合のみ ENABLE_API_DOCS=true を明示する。
+    enable_api_docs: bool = False
 
     # --- LINE ---
     line_channel_secret: str = ""
@@ -128,6 +135,21 @@ class Settings(BaseSettings):
 
     # --- レビュー Web UI ---
     review_admin_allowed_emails: str = ""
+
+    @property
+    def is_local_env(self) -> bool:
+        """ローカル開発 / テスト環境か。
+
+        Cloud Run は予約済み env `K_SERVICE` を必ず注入するため、ENV の設定漏れが
+        あっても Cloud Run 上では本番相当として扱う (fail-closed)。
+        """
+        if os.environ.get("K_SERVICE"):
+            return False
+        return self.env.strip().lower() == "local"
+
+    @property
+    def api_docs_enabled(self) -> bool:
+        return self.enable_api_docs or self.is_local_env
 
     @property
     def operator_user_id_set(self) -> frozenset[str]:

@@ -8,6 +8,7 @@ C3: 本番 wiring (pgvector + Firestore) + lifespan で接続プール管理
 from __future__ import annotations
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -38,6 +39,15 @@ from review_admin_ui.services import (
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
+
+# CSRF: session に保存した token を hidden input (`csrf_token`) で送らせ、
+# 状態変更 POST で照合する (synchronizer token pattern)。
+CSRF_SESSION_KEY = "csrf_token"
+CSRF_FORM_FIELD = "csrf_token"
+
+# session secret が空のときの fallback 鍵。ローカル開発専用で、本番相当では
+# AdminSettings の validator が起動を拒否するためここには到達しない。
+_DEV_ONLY_SESSION_SECRET = "dev-only-insecure-secret-do-not-use"
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
@@ -104,6 +114,30 @@ async def _build_default_review_service(app: FastAPI) -> ReviewService:
     return ReviewService(bank=bank, repo=repo)
 
 
+def get_csrf_token(request: Request) -> str:
+    """session の CSRF token を返す。未発行なら生成して session に保存する。"""
+    token = request.session.get(CSRF_SESSION_KEY)
+    if not isinstance(token, str) or not token:
+        token = secrets.token_urlsafe(32)
+        request.session[CSRF_SESSION_KEY] = token
+    return token
+
+
+async def verify_csrf(request: Request) -> None:
+    """状態変更 POST 用の CSRF 検証 Depends。不一致・欠落は 403。"""
+    expected = request.session.get(CSRF_SESSION_KEY)
+    form = await request.form()
+    submitted = form.get(CSRF_FORM_FIELD)
+    if (
+        not isinstance(expected, str)
+        or not expected
+        or not isinstance(submitted, str)
+        or not secrets.compare_digest(submitted.encode("utf-8"), expected.encode("utf-8"))
+    ):
+        logger.warning("CSRF token mismatch: path=%s", request.url.path)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid CSRF token")
+
+
 async def get_review_service(request: Request) -> ReviewService:
     svc = getattr(request.app.state, _REVIEW_SERVICE_KEY, None)
     if svc is None:
@@ -127,7 +161,7 @@ async def _lifespan(app: FastAPI):
 
 def _build_oauth_client():
     """Authlib OAuth client (Google) を構築。dev_bypass 時は None を返す。"""
-    if settings.dev_bypass:
+    if settings.dev_bypass_active:
         return None
     if not (settings.oauth_client_id and settings.oauth_client_secret):
         # 本番想定だが env 未設定: middleware は load するがログイン時にエラー
@@ -147,24 +181,29 @@ def _build_oauth_client():
 
 
 def create_app(review_service: ReviewService | None = None) -> FastAPI:
+    # 本番相当 (ADMIN_ENV=gcp / Cloud Run) では API スキーマを公開しない。
+    docs_enabled = settings.api_docs_enabled
     app = FastAPI(
         title="driving-license-bot review admin UI",
         version=settings.service_version,
         lifespan=_lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
     )
     if review_service is not None:
         setattr(app.state, _REVIEW_SERVICE_KEY, review_service)
 
     # Session cookie. dev_bypass 時もテストで使うため必ず install。
-    # https_only は Cloud Run で True、ローカルテストでは settings.env=='local'
-    # でも cookie は送られる（host='testclient' なら secure flag は無視）。
-    session_secret = settings.session_secret_key or "dev-only-insecure-secret-do-not-use"
+    # https_only は本番相当 (Cloud Run) で True、ローカル (ADMIN_ENV=local) では False。
+    # secret 未設定時の fallback 鍵はローカル専用 (本番相当では config で起動拒否)。
+    session_secret = settings.session_secret_key or _DEV_ONLY_SESSION_SECRET
     app.add_middleware(
         SessionMiddleware,
         secret_key=session_secret,
         max_age=settings.session_max_age_seconds,
         same_site="lax",
-        https_only=(settings.env != "local"),
+        https_only=not settings.is_local_env,
     )
 
     install_redirect_handler(app)
@@ -181,7 +220,7 @@ def create_app(review_service: ReviewService | None = None) -> FastAPI:
     @app.get("/login")
     async def login(request: Request) -> RedirectResponse:
         """Google OAuth consent screen にリダイレクト。"""
-        if settings.dev_bypass:
+        if settings.dev_bypass_active:
             # dev: 既にログイン済みとみなして redirect
             return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
         if oauth_client is None:
@@ -270,6 +309,7 @@ def create_app(review_service: ReviewService | None = None) -> FastAPI:
                 "user_email": user.email,
                 "service_name": settings.service_name,
                 "item": item,
+                "csrf_token": get_csrf_token(request),
             },
         )
 
@@ -277,6 +317,7 @@ def create_app(review_service: ReviewService | None = None) -> FastAPI:
     async def approve(
         question_id: str,
         user: AdminUser = Depends(require_admin),
+        _csrf: None = Depends(verify_csrf),
         svc: ReviewService = Depends(get_review_service),
     ) -> RedirectResponse:
         ok = await svc.approve(question_id)
@@ -298,19 +339,15 @@ def create_app(review_service: ReviewService | None = None) -> FastAPI:
         question_id: str,
         request: Request,
         user: AdminUser = Depends(require_admin),
+        _csrf: None = Depends(verify_csrf),
         svc: ReviewService = Depends(get_review_service),
     ) -> RedirectResponse:
-        # form / query どちらでも reason_tag を受ける（最小実装）
-        form = (
-            await request.form()
-            if request.headers.get("content-type", "").startswith(
-                "application/x-www-form-urlencoded"
-            )
-            else {}
-        )
+        # form / query どちらでも reason_tag を受ける（最小実装）。
+        # form は verify_csrf で既に parse 済み (Starlette が request 内で cache)。
+        form = await request.form()
         reason_tag = (
-            form.get("reason_tag") if form else request.query_params.get("reason_tag")
-        ) or "unspecified"
+            form.get("reason_tag") or request.query_params.get("reason_tag") or "unspecified"
+        )
 
         ok = await svc.reject(question_id)
         if not ok:

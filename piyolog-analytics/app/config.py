@@ -6,7 +6,13 @@
 
 from __future__ import annotations
 
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# ローカル開発 / テストとみなす APP_ENV の値。これ以外 (deploy_cloud_run.sh の既定
+# `prod` など) は本番相当として扱う。
+_LOCAL_APP_ENVS = frozenset({"dev", "local", "test"})
 
 
 class Settings(BaseSettings):
@@ -18,6 +24,11 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     service_version: str = "0.1.0"
     log_level: str = "INFO"
+
+    # FastAPI の /docs・/redoc・/openapi.json を公開するか。
+    # 既定 (false) では「ローカル開発 (APP_ENV が dev/local/test かつ Cloud Run 外)」
+    # のときだけ公開する。本番で一時的に見たい場合のみ ENABLE_API_DOCS=true を明示する。
+    enable_api_docs: bool = False
 
     # --- DB ---
     # 優先: `DATABASE_URL` (SQLAlchemy URL)
@@ -99,6 +110,21 @@ class Settings(BaseSettings):
     # 空なら mode 切替時に rich menu の link/unlink を行わない (default の normal
     # メニューがそのまま表示される)。
     rich_menu_id_consulting: str = ""
+
+    @property
+    def is_local_env(self) -> bool:
+        """ローカル開発 / テスト環境か。
+
+        Cloud Run は予約済み env `K_SERVICE` を必ず注入するため、APP_ENV の
+        設定漏れがあっても Cloud Run 上では本番相当として扱う (fail-closed)。
+        """
+        if os.environ.get("K_SERVICE"):
+            return False
+        return self.app_env.strip().lower() in _LOCAL_APP_ENVS
+
+    @property
+    def api_docs_enabled(self) -> bool:
+        return self.enable_api_docs or self.is_local_env
 
     @property
     def vertex_configured(self) -> bool:
