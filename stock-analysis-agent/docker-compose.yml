@@ -1,7 +1,7 @@
 services:
   # MCP サーバー (Brave Search) — supergateway で stdio→HTTP SSE に変換
   mcp-brave-search:
-    image: node:20-slim
+    image: node:24-slim
     working_dir: /app
     environment:
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}

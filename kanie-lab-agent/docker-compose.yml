@@ -1,7 +1,7 @@
 services:
   # Firebase Emulator (Auth + Firestore)
   firebase-emulator:
-    image: node:20-slim
+    image: node:24-slim
     working_dir: /firebase
     volumes:
       - ./infra/firebase:/firebase
