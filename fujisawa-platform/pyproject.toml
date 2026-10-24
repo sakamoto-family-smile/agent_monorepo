@@ -47,13 +47,10 @@ gcs = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# SKILL.md / SQL DDL もパッケージ配下にあるため packages 指定だけで wheel に含まれる。
+# force-include で同じディレクトリを重ねて指定すると重複エラーでビルドが失敗する。
 [tool.hatch.build.targets.wheel]
 packages = ["fujisawa_platform"]
-
-# SKILL.md / SQL DDL を wheel に含める
-[tool.hatch.build.targets.wheel.force-include]
-"fujisawa_platform/skills" = "fujisawa_platform/skills"
-"fujisawa_platform/db" = "fujisawa_platform/db"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
