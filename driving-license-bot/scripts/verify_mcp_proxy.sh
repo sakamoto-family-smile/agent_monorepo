@@ -19,16 +19,21 @@ PROXY_URL="${SECURITY_MCP_PROXY_URL:-http://localhost:8080}"
 echo "[verify_mcp_proxy] target=${PROXY_URL}"
 
 # 1. 到達性
-if ! curl -sS --max-time 5 -o /dev/null -w "%{http_code}\n" "${PROXY_URL}/health" >/tmp/_proxy_status 2>&1; then
+# ステータスは /tmp の共有ファイルを経由せず変数で受け取る
+# (他ユーザーが書き換えた内容が下の算術比較で評価されるのを防ぐ)
+if ! STATUS=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" "${PROXY_URL}/health" 2>&1); then
     echo "[verify_mcp_proxy] FAIL: cannot reach ${PROXY_URL}/health"
     echo "  → security-platform を起動しているか確認してください:"
     echo "      cd security-platform && uv run uvicorn src.proxy.server:app --port 8080"
     exit 1
 fi
 
-STATUS=$(cat /tmp/_proxy_status)
 echo "[verify_mcp_proxy] /health status=${STATUS}"
-if [[ "${STATUS}" -ge 500 ]]; then
+if [[ ! "${STATUS}" =~ ^[0-9]{3}$ ]]; then
+    echo "[verify_mcp_proxy] FAIL: unexpected status: ${STATUS}"
+    exit 1
+fi
+if (( STATUS >= 500 )); then
     echo "[verify_mcp_proxy] FAIL: proxy returned 5xx"
     exit 1
 fi
