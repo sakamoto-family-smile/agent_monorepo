@@ -27,8 +27,9 @@ ENV UV_LINK_MODE=copy \
 
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /uvx /usr/local/bin/
 
-# path dep 解決のため analytics-platform を sibling 配置
+# path dep 解決のため analytics-platform / llm-client を sibling 配置
 COPY analytics-platform /analytics-platform
+COPY llm-client /llm-client
 COPY driving-license-bot/pyproject.toml /app/
 # uv.lock があれば使う（無い時は `uv sync` で生成される）
 COPY driving-license-bot/uv.lock* /app/
