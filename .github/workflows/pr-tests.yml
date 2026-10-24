@@ -5,6 +5,12 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened]
 
+# `uv python install` / `uv sync` が使う Python を Dockerfile (python:3.12-slim) と揃える。
+# 未指定だと最新 (3.15) が選ばれ、wheel 未提供の依存 (watchfiles / rpds-py / lxml 等) の
+# ソースビルドで失敗する。
+env:
+  UV_PYTHON: "3.12"
+
 jobs:
   detect-changes:
     name: Detect changed modules
