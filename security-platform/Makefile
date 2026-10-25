@@ -39,6 +39,7 @@ help:
 	@echo "    up             docker compose up -d --build (intel + analytics を常駐)"
 	@echo "    down           docker compose down"
 	@echo "    ps / logs-vuln docker compose の状態 / ログ"
+	@echo "    (以下の書き込みを伴うコマンドは docker compose run でコンテナ内から実行する)"
 	@echo "    vuln-migrate   SQLite 3 ファイル (intel/detection/remediation) を最新スキーマに"
 	@echo "    intel-bootstrap 初回全量取り込み (OSV 全エコシステム + KEV + EPSS、再開可)"
 	@echo "    intel-osv      OSV 差分取得       intel-osv-full  OSV 全量の再取得"
@@ -106,9 +107,14 @@ cron:
 	./scripts/setup-cron.sh
 
 # ── vulnerability response (A1 intel / analytics) ───────────────────────────
+# SQLite への書き込みはコンテナ内からだけ行う (ホストと VM をまたいだ WAL 共有を避ける)。
+# 常駐中の intel と同時に走らせても、data/.locks のロックで片方がすぐ失敗する
+COMPOSE   = HOST_UID=$$(id -u) HOST_GID=$$(id -g) docker compose
+INTEL_RUN = $(COMPOSE) run --rm --no-deps intel python -m src.intel
+
 up:
 	mkdir -p data
-	HOST_UID=$$(id -u) HOST_GID=$$(id -g) docker compose up -d --build
+	$(COMPOSE) up -d --build
 
 down:
 	docker compose down
@@ -120,28 +126,28 @@ logs-vuln:
 	docker compose logs -f --tail=100 intel analytics
 
 vuln-migrate:
-	uv run python -m src.common.migrate
+	$(COMPOSE) run --rm --no-deps migrate
 
 intel-bootstrap:
-	uv run python -m src.intel bootstrap
+	$(INTEL_RUN) bootstrap
 
 intel-osv:
-	uv run python -m src.intel osv
+	$(INTEL_RUN) osv
 
 intel-osv-full:
-	uv run python -m src.intel osv-full
+	$(INTEL_RUN) osv-full
 
 intel-kev:
-	uv run python -m src.intel kev
+	$(INTEL_RUN) kev
 
 intel-epss:
-	uv run python -m src.intel epss
+	$(INTEL_RUN) epss
 
 intel-health:
-	uv run python -m src.intel health
+	$(INTEL_RUN) health
 
 analytics:
-	uv run python -m src.analytics build
+	$(COMPOSE) run --rm --no-deps analytics python -m src.analytics build
 
 duck-ui:
 	uv run python -m src.analytics ui

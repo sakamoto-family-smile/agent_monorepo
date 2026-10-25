@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     osv_full_refresh_days: int = 7  # 全量ダンプの再取得間隔
     osv_incremental_max_records: int = 3000  # 超えたら該当エコシステムを全量取得に切替
     osv_raw_full_snapshots_kept: int = 2  # data/raw/osv の全量スナップショット保持数
+    raw_retention_days: int = 30  # KEV・EPSS・OSV 差分の生データ保持日数 (全量は世代数で管理)
+    min_free_disk_gb: float = 10.0  # data/ の空きがこれを下回ったら大きな取得を止める (0 で無効)
+    healthcheck_ping_base: str = ""  # 例: https://hc-ping.com/<ping-key>。空なら ping しない
     kev_url: str = (
         "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
     )

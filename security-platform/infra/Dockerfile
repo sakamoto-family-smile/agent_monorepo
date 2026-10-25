@@ -8,8 +8,8 @@ ENV PYTHONUNBUFFERED=1 \
     HOME=/home/app \
     DATA_DIR=/app/data
 
-RUN pip install --no-cache-dir uv \
-    && useradd --create-home --home-dir /home/app --uid 1000 app
+COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /usr/local/bin/uv
+RUN useradd --create-home --home-dir /home/app --uid 1000 app
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
@@ -20,9 +20,10 @@ COPY migrations ./migrations
 COPY dbt ./dbt
 
 # DuckDB の sqlite 拡張はビルド時に入れておく (実行時にダウンロードしない)
-# compose は ホストの UID で動かすので、拡張のキャッシュ (HOME 配下) は誰でも読めるようにする
+# compose はホストの UID で動かすので、拡張 (HOME 配下) は誰でも読めるようにする。
+# 書き込みは許さない (他のプロセスが拡張を差し替えられないように)
 USER app
 RUN python -c "import duckdb; duckdb.connect().execute('INSTALL sqlite')" \
-    && chmod -R a+rwX /home/app
+    && chmod -R a+rX,go-w /home/app
 
 CMD ["python", "-m", "src.intel", "serve"]

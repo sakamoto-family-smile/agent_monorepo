@@ -6,7 +6,12 @@
 #   make duck-ui                     # ホスト側で DuckDB UI を開く
 #
 # SQLite の書き込みプロセスは 1 ファイルにつき 1 つ (intel.db は intel サービスだけが書く)。
-# data/ はホストにバインドするので、DuckDB はホストから直接開ける。
+# 手動実行 (make intel-* / make analytics) も docker compose run で同じ VM の中から行う。
+# ホストの macOS から SQLite を直接書くと、VM をまたいだ WAL 共有になり壊れる恐れがある。
+# data/ はホストにバインドするので、DuckDB (読み取り専用) はホストから直接開ける。
+#
+# コンテナに渡す環境変数は config/vuln.env だけ (config/.env の API キー等は渡さない)。
+# 雛形: config/vuln.env.example
 x-app: &app
   build:
     context: .
@@ -17,10 +22,19 @@ x-app: &app
   volumes:
     - ./data:/app/data
   env_file:
-    - path: config/.env
+    - path: config/vuln.env
       required: false
   environment:
     DATA_DIR: /app/data
+    TZ: UTC
+    DBT_SEND_ANONYMOUS_USAGE_STATS: "false"
+  init: true  # SIGTERM を python に届け、ジョブの区切りで止める
+  stop_grace_period: 2m
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "5"
 
 services:
   migrate:

@@ -14,11 +14,16 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 
-# 脆弱性対応: 生データ・イベントログ・分析 DB・osv-scanner DB (すべて再取得/再構築できる)
+config/vuln.env
+
+# 脆弱性対応のデータ。生データ・osv-scanner DB は再取得できるが、次は再構築できない:
+# 運用 DB の履歴 (advisory_history / events / source_runs)、分析 DB のスナップショット (history.snp_*)、
+# イベントの JSONL。リポジトリには入れず、別途バックアップする (docs/VULN_RESPONSE.md)
 data/raw/
 data/events/
 data/osv-db/
 data/.dbt/
+data/.locks/
 data/*.duckdb
 data/*.duckdb.wal
 data/.analytics_last_success

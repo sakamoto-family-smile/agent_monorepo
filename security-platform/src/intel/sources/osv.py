@@ -30,6 +30,10 @@ EMPTY_ECOSYSTEM = "[EMPTY]"
 CHUNK = 1 << 20
 
 
+class MalformedRecord(ValueError):
+    """本文が JSON として読めない、または ``id`` を持つオブジェクトでない。"""
+
+
 @dataclass(frozen=True)
 class ModifiedEntry:
     modified: str
@@ -91,12 +95,19 @@ class OsvClient:
         return with_retry(go, what="osv modified_id.csv")
 
     def fetch_record(self, ecosystem: str, record_id: str) -> dict[str, Any] | None:
+        """404 なら None。中身が壊れていれば MalformedRecord。"""
         def go() -> dict[str, Any] | None:
             r = self._http.get(self._url(ecosystem, f"{record_id}.json"))
             if r.status_code == 404:
                 return None
             r.raise_for_status()
-            return r.json()
+            try:
+                body = r.json()
+            except ValueError as e:
+                raise MalformedRecord(f"{ecosystem}/{record_id}: invalid JSON") from e
+            if not isinstance(body, dict) or not isinstance(body.get("id"), str):
+                raise MalformedRecord(f"{ecosystem}/{record_id}: not an OSV object")
+            return body
 
         return with_retry(go, what=f"osv record {record_id}")
 
@@ -129,6 +140,8 @@ def iter_zip_records(path: Path) -> Iterator[tuple[str, dict[str, Any]]]:
 
 def publish_scanner_db(zip_path: Path, osv_db_dir: Path, ecosystem: str) -> Path:
     """osv-scanner のオフライン DB 配置 (``osv-scanner/<ecosystem>/all.zip``) に置く。"""
+    if not ecosystem or ecosystem in (".", "..") or "/" in ecosystem or "\\" in ecosystem:
+        raise ValueError(f"unsafe ecosystem name: {ecosystem!r}")
     target = osv_db_dir / "osv-scanner" / ecosystem / "all.zip"
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name("all.zip.tmp")

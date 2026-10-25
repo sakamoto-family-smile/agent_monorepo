@@ -1,4 +1,7 @@
-"""外部取得用の HTTP クライアント (同期)。5xx と通信エラーは指数バックオフで再試行する。"""
+"""外部取得用の HTTP クライアント (同期)。5xx・429 と通信エラーは指数バックオフで再試行する。
+
+429 / 503 に Retry-After (秒) が付いていればそれに従う (上限 MAX_RETRY_AFTER 秒)。
+"""
 from __future__ import annotations
 
 import logging
@@ -13,6 +16,15 @@ logger = logging.getLogger(__name__)
 
 USER_AGENT = "agent-monorepo-security-platform/0.1 (+intel collector)"
 RETRIES = 4
+MAX_RETRY_AFTER = 120.0
+
+
+def _retry_after(response: httpx.Response) -> float | None:
+    value = response.headers.get("Retry-After", "")
+    try:
+        return min(max(float(value), 0.0), MAX_RETRY_AFTER)
+    except ValueError:
+        return None
 
 
 def make_client(transport: httpx.BaseTransport | None = None) -> httpx.Client:
@@ -26,15 +38,18 @@ def make_client(transport: httpx.BaseTransport | None = None) -> httpx.Client:
 
 def with_retry[T](fn: Callable[[], T], *, what: str, sleep: Callable[[float], None] = time.sleep) -> T:
     for attempt in range(RETRIES):
+        wait = 2.0 ** (attempt + 1)
         try:
             return fn()
         except httpx.HTTPStatusError as e:
-            if e.response.status_code < 500 or attempt == RETRIES - 1:
+            status = e.response.status_code
+            if (status < 500 and status != 429) or attempt == RETRIES - 1:
                 raise
-            logger.warning("%s: HTTP %s, retrying", what, e.response.status_code)
+            wait = _retry_after(e.response) or wait
+            logger.warning("%s: HTTP %s, retrying in %.0fs", what, status, wait)
         except (httpx.TransportError, httpx.DecodingError):
             if attempt == RETRIES - 1:
                 raise
             logger.warning("%s: transport error, retrying", what)
-        sleep(2.0 ** (attempt + 1))
+        sleep(wait)
     raise RuntimeError("unreachable")

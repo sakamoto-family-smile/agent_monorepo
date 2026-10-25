@@ -24,20 +24,23 @@ class FakePipeline:
     def run_kev(self) -> None:
         self.calls.append("kev")
 
+    def missing_count(self) -> int:
+        return 0
+
 
 def test_health_reports_stale_sources(monkeypatch):
-    monkeypatch.setattr(cli, "build_pipeline", lambda: FakePipeline({"osv", "kev", "epss", "osv_full"}))
+    monkeypatch.setattr(cli, "build_pipeline", lambda **_: FakePipeline({"osv", "kev", "epss", "osv_full"}))
     result = CliRunner().invoke(cli.app, ["health"])
     assert result.exit_code == 0 and "STALE" not in result.output
 
-    monkeypatch.setattr(cli, "build_pipeline", lambda: FakePipeline({"osv"}))
+    monkeypatch.setattr(cli, "build_pipeline", lambda **_: FakePipeline({"osv"}))
     result = CliRunner().invoke(cli.app, ["health"])
     assert result.exit_code == 1 and "STALE kev" in result.output
 
 
 def test_commands_dispatch_to_pipeline(monkeypatch):
     fake = FakePipeline(set())
-    monkeypatch.setattr(cli, "build_pipeline", lambda: fake)
+    monkeypatch.setattr(cli, "build_pipeline", lambda **_: fake)
     assert "bootstrap completed" in CliRunner().invoke(cli.app, ["bootstrap"]).output
     assert CliRunner().invoke(cli.app, ["kev"]).exit_code == 0
     assert fake.calls == ["bootstrap", "kev"]

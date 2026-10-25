@@ -48,7 +48,7 @@ flowchart LR
     RDB[("data/remediation.db")]
 
     subgraph AN["analytics サービス"]
-      DBT["dbt-duckdb<br/>security_build.duckdb → 差し替え"]
+      DBT["dbt-duckdb<br/>security_build_*.duckdb → 差し替え"]
     end
     DUCK[("data/security.duckdb<br/>staging / marts / history")]
     EVJ[("data/events/*.jsonl<br/>イベントの保管")]
@@ -129,17 +129,51 @@ docker compose logs -f intel      # = make logs-vuln
 make duck-ui                      # ホストで DuckDB UI を開く (http://localhost:4213)
 ```
 
-コンテナを使わずに単発で動かす場合:
+単発で動かす場合 (どれも `docker compose run` でコンテナ内から実行する):
 
 ```bash
 make vuln-migrate        # data/{intel,detection,remediation}.db を作成
 make intel-bootstrap     # 初回全量 (中断しても続きから再開)
 make intel-osv           # OSV 差分 / intel-osv-full / intel-kev / intel-epss
-make intel-health        # 情報源ごとの最終成功時刻 (古いものがあれば exit 1)
+make intel-health        # 情報源ごとの最終成功時刻 (古いものがあれば exit 1。DB には書かない)
 make analytics           # dbt build → data/security.duckdb を差し替え
 ```
 
-`OSV_ECOSYSTEMS=PyPI,npm` を `config/.env` に書くと対象エコシステムを絞れる (空なら全エコシステム)。
+SQLite に書くのはコンテナの中からだけにする。ホストの macOS から `uv run` で書くと、
+Docker Desktop の VM をまたいで同じ WAL ファイルを共有することになり、壊れる恐れがある。
+同じ VM の中では `data/.locks/<name>.lock` (flock) で書き込みを 1 プロセスに絞っており、
+常駐中の intel のジョブと手動実行が重なると、後から来た方が `WriterBusy` ですぐ失敗する。
+
+コンテナに渡す設定は `config/vuln.env` だけ (雛形 `config/vuln.env.example`)。
+`config/.env` の API キーなどはコンテナに渡さない。主な設定:
+
+| 変数 | 既定 | 内容 |
+|---|---|---|
+| `OSV_ECOSYSTEMS` | (全部) | 対象エコシステム (CSV)。全量取得・差分取得の両方に効く |
+| `HEALTHCHECK_PING_BASE` | (なし) | 例 `https://hc-ping.com/<ping-key>`。ジョブの成否を `sec-<job>` に ping する |
+| `RAW_RETENTION_DAYS` | 30 | KEV・EPSS・OSV 差分の生データ保持日数 |
+| `OSV_RAW_FULL_SNAPSHOTS_KEPT` | 2 | OSV 全量の保持世代数 (完了した実行だけを数える) |
+| `MIN_FREE_DISK_GB` | 10 | 空きがこれを下回ったら全量のダウンロードを止める |
+
+## 運用 (ローカル常駐)
+
+- **止まったことに気づく**: Mac のスリープ・Docker Desktop の停止・再起動後の未ログインで取得は止まる。
+  `HEALTHCHECK_PING_BASE` を設定し、監視側 (Healthchecks.io など) で ping が途絶えたら通知させる。
+  あわせて「スリープしない」設定と Docker Desktop の自動起動を有効にしておく
+- **失敗時の再試行**: ジョブが失敗すると 5 分 → 10 分 → 20 分 … と倍々に待つ (上限 6 時間、
+  かつ実行間隔まで)。全量取得が途中で失敗したら、その実行で落としたファイルはすぐ消す
+- **データ量の目安** (2026-10 時点の実測): OSV 全量 約 3.2GB (45 エコシステム)、
+  `modified_id.csv` 約 150MB、変更は 1 日 1 万件前後 (多い日は 18 万件)、KEV 約 2MB、EPSS 1 日 約 3MB。
+  KEV は内容が変わったときだけ、EPSS は `score_date` が変わったときだけ生データを保存する
+- **404 のレコード**: `modified_id.csv` に載っているのに本文が 404 のものは `osv_missing` に記録し、
+  次の差分取得から最大 24 回取り直す。`make intel-health` に件数が出る。OSV 側での削除の検出は未対応
+- **バックアップ**: 生データと osv-scanner DB は取り直せるが、次は作り直せない。
+  `data/intel.db` の `advisory_history` / `events` / `source_runs`、`data/security.duckdb` の
+  `history.*`、`data/events/`。これらを毎日、暗号化して外部に退避する
+  (SQLite は `sqlite3 data/intel.db ".backup ..."` をコンテナ内で実行する)
+- **イベントの受信側**: `seq` は DB ファイルの中でだけ意味を持つ。受信側はカーソルと一緒に
+  発行側の `db_info.epoch` を持ち、DB が作り直されたら 0 から読み直す。payload には `schema_version` が入る
+- **時刻**: DB には UTC で保存する。dbt のセッションも UTC に固定している (スナップショットの時刻がずれないように)
 
 ## データの持ち方
 
@@ -153,8 +187,10 @@ make analytics           # dbt build → data/security.duckdb を差し替え
 | osv-scanner DB | `data/osv-db/osv-scanner/<ecosystem>/all.zip` | intel | A2 (L2) のオフライン照合用。OSV 全量取得のたびに更新 |
 
 DuckDB を運用 DB にしないのは、同時に書き込めるのが 1 プロセスだけで、書き込み中は他から
-開けないため。dbt は `security_build.duckdb` に作ってから `security.duckdb` に置き換えるので、
+開けないため。dbt は `security_build_<ランダム>.duckdb` に作ってから `security.duckdb` に置き換えるので、
 UI で開いたままでも更新は止まらない (開き直すと新しい内容が見える)。
+intel のブートストラップが終わるまでは dbt snapshot (とその下流) を実行しない。
+取り込み途中の状態を「変化」として履歴に残さないため。
 
 ## A1 の取り込み
 
@@ -229,10 +265,12 @@ DuckDB の `sqlite` 拡張を使う。初回に extensions.duckdb.org から自�
 
 ## 既知の制約
 
-- 取得停止のアラート (FR-I07) は `make intel-health` と `mart_source_freshness` で確認できるが、通知は L2 で LINE 通知と一緒に入れる
+- 取得停止のアラート (FR-I07) は `HEALTHCHECK_PING_BASE` の外部監視で受ける。LINE への直接通知は L2 で入れる
 - osv-scanner DB は全量取得 (7 日ごと) のタイミングでしか更新されない。L2 で差分の反映方法を決める
 - NVD・JVN・ランタイムのリリース情報・OneCRL・非構造ソース (注意喚起・ニュース) は未対応
 - 既存の `src/collector/` / `src/analyzer/` (data/security.db) は当面そのまま残し、L2 で置き換える
-- CVE の無いレコード同士の合流は取り込み順に依存し、別名の連鎖は 1 段までしか付け直さない (CVE のあるものは順序に依存しない)
+- CVE の無いレコード同士の合流は取り込み順に依存する (CVE のあるものは順序に依存しない)。別名の連鎖は、キーが変わったレコードを辿って付け直す
+- OSV 側で削除されたレコードは検出しない (404 は `osv_missing` に残るだけ)
+- 止まっていた間の OSV の途中の変化は取り戻せない (OSV は最新版しか配らない)。EPSS は過去日のファイルがあるが、埋め戻しコマンドは未実装
 - dbt は運用 DB を ATTACH して読むため、取り込み中に build するとテーブルごとに読む時点が少しずれることがある
 - イベントの JSONL ミラーは commit 後に書くので、その間に落ちると JSONL だけ欠ける (正本は各 DB の `events`)

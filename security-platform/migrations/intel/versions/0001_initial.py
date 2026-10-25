@@ -11,10 +11,14 @@ Create Date: 2026-10-24
   advisory_history                                Advisory の変化の履歴
   advisories_dirty                                再集計待ち (レコード書き込みと同じトランザクションで積む)
   source_cursors / source_runs / meta             取得位置・実行記録・ブートストラップ状態
+  osv_missing                                     本文が 404 だったレコード (再取得待ち)
+  db_info                                         DB ファイル固有の epoch
   events                                          outbox (advisory.changed 等)
 ビュー v_advisories / v_advisory_affected / v_advisory_aliases は A2・B への読み取り契約。
 """
 from __future__ import annotations
+
+import uuid
 
 import sqlalchemy as sa
 from alembic import op
@@ -175,6 +179,16 @@ def upgrade() -> None:
         sa.Column("error", sa.Text),
     )
     op.create_index("ix_source_runs_source", "source_runs", ["source", "started_at"])
+    # modified_id.csv に載っていたのに本文が 404 だったレコード。次回以降の差分取得で取り直す
+    op.create_table(
+        "osv_missing",
+        sa.Column("record_id", sa.Text, primary_key=True),
+        sa.Column("ecosystem", sa.Text, nullable=False),
+        sa.Column("modified", sa.Text, nullable=False),  # modified_id.csv 上の時刻
+        _ts("first_missing_at", nullable=False),
+        _ts("last_checked_at", nullable=False),
+        sa.Column("attempts", sa.Integer, nullable=False, server_default="1"),
+    )
     op.create_table(
         "meta",
         sa.Column("key", sa.Text, primary_key=True),
@@ -187,17 +201,30 @@ def upgrade() -> None:
         sa.Column("type", sa.Text, nullable=False),
         sa.Column("payload", sa.Text, nullable=False),
         _ts("occurred_at", nullable=False),
+        # AUTOINCREMENT: 末尾の行を消しても seq を再利用しない (受信側の読み飛ばし防止)
+        sqlite_autoincrement=True,
     )
+    _create_db_info()
     op.execute(V_ADVISORIES)
     op.execute(V_ADVISORY_AFFECTED)
     op.execute(V_ADVISORY_ALIASES)
+
+
+def _create_db_info() -> None:
+    """DB ファイル固有の epoch。作り直すと変わるので、受信側は seq の振り直しを検知できる。"""
+    op.create_table(
+        "db_info",
+        sa.Column("key", sa.Text, primary_key=True),
+        sa.Column("value", sa.Text, nullable=False),
+    )
+    op.execute(f"INSERT INTO db_info (key, value) VALUES ('epoch', '{uuid.uuid4().hex}')")
 
 
 def downgrade() -> None:
     for view in ("v_advisory_aliases", "v_advisory_affected", "v_advisories"):
         op.execute(f"DROP VIEW IF EXISTS {view}")
     for table in (
-        "events", "meta", "source_runs", "source_cursors", "advisory_history",
+        "db_info", "events", "meta", "osv_missing", "source_runs", "source_cursors", "advisory_history",
         "advisories_dirty", "advisory_cves", "advisories", "epss_scores", "kev_entries",
         "record_affected", "record_aliases", "osv_records",
     ):

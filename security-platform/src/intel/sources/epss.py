@@ -29,15 +29,24 @@ def _text(body: bytes) -> io.StringIO:
     return io.StringIO(raw.decode("utf-8"))
 
 
-def score_date(body: bytes) -> str | None:
+def _header(body: bytes, name: str) -> str | None:
     first = _text(body).readline().strip()
     if not first.startswith("#"):
         return None
     for part in first.lstrip("#").split(","):
         key, _, value = part.partition(":")
-        if key.strip() == "score_date":
+        if key.strip() == name:
             return value.strip()
     return None
+
+
+def score_date(body: bytes) -> str | None:
+    return _header(body, "score_date")
+
+
+def model_version(body: bytes) -> str | None:
+    """モデルが変わるとほぼ全 CVE のスコアが一斉に動くので、その日は上昇検知をしない。"""
+    return _header(body, "model_version")
 
 
 def iter_epss(body: bytes) -> Iterator[EpssScore]:

@@ -8,6 +8,8 @@ L0 ではスキーマのみ。書き込みは L2 (Matcher / Triage) から。
 """
 from __future__ import annotations
 
+import uuid
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -96,6 +98,8 @@ def upgrade() -> None:
         "event_cursors",
         sa.Column("source", sa.Text, primary_key=True),
         sa.Column("last_seq", sa.Integer, nullable=False),
+        # 発行側 DB の db_info.epoch。DB を作り直すと変わり、カーソルは 0 から読み直す
+        sa.Column("epoch", sa.Text, nullable=False, server_default=""),
         _ts("updated_at", nullable=False),
     )
     op.create_table(
@@ -105,12 +109,25 @@ def upgrade() -> None:
         sa.Column("type", sa.Text, nullable=False),
         sa.Column("payload", sa.Text, nullable=False),
         _ts("occurred_at", nullable=False),
+        # AUTOINCREMENT: 末尾の行を消しても seq を再利用しない (受信側の読み飛ばし防止)
+        sqlite_autoincrement=True,
     )
+    _create_db_info()
+
+
+def _create_db_info() -> None:
+    """DB ファイル固有の epoch。作り直すと変わるので、受信側は seq の振り直しを検知できる。"""
+    op.create_table(
+        "db_info",
+        sa.Column("key", sa.Text, primary_key=True),
+        sa.Column("value", sa.Text, nullable=False),
+    )
+    op.execute(f"INSERT INTO db_info (key, value) VALUES ('epoch', '{uuid.uuid4().hex}')")
 
 
 def downgrade() -> None:
     for table in (
-        "events", "event_cursors", "exceptions", "finding_transitions",
+        "db_info", "events", "event_cursors", "exceptions", "finding_transitions",
         "findings", "sbom_components", "sboms", "services",
     ):
         op.drop_table(table)

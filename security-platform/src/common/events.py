@@ -6,6 +6,10 @@ GCP に出すときは outbox → Pub/Sub の転送を足すだけで受信側�
 
 同じ内容を ``data/events/type=<type>/dt=YYYY-MM-DD/<producer>.jsonl`` に追記する。
 こちらは運用 DB を作り直しても残る履歴アーカイブで、受信処理には使わない。
+
+``seq`` は DB ファイルの中でだけ意味を持つ。DB を作り直すと 1 から振り直されるので、
+受信側はカーソルと一緒に発行側の ``db_info.epoch`` を持ち、変わっていたら 0 から読み直す
+(受信処理は event_id で冪等にしておく)。payload の形を変えたら SCHEMA_VERSION を上げる。
 """
 from __future__ import annotations
 
@@ -18,6 +22,8 @@ from typing import Any
 from sqlalchemy import Connection, Engine, text
 
 from .timeutil import utc_now_iso
+
+SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -44,7 +50,10 @@ class Outbox:
     def publish(self, conn: Connection, type_: str, payload: dict[str, Any]) -> str:
         event_id = payload.get("event_id") or new_event_id()
         occurred_at = payload.get("occurred_at") or utc_now_iso()
-        body = {**payload, "event_id": event_id, "occurred_at": occurred_at}
+        body = {
+            **payload, "event_id": event_id, "occurred_at": occurred_at,
+            "schema_version": SCHEMA_VERSION,
+        }
         conn.execute(
             text(
                 "INSERT INTO events (event_id, type, payload, occurred_at) "
@@ -86,12 +95,19 @@ class Consumer:
         self._own = own_engine
         self._name = source_name
 
+    def source_epoch(self) -> str:
+        with self._source.connect() as conn:
+            return conn.execute(text("SELECT value FROM db_info WHERE key = 'epoch'")).scalar_one()
+
     def last_seq(self) -> int:
+        """処理済み位置。発行側 DB が作り直されていたら (epoch 不一致) 0 を返す。"""
         with self._own.connect() as conn:
             row = conn.execute(
-                text("SELECT last_seq FROM event_cursors WHERE source = :s"), {"s": self._name}
+                text("SELECT last_seq, epoch FROM event_cursors WHERE source = :s"), {"s": self._name}
             ).first()
-        return int(row[0]) if row else 0
+        if row is None or row[1] != self.source_epoch():
+            return 0
+        return int(row[0])
 
     def fetch(self, types: tuple[str, ...] | None = None, limit: int = 500) -> list[Event]:
         sql = "SELECT seq, event_id, type, payload, occurred_at FROM events WHERE seq > :seq"
@@ -108,11 +124,12 @@ class Consumer:
     def ack(self, seq: int, conn: Connection | None = None) -> None:
         """処理済み位置を進める。受信側の状態変更と同じトランザクションで呼ぶのが基本。"""
         stmt = text(
-            "INSERT INTO event_cursors (source, last_seq, updated_at) VALUES (:s, :q, :u) "
-            "ON CONFLICT(source) DO UPDATE SET last_seq = excluded.last_seq, "
-            "updated_at = excluded.updated_at WHERE excluded.last_seq > event_cursors.last_seq"
+            "INSERT INTO event_cursors (source, last_seq, epoch, updated_at) VALUES (:s, :q, :e, :u) "
+            "ON CONFLICT(source) DO UPDATE SET last_seq = excluded.last_seq, epoch = excluded.epoch, "
+            "updated_at = excluded.updated_at "
+            "WHERE excluded.last_seq > event_cursors.last_seq OR excluded.epoch != event_cursors.epoch"
         )
-        params = {"s": self._name, "q": seq, "u": utc_now_iso()}
+        params = {"s": self._name, "q": seq, "e": self.source_epoch(), "u": utc_now_iso()}
         if conn is not None:
             conn.execute(stmt, params)
             return

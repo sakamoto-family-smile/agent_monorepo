@@ -1,6 +1,6 @@
 # security-platform 分析 DB (DuckDB)。
 # 運用 DB (SQLite) は sqlite 拡張で読み取り専用に ATTACH する。
-# パスは src/analytics/build.py が環境変数で渡す (SEC_DUCKDB_PATH は差し替え前の一時ファイル security_build.duckdb)。
+# パスは src/analytics/build.py が環境変数で渡す (SEC_DUCKDB_PATH は差し替え前の一時ファイル security_build_<ランダム>.duckdb)。
 security_platform:
   target: local
   outputs:
@@ -9,6 +9,10 @@ security_platform:
       path: "{{ env_var('SEC_DUCKDB_PATH') }}"
       extensions:
         - sqlite
+      # スナップショットの dbt_valid_from などはタイムゾーンなしの timestamp で入る。
+      # ホスト (JST) とコンテナ (UTC) で 9 時間ずれないよう、セッションを UTC に固定する
+      settings:
+        TimeZone: UTC
       attach:
         - path: "{{ env_var('SEC_DATA_DIR') }}/intel.db"
           alias: intel

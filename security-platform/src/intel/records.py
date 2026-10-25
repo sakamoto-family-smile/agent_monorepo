@@ -122,24 +122,38 @@ def _write_record(
 
 
 def _rekey_dependents(conn: Connection, record_id: str) -> set[str]:
-    """``record_id`` をエイリアスに持つレコードの advisory_id を付け直す (1 段のみ)。"""
+    """``record_id`` をエイリアスに持つレコードの advisory_id を付け直す。
+
+    付け直したレコードをさらにエイリアスに持つレコードへも辿る (A → B → C の連鎖で、
+    C が CVE を得たら A まで届かせる)。キーが変わらなかったレコードの先は辿らない。
+    """
     touched: set[str] = set()
-    deps = conn.execute(
-        text("SELECT DISTINCT record_id FROM record_aliases WHERE alias = :id AND record_id != :id"),
-        {"id": record_id},
-    ).scalars().all()
-    for dep_id in deps:
-        dep = _stored_record(conn, dep_id)
-        current = conn.execute(
-            text("SELECT advisory_id FROM osv_records WHERE record_id = :id"), {"id": dep_id}
-        ).scalar_one()
-        new_key = resolve_advisory_id(dep, lambda a: _lookup_alias(conn, a))
-        if new_key != current:
-            conn.execute(
-                text("UPDATE osv_records SET advisory_id = :k, updated_at = :u WHERE record_id = :id"),
-                {"k": new_key, "u": utc_now_iso(), "id": dep_id},
-            )
-            touched |= {current, new_key}
+    queue = [record_id]
+    seen = {record_id}
+    while queue:
+        target = queue.pop(0)
+        deps = conn.execute(
+            text("SELECT DISTINCT record_id FROM record_aliases WHERE alias = :id AND record_id != :id"),
+            {"id": target},
+        ).scalars().all()
+        for dep_id in deps:
+            if dep_id in seen:
+                continue
+            seen.add(dep_id)
+            dep = _stored_record(conn, dep_id)
+            if dep is None:
+                continue
+            current = conn.execute(
+                text("SELECT advisory_id FROM osv_records WHERE record_id = :id"), {"id": dep_id}
+            ).scalar_one()
+            new_key = resolve_advisory_id(dep, lambda a: _lookup_alias(conn, a))
+            if new_key != current:
+                conn.execute(
+                    text("UPDATE osv_records SET advisory_id = :k, updated_at = :u WHERE record_id = :id"),
+                    {"k": new_key, "u": utc_now_iso(), "id": dep_id},
+                )
+                touched |= {current, new_key}
+                queue.append(dep_id)
     return touched
 
 

@@ -288,7 +288,7 @@ dbt で `data/security.duckdb` (DuckDB) に分析用として蓄積する。dock
 
 ```bash
 docker compose up -d --build   # = make up (intel + analytics)。初回は全量ブートストラップから始まる
-make intel-health              # 情報源ごとの最終成功時刻
+make intel-health              # 情報源ごとの最終成功時刻 (書き込みを伴う make intel-* はコンテナ内で実行)
 make duck-ui                   # DuckDB UI で分析 DB を開く
 ```
 

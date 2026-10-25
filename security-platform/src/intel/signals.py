@@ -40,6 +40,7 @@ def _advisories_for(conn: Connection, cve: str) -> list[str]:
 
 
 KEV_MIN_RATIO = 0.5  # 既存件数に対してこれを下回るスナップショットは壊れているとみなす
+EPSS_MIN_RATIO = 0.5  # EPSS も同じ (全 CVE 分が毎日配られるので、急減は取得側の異常)
 
 
 def upsert_kev(conn: Connection, ctx: RunContext, entries: list[KevEntry], raw_ref: str) -> set[str]:
@@ -86,9 +87,13 @@ def _write_kev(conn: Connection, entries: list[KevEntry], raw_ref: str, now: str
 
 def upsert_epss(
     conn: Connection, ctx: RunContext, scores: Iterable[EpssScore], score_date: str | None,
-    delta: float,
+    delta: float, *, detect_rises: bool = True,
 ) -> int:
-    """EPSS を反映し、``delta`` 以上上がった CVE を持つ Advisory にシグナルを積む。"""
+    """EPSS を反映し、``delta`` 以上上がった CVE を持つ Advisory にシグナルを積む。
+
+    件数が既存の EPSS_MIN_RATIO 未満なら壊れたスナップショットとして拒否する (反映しない)。
+    ``detect_rises=False`` (モデル更新日) は値だけ入れ替え、上昇のシグナルは出さない。
+    """
     now = utc_now_iso()
     conn.execute(text("CREATE TEMP TABLE IF NOT EXISTS epss_in (cve TEXT PRIMARY KEY, epss REAL, percentile REAL)"))
     conn.execute(text("DELETE FROM epss_in"))
@@ -103,11 +108,17 @@ def upsert_epss(
     if batch:
         conn.execute(text("INSERT OR REPLACE INTO epss_in VALUES (:c, :e, :p)"), batch)
         count += len(batch)
+    existing = conn.execute(text("SELECT COUNT(*) FROM epss_scores")).scalar_one()
+    if existing and count < existing * EPSS_MIN_RATIO:
+        conn.execute(text("DROP TABLE epss_in"))
+        raise ValueError(
+            f"EPSS snapshot too small ({count} < {EPSS_MIN_RATIO:.0%} of {existing}); refusing"
+        )
     risen = conn.execute(
         text("SELECT DISTINCT c.advisory_id FROM epss_in i JOIN epss_scores s ON s.cve = i.cve "
              "JOIN advisory_cves c ON c.cve = i.cve WHERE i.epss - s.epss >= :d"),
         {"d": delta},
-    ).scalars().all()
+    ).scalars().all() if detect_rises else []
     for advisory_id in risen:
         ctx.add_signal(advisory_id, "epss_increased")
     conn.execute(

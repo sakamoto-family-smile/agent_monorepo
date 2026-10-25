@@ -1,0 +1,15 @@
+# ビルドコンテキストに生データ・DB・秘密情報を入れない
+data/
+logs/
+config/.env
+config/.env.*
+config/vuln.env
+.venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.coverage
+dbt/target/
+dbt/logs/
+dbt/.user.yml
+.git

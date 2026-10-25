@@ -15,9 +15,10 @@ from src.common.db import make_engine
 from src.common.migrate import upgrade_all
 from src.common.paths import DataPaths
 from src.common.raw_store import RawStore
+from src.common.timeutil import parse_iso
 from src.intel import changes as changes_mod
 from src.intel.pipeline import IntelPipeline
-from src.intel.sources.osv import ModifiedEntry
+from src.intel.sources.osv import MalformedRecord, ModifiedEntry
 
 KEV_URL = "https://kev.test/kev.json"
 EPSS_URL = "https://epss.test/epss.csv.gz"
@@ -63,7 +64,7 @@ class FakeOsv:
         self.zips: dict[str, list[dict[str, Any]]] = {
             "PyPI": [ghsa(), PYSEC], "npm": [NPM_NO_CVE], "Debian": [DSA_BUNDLE],
         }
-        self.records: dict[str, dict[str, Any]] = {}
+        self.records: dict[str, dict[str, Any] | MalformedRecord] = {}
         self.modified: list[ModifiedEntry] = []
         self.head = "2026-10-20T00:00:00.000000001Z"
         self.fail_on: str | None = None
@@ -76,10 +77,14 @@ class FakeOsv:
         return self.head
 
     def modified_since(self, cursor: str) -> list[ModifiedEntry]:
-        return list(self.modified)
+        since = parse_iso(cursor)
+        return [e for e in self.modified if parse_iso(e.modified) >= since]
 
     def fetch_record(self, ecosystem: str, record_id: str) -> dict[str, Any] | None:
-        return copy.deepcopy(self.records.get(record_id))
+        rec = self.records.get(record_id)
+        if isinstance(rec, MalformedRecord):
+            raise rec
+        return copy.deepcopy(rec)
 
     def download_all_zip(self, ecosystem: str, store: RawStore, name: str):
         if ecosystem == self.fail_on:
@@ -101,8 +106,8 @@ def kev_body(*cves: str) -> bytes:
     ]}).encode()
 
 
-def epss_body(rows: dict[str, float]) -> bytes:
-    lines = ["#model_version:v2025.03.14,score_date:2026-10-23T00:00:00Z", "cve,epss,percentile"]
+def epss_body(rows: dict[str, float], day: str = "2026-10-23", model: str = "v2025.03.14") -> bytes:
+    lines = [f"#model_version:{model},score_date:{day}T00:00:00Z", "cve,epss,percentile"]
     lines += [f"{c},{s},0.9" for c, s in rows.items()]
     return gzip.compress("\n".join(lines).encode())
 
@@ -227,7 +232,7 @@ def test_kev_and_epss_signals_after_bootstrap(env):
     pipeline.bootstrap()
     remote[KEV_URL] = kev_body("CVE-2026-1111", "CVE-2026-9999", "CVE-2026-2002")
     pipeline.run_kev()
-    remote[EPSS_URL] = epss_body({"CVE-2026-1111": 0.25, "CVE-2026-2001": 0.6})
+    remote[EPSS_URL] = epss_body({"CVE-2026-1111": 0.25, "CVE-2026-2001": 0.6}, day="2026-10-24")
     pipeline.run_epss()
     got = [(e["advisory_id"], e["change_types"]) for e in events(pipeline)]
     assert got == [("DSA-5999-1", ["kev_added"]), ("DSA-5999-1", ["epss_increased"])]
@@ -319,3 +324,130 @@ def test_suspiciously_small_kev_snapshot_is_refused(env):
     with pytest.raises(ValueError, match="too small"):
         pipeline.run_kev()
     assert q(pipeline, "SELECT COUNT(*) FROM kev_entries") == [(2,)]
+
+
+# ── PR #227 レビュー指摘 (2 回目) の回帰テスト ────────────────────────────
+
+
+def test_malformed_incremental_record_does_not_stall_cursor(env):
+    pipeline, osv, _, _ = env
+    pipeline.bootstrap()
+    good = ghsa(fixed="2.4.4") | {"modified": "2026-10-21T00:00:00Z"}
+    osv.records = {"BAD-1": MalformedRecord("PyPI/BAD-1: invalid JSON"), good["id"]: good}
+    osv.modified = [ModifiedEntry("2026-10-21T00:00:01Z", "PyPI", "BAD-1"),
+                    ModifiedEntry("2026-10-21T00:00:00Z", "PyPI", good["id"])]
+    pipeline.run_osv_incremental()
+    assert pipeline.osv_cursor() == "2026-10-21T00:00:01Z"
+    assert [e["advisory_id"] for e in events(pipeline)] == ["CVE-2026-1111"]
+    assert q(pipeline, "SELECT skipped FROM source_runs WHERE source = 'osv'") == [(1,)]
+
+
+def test_missing_records_are_tracked_and_retried(env):
+    pipeline, osv, _, _ = env
+    pipeline.bootstrap()
+    osv.modified = [ModifiedEntry("2026-10-21T00:00:00Z", "PyPI", "GHSA-gone-gone-gone")]
+    pipeline.run_osv_incremental()
+    assert q(pipeline, "SELECT record_id, attempts FROM osv_missing") == [("GHSA-gone-gone-gone", 1)]
+    assert pipeline.missing_count() == 1
+    # 次の実行では modified_id.csv の範囲外になっていても取り直す
+    osv.modified = []
+    pipeline.run_osv_incremental()
+    assert q(pipeline, "SELECT attempts FROM osv_missing") == [(2,)]
+    osv.records = {"GHSA-gone-gone-gone": {"id": "GHSA-gone-gone-gone", "modified": "2026-10-21T00:00:00Z",
+                                           "aliases": ["CVE-2026-5555"]}}
+    pipeline.run_osv_incremental()
+    assert pipeline.missing_count() == 0
+    assert q(pipeline, "SELECT 1 FROM advisories WHERE advisory_id = 'CVE-2026-5555'") == [(1,)]
+
+
+def test_incremental_respects_ecosystem_filter(env):
+    pipeline, osv, _, _ = env
+    pipeline.ecosystems = ["PyPI"]
+    pipeline.bootstrap()
+    assert sorted(osv.downloaded) == ["PyPI"]
+    osv.modified = [ModifiedEntry(f"2026-10-21T00:00:0{i}Z", "Debian", f"DSA-{i}") for i in reversed(range(5))]
+    osv.downloaded.clear()
+    fetched: list[str] = []
+    osv.fetch_record = lambda eco, rid: fetched.append(rid)  # type: ignore[method-assign]
+    pipeline.run_osv_incremental()
+    assert osv.downloaded == [] and fetched == []
+    assert pipeline.osv_cursor() == "2026-10-21T00:00:04Z"  # 対象外でもカーソルは進む
+
+
+def test_two_level_alias_chain_is_rekeyed(env):
+    pipeline, osv, _, _ = env
+    osv.zips = {"PyPI": [
+        {"id": "G2", "modified": "2026-10-01T00:00:00Z"},
+        {"id": "G1", "modified": "2026-10-01T00:00:00Z", "aliases": ["G2"]},
+        {"id": "P1", "modified": "2026-10-01T00:00:00Z", "aliases": ["G1"]},
+    ]}
+    pipeline.bootstrap()
+    assert set(q(pipeline, "SELECT advisory_id FROM osv_records")) == {("G2",)}
+    g2 = {"id": "G2", "modified": "2026-10-21T00:00:00Z", "aliases": ["CVE-2026-6666"]}
+    osv.records = {"G2": g2}
+    osv.modified = [ModifiedEntry("2026-10-21T00:00:00Z", "PyPI", "G2")]
+    pipeline.run_osv_incremental()
+    assert set(q(pipeline, "SELECT record_id, advisory_id FROM osv_records")) == {
+        ("G2", "CVE-2026-6666"), ("G1", "CVE-2026-6666"), ("P1", "CVE-2026-6666"),
+    }
+
+
+def test_epss_rejects_truncated_snapshot(env):
+    pipeline, _, remote, _ = env
+    pipeline.bootstrap()
+    remote[EPSS_URL] = epss_body({}, day="2026-10-24")
+    with pytest.raises(ValueError, match="too small"):
+        pipeline.run_epss()
+    assert q(pipeline, "SELECT COUNT(*) FROM epss_scores") == [(2,)]
+
+
+def test_epss_model_change_suppresses_rise_events(env):
+    pipeline, _, remote, _ = env
+    pipeline.bootstrap()
+    remote[EPSS_URL] = epss_body({"CVE-2026-1111": 0.9, "CVE-2026-2001": 0.9}, day="2026-10-24", model="v2027")
+    pipeline.run_epss()
+    assert events(pipeline) == []
+    assert q(pipeline, "SELECT epss FROM epss_scores WHERE cve = 'CVE-2026-1111'") == [(0.9,)]
+
+
+def test_same_epss_day_is_not_reingested(env):
+    pipeline, *_ , paths = env
+    pipeline.bootstrap()
+    pipeline.run_epss()
+    assert len(list((paths.raw_dir / "epss").rglob("*.csv.gz"))) == 1
+
+
+def test_unchanged_kev_is_not_saved_again(env):
+    pipeline, *_ , paths = env
+    pipeline.bootstrap()
+    pipeline.run_kev()
+    files = list((paths.raw_dir / "kev").rglob("*.json"))
+    assert len(files) == 1
+    ref = q(pipeline, "SELECT DISTINCT raw_ref FROM kev_entries")
+    assert ref == [(str(files[0].relative_to(paths.root)),)]
+
+
+def test_failed_full_refresh_removes_partial_download(env):
+    pipeline, osv, _, paths = env
+    pipeline.bootstrap()
+    osv.fail_on = "npm"  # PyPI まで落としてから失敗
+    with pytest.raises(RuntimeError):
+        pipeline.run_osv_full()
+    (failed_run,) = q(pipeline, "SELECT run_id FROM source_runs WHERE source = 'osv_full' AND status = 'failed'")
+    assert not list(paths.raw_dir.glob(f"osv/dt=*/full-{failed_run[0]}"))
+    osv.fail_on = None
+    pipeline.run_osv_full()
+    pipeline.run_osv_full()
+    assert len({p.name for p in paths.raw_dir.glob("osv/dt=*/full-*")}) == 2  # 完了した 2 世代だけ
+
+
+def test_full_download_stops_when_disk_is_low(env, monkeypatch):
+    from src.common import raw_store
+    from src.common.raw_store import DiskFull
+
+    pipeline, osv, _, _ = env
+    pipeline.raw._min_free = 10**9
+    monkeypatch.setattr(raw_store.shutil, "disk_usage", lambda _p: type("U", (), {"free": 10})())
+    with pytest.raises(DiskFull):
+        pipeline.bootstrap()
+    assert osv.downloaded == []
