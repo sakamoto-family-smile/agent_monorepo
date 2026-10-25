@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: stg_advisories
+    description: Advisory (CVE 等で名寄せ済み) に KEV・EPSS を結合
+    columns:
+      - name: advisory_id
+        data_tests: [unique, not_null]
+  - name: stg_osv_records
+    description: OSV レコード (情報源ごとの事実)
+    columns:
+      - name: record_id
+        data_tests: [unique, not_null]
+  - name: stg_affected_packages
+    description: Advisory が影響するパッケージ
+  - name: stg_kev
+    description: CISA KEV
+    columns:
+      - name: cve
+        data_tests: [unique, not_null]
+  - name: stg_source_runs
+    description: 情報源ごとの取得実行の記録
+    columns:
+      - name: run_id
+        data_tests: [unique, not_null]
+  - name: stg_advisory_history
+    description: Advisory の変化 (1 変化 1 行)
+  - name: stg_events
+    description: サブシステム間イベント

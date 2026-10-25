@@ -281,7 +281,23 @@ Dashboard で以下が見えること:
 
 ---
 
-## 6. 関連ドキュメント
+## 6. 脆弱性対応フレームワーク (ローカル常駐)
+
+外部の脆弱性情報 (OSV 全エコシステム / CISA KEV / FIRST EPSS) を `data/intel.db` (SQLite) に集約し、
+dbt で `data/security.duckdb` (DuckDB) に分析用として蓄積する。docker compose で常駐させる。
+
+```bash
+docker compose up -d --build   # = make up (intel + analytics)。初回は全量ブートストラップから始まる
+make intel-health              # 情報源ごとの最終成功時刻 (書き込みを伴う make intel-* はコンテナ内で実行)
+make duck-ui                   # DuckDB UI で分析 DB を開く
+```
+
+詳細 (データの持ち方 / 名寄せ規則 / イベント / 分析テーブル / 段階計画) は
+[`docs/VULN_RESPONSE.md`](docs/VULN_RESPONSE.md) を参照。
+
+---
+
+## 7. 関連ドキュメント
 
 - [`docs/DESIGN.md`](docs/DESIGN.md) — システム全体設計 (機能要件 F1-F28 / NFR / アーキ / Roadmap / ADR-lite 15 件 / 用語集)
 - [`config/inventory.yaml`](config/inventory.yaml) — 監視対象 MCP server / npm / pip パッケージ

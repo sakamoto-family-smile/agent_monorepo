@@ -155,6 +155,12 @@ jobs:
               "security-platform/src/collector/": "tests/collector/",
               "security-platform/src/db/":        "tests/db/",
               "security-platform/src/notifier/":  "tests/notifier/",
+              "security-platform/src/common/":    "tests/common/ tests/intel/ tests/analytics/",
+              "security-platform/src/intel/":     "tests/intel/",
+              "security-platform/src/analytics/": "tests/analytics/",
+              "security-platform/migrations/":    "tests/common/ tests/intel/",
+              "security-platform/dbt/":           "tests/analytics/",
+              "security-platform/config/services.yaml": "tests/common/",
           }
           FULL_SUITE_TRIGGERS = [
               "security-platform/src/config.py",
@@ -199,6 +205,13 @@ jobs:
         run: |
           uv run pytest ${{ steps.map.outputs.test_paths }} \
             --tb=short -v --no-header
+
+      # 空の運用 DB に対して dbt build を通し、モデル・スナップショットの SQL を検証する
+      - name: dbt build (empty databases)
+        env:
+          DATA_DIR: ${{ runner.temp }}/security-data
+          DBT_SEND_ANONYMOUS_USAGE_STATS: "false"
+        run: uv run python -m src.analytics build
 
       - name: Upload test results
         if: always()

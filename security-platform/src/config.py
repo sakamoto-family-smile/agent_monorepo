@@ -49,5 +49,28 @@ class Settings(BaseSettings):
     proxy_host: str = "0.0.0.0"  # nosec B104
     proxy_port: int = 8080
 
+    # ── 脆弱性対応 (A1 intel / A2 detection / B remediation) ──────────────
+    # 生データ・運用 DB (SQLite)・分析 DB (DuckDB)・イベントログの置き場所。
+    data_dir: Path = BASE_DIR / "data"
+
+    # A1: 情報源
+    osv_base_url: str = "https://osv-vulnerabilities.storage.googleapis.com"
+    osv_ecosystems: str = ""  # CSV。空なら ecosystems.txt の全エコシステム
+    osv_full_refresh_days: int = 7  # 全量ダンプの再取得間隔
+    osv_incremental_max_records: int = 3000  # 超えたら該当エコシステムを全量取得に切替
+    osv_raw_full_snapshots_kept: int = 2  # data/raw/osv の全量スナップショット保持数
+    raw_retention_days: int = 30  # KEV・EPSS・OSV 差分の生データ保持日数 (全量は世代数で管理)
+    min_free_disk_gb: float = 10.0  # data/ の空きがこれを下回ったら大きな取得を止める (0 で無効)
+    healthcheck_ping_base: str = ""  # 例: https://hc-ping.com/<ping-key>。空なら ping しない
+    kev_url: str = (
+        "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    )
+    epss_url: str = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
+    epss_event_delta: float = 0.1  # この幅以上の上昇で advisory.changed を出す
+    http_timeout_seconds: float = 60.0
+
+    # 分析 DB (DuckDB) の再構築間隔
+    analytics_interval_minutes: int = 60
+
 
 settings = Settings()

@@ -1,0 +1,12 @@
+snapshots:
+  - name: snp_advisories
+    description: >
+      Advisory の変更履歴 (SCD2)。運用 DB は現在の状態しか持たないため、
+      深刻度・影響範囲・修正版・取り下げの推移はここに積み上げる。
+      EPSS は毎日ほぼ全件が動くので対象外 (必要なら別途日次スナップショットを作る)。
+    relation: source('intel', 'advisories')
+    config:
+      unique_key: advisory_id
+      strategy: check
+      check_cols: [cvss_score, severity, withdrawn, record_count, affected_hash, fixed_hash, cves_json]
+      hard_deletes: invalidate

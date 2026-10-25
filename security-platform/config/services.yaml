@@ -1,0 +1,105 @@
+# 資産台帳 (A2 内部該当検知の入力)。人が書くのはサービスのメタデータだけ。
+# パッケージの一覧は lockfile から作る SBOM が正 (旧 inventory.yaml の手書き一覧は使わない)。
+#
+#   exposure:         external (インターネット公開) / internal / none (ローカルのみ)
+#   deployed:         本番で稼働しているか (優先度の判定に使う。README の GCP デプロイ状況と一致させる)
+#   lockfiles:        SBOM を作る lockfile (path からの相対)。空なら照合対象外 (lock を先に作る)
+#   auto_remediation: B (自動改修) の対象にするか
+services:
+  - id: piyolog-analytics
+    path: piyolog-analytics/
+    exposure: external          # LINE webhook
+    deployed: true
+    lockfiles: [uv.lock]
+    auto_remediation: true
+
+  - id: driving-license-bot
+    path: driving-license-bot/
+    exposure: external          # LINE webhook / admin UI
+    deployed: true
+    lockfiles: [uv.lock]
+    auto_remediation: true
+
+  - id: fujisawa-info-bot
+    path: fujisawa-info-bot/
+    exposure: external          # LINE webhook
+    deployed: true
+    lockfiles: [uv.lock]
+    auto_remediation: true
+
+  - id: fujisawa-platform
+    path: fujisawa-platform/
+    exposure: internal          # Cloud Run Jobs (ETL)
+    deployed: true
+    lockfiles: []               # uv.lock 未作成
+    auto_remediation: false
+
+  - id: kanie-lab-agent-backend
+    path: kanie-lab-agent/backend/
+    exposure: none
+    deployed: false
+    lockfiles: [uv.lock]
+    auto_remediation: true
+
+  - id: kanie-lab-agent-frontend
+    path: kanie-lab-agent/frontend/
+    exposure: none
+    deployed: false
+    lockfiles: [package-lock.json]
+    auto_remediation: true
+
+  - id: stock-analysis-agent
+    path: stock-analysis-agent/
+    exposure: none              # terraform は ingress=all。稼働させたら external に変更
+    deployed: false
+    lockfiles: []               # uv.lock 未作成
+    auto_remediation: false
+
+  - id: lifeplanner-agent
+    path: lifeplanner-agent/
+    exposure: none
+    deployed: false
+    lockfiles: []               # uv.lock 未作成
+    auto_remediation: false
+
+  - id: hotcook-agent
+    path: hotcook-agent/
+    exposure: none
+    deployed: false
+    lockfiles: []               # uv.lock 未作成
+    auto_remediation: false
+
+  - id: tech-news-agent
+    path: tech-news-agent/
+    exposure: none
+    deployed: false
+    lockfiles: [uv.lock]
+    auto_remediation: true
+
+  - id: analytics-platform
+    path: analytics-platform/
+    exposure: none
+    deployed: false
+    lockfiles: [uv.lock]
+    auto_remediation: true
+
+  - id: security-platform
+    path: security-platform/
+    exposure: none
+    deployed: false
+    lockfiles: [uv.lock]
+    auto_remediation: false     # 自分自身は人が直す
+
+  - id: llm-client
+    path: llm-client/
+    exposure: none              # ライブラリ (利用側の lockfile で照合される)
+    deployed: false
+    lockfiles: [uv.lock]
+    auto_remediation: true
+
+  - id: edinet-client
+    path: edinet-client/
+    exposure: none              # ライブラリ
+    deployed: false
+    lockfiles: [uv.lock]
+    auto_remediation: true

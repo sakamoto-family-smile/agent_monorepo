@@ -1,0 +1,27 @@
+name: security_platform
+version: "0.1.0"
+config-version: 2
+profile: security_platform
+
+model-paths: ["models"]
+snapshot-paths: ["snapshots"]
+macro-paths: ["macros"]
+
+# staging / marts はすべて table。security.duckdb を単体で開いても
+# (運用 DB を ATTACH していなくても) 中身を見られるようにするため。
+models:
+  security_platform:
+    +materialized: table
+    staging:
+      +schema: staging
+    marts:
+      +schema: marts
+
+snapshots:
+  security_platform:
+    +schema: history
+
+# データ品質テストは観測用。失敗しても security.duckdb の更新は止めない
+data_tests:
+  security_platform:
+    +severity: warn

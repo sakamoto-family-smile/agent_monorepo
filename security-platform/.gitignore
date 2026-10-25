@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+.coverage
 *.egg-info/
 
 # Sensitive config - copy from .env.example
@@ -13,9 +14,26 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 
+config/vuln.env
+
+# 脆弱性対応のデータ。生データ・osv-scanner DB は再取得できるが、次は再構築できない:
+# 運用 DB の履歴 (advisory_history / events / source_runs)、分析 DB のスナップショット (history.snp_*)、
+# イベントの JSONL。リポジトリには入れず、別途バックアップする (docs/VULN_RESPONSE.md)
+data/raw/
+data/events/
+data/osv-db/
+data/.dbt/
+data/.locks/
+data/*.duckdb
+data/*.duckdb.wal
+data/.analytics_last_success
+
 # Logs (generated)
 logs/*.jsonl
 logs/*.log
 logs/*.json
 logs/*.html
 !logs/.gitkeep
+
+# dbt が自動生成する匿名 ID
+dbt/.user.yml

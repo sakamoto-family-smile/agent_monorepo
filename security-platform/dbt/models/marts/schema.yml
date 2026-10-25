@@ -1,0 +1,22 @@
+version: 2
+
+models:
+  - name: mart_source_freshness
+    description: 情報源ごとの最終成功時刻・24 時間の実行件数と失敗数
+    columns:
+      - name: source
+        data_tests: [unique, not_null]
+  - name: mart_advisory_lead_time
+    description: CVE が各情報源 (GHSA / PYSEC / DSA / KEV ...) に載った時刻と最初からの遅れ
+  - name: mart_advisories_by_ecosystem
+    description: エコシステムごとの Advisory 件数と深刻度の内訳
+    columns:
+      - name: ecosystem
+        data_tests: [unique, not_null]
+  - name: mart_kev_coverage
+    description: KEV 掲載 CVE のうちパッケージ単位で照合できるもの
+    columns:
+      - name: cve
+        data_tests: [unique, not_null]
+  - name: mart_daily_changes
+    description: 日別・変化の種類別の件数
