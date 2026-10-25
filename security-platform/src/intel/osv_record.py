@@ -116,6 +116,16 @@ def _summary(raw: dict[str, Any]) -> str | None:
     return text[:SUMMARY_MAX] or None
 
 
+# Red Hat 系 (AlmaLinux 等) は深刻度を構造化フィールドでなく summary の先頭 ("Important: ...") に書く
+_SUMMARY_SEVERITY = re.compile(r"^(Critical|Important|Moderate|Low):\s")
+_SUMMARY_SEVERITY_LABELS = {"Critical": "CRITICAL", "Important": "HIGH", "Moderate": "MEDIUM", "Low": "LOW"}
+
+
+def severity_label_from_summary(summary: str | None) -> str | None:
+    m = _SUMMARY_SEVERITY.match(summary or "")
+    return _SUMMARY_SEVERITY_LABELS[m.group(1)] if m else None
+
+
 def parse_record(raw: dict[str, Any]) -> OsvRecord:
     record_id = raw["id"]
     affected_raw = raw.get("affected") or []
@@ -124,6 +134,8 @@ def parse_record(raw: dict[str, Any]) -> OsvRecord:
         severities.extend(a.get("severity") or [])
     vector, score = _best_cvss(severities)
     label = (raw.get("database_specific") or {}).get("severity")
+    if not isinstance(label, str):
+        label = severity_label_from_summary(raw.get("summary"))
     return OsvRecord(
         record_id=record_id,
         aliases=tuple(sorted(set(raw.get("aliases") or []) - {record_id})),

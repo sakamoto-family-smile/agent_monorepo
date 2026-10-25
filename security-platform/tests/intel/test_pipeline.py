@@ -157,6 +157,57 @@ def test_bootstrap_builds_advisories_without_change_events(env):
     assert pipeline.bootstrap() is False
 
 
+MAL = {
+    "id": "MAL-2026-100", "modified": "2026-10-01T00:00:00Z",
+    "summary": "Malicious code in evilpkg (npm)",
+    "affected": [{"package": {"ecosystem": "npm", "name": "evilpkg"}, "ranges": []}],
+}
+ALSA = {
+    "id": "ALSA-2026:A014", "modified": "2026-10-01T00:00:00Z",
+    "summary": "Important: php:8.1 security update",
+    "affected": [{"package": {"ecosystem": "AlmaLinux:9", "name": "php"}, "ranges": []}],
+}
+
+
+def _bootstrap_with_mal_and_alsa(env):
+    pipeline, osv, _, _ = env
+    osv.zips["npm"].append(MAL)
+    osv.zips["AlmaLinux"] = [ALSA]
+    assert pipeline.bootstrap() is True
+    return pipeline
+
+
+def test_malicious_kind_and_summary_severity(env):
+    pipeline = _bootstrap_with_mal_and_alsa(env)
+    rows = dict(q(pipeline, "SELECT advisory_id, kind || '/' || coalesce(severity, '-') FROM advisories "
+                            "WHERE advisory_id IN ('MAL-2026-100', 'ALSA-2026:A014', 'CVE-2026-1111')"))
+    assert rows == {
+        "MAL-2026-100": "malicious/-",
+        "ALSA-2026:A014": "vulnerability/HIGH",
+        "CVE-2026-1111": "vulnerability/CRITICAL",
+    }
+
+
+def test_migration_0002_backfills_existing_rows(env):
+    """0001 時点で取り込んだデータ (kind 未分類・summary の深刻度なし) を 0002 が補正する。"""
+    from alembic import command
+
+    from src.common.migrate import alembic_config, upgrade
+
+    pipeline = _bootstrap_with_mal_and_alsa(env)
+    paths = env[3]
+    command.downgrade(alembic_config("intel", paths), "0001")
+    with pipeline.engine.begin() as conn:
+        conn.execute(text("UPDATE osv_records SET severity_label = NULL WHERE record_id = 'ALSA-2026:A014'"))
+        conn.execute(text("UPDATE advisories SET severity = NULL WHERE advisory_id = 'ALSA-2026:A014'"))
+    assert q(pipeline, "SELECT count(*) FROM advisories WHERE kind = 'malicious'") == [(0,)]
+
+    upgrade("intel", paths)
+    assert q(pipeline, "SELECT kind FROM advisories WHERE advisory_id = 'MAL-2026-100'") == [("malicious",)]
+    assert q(pipeline, "SELECT severity_label FROM osv_records WHERE record_id = 'ALSA-2026:A014'") == [("HIGH",)]
+    assert q(pipeline, "SELECT advisory_id FROM advisories_dirty") == [("ALSA-2026:A014",)]
+
+
 def test_bootstrap_resumes_after_failure(env):
     pipeline, osv, _, _ = env
     osv.fail_on = "Debian"

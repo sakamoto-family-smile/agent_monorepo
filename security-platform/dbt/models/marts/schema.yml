@@ -9,7 +9,7 @@ models:
   - name: mart_advisory_lead_time
     description: CVE が各情報源 (GHSA / PYSEC / DSA / KEV ...) に載った時刻と最初からの遅れ
   - name: mart_advisories_by_ecosystem
-    description: エコシステムごとの Advisory 件数と深刻度の内訳
+    description: エコシステムごとの Advisory 件数と深刻度の内訳 (悪性パッケージは malicious 列に分け、深刻度の内訳から除く)
     columns:
       - name: ecosystem
         data_tests: [unique, not_null]
