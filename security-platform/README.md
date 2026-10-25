@@ -18,7 +18,7 @@ OWASP ASI / OWASP LLM Top 10 のカバレッジを得られる。
 
 | ツール | バージョン | 備考 |
 |---|---|---|
-| Python | 3.12+ | `pyproject.toml` で指定 |
+| Python | 3.15+ | `pyproject.toml` で指定 |
 | uv | 最新 | パッケージ管理 (推奨)、pip でも可 |
 | Node.js | 18+ | MCP scan / Red team script に必要 |
 | gcloud CLI | 最新 | Vertex AI Gemini を使う場合のみ |

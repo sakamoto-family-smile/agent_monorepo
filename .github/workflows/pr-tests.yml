@@ -125,6 +125,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.security_platform == 'true'
     runs-on: ubuntu-latest
+    env:
+      # security-platform は 3.15 (infra/Dockerfile・.python-version と揃える)
+      UV_PYTHON: "3.15"
     defaults:
       run:
         working-directory: security-platform
@@ -166,6 +169,7 @@ jobs:
               "security-platform/src/config.py",
               "security-platform/pyproject.toml",
               "security-platform/uv.lock",
+              "security-platform/.python-version",
           ]
 
           import subprocess
