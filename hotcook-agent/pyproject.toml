@@ -10,7 +10,7 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "pydantic>=2.6.0",
     "rapidfuzz>=3.0.0",
-    "claude-agent-sdk",
+    "claude-agent-sdk>=0.2.174",
     "analytics-platform",
 ]
 

@@ -1,0 +1,13 @@
+# リポジトリルートを build context にする docker build 用 (driving-license-bot 等)。
+# 秘密情報をローカルの build context に含めない。Dockerfile ごとの
+# <Dockerfile>.dockerignore がある場合はそちらが優先される。
+**/.env*
+**/*.pem
+**/*.key
+**/*-key.json
+**/*service-account*.json
+**/*credentials*.json
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/terraform.tfvars

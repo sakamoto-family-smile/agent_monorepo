@@ -44,7 +44,8 @@ def test_enqueue_builds_request(_patched):
     assert http["url"] == "https://worker.example/api/tasks/analyze"
     assert json.loads(http["body"]) == {"user_id": "U_a", "target": "トヨタ"}
     assert http["oidc_token"]["service_account_email"] == "inv@p.iam.gserviceaccount.com"
-    assert http["oidc_token"]["audience"] == "https://worker.example/api/tasks/analyze"
+    # Cloud Run の IAM 認証はサービス URL を audience に要求する (パスは含めない)
+    assert http["oidc_token"]["audience"] == "https://worker.example"
 
 
 def test_enqueue_without_invoker_sa_omits_oidc(_patched, monkeypatch):

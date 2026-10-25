@@ -24,7 +24,17 @@
 **/*.tfstate
 **/*.tfstate.*
 **/terraform.tfvars
-**/.env.secrets
+**/*.tfplan
+**/terraform/*.out
+
+# 秘密情報: ローカルの env ファイル・鍵は Cloud Build のステージングバケットに上げない
+# (.env.example も不要なので .env* でまとめて除外する)
+**/.env*
+**/*.pem
+**/*.key
+**/*-key.json
+**/*service-account*.json
+**/*credentials*.json
 
 # OS
 .DS_Store
@@ -47,7 +57,7 @@ agent-system-2/
 hotcook-agent/
 kanie-lab-agent/
 lifeplanner-agent/
-llm-client/
+# llm-client/  ← driving-license-bot が path dep として参照するため除外しない。
 # piyolog-analytics/  ← piyolog の Cloud Build が同 .gcloudignore を参照するため除外しない。
 #                        他 agent (driving-license-bot 等) の image には Dockerfile.dockerignore 側で弾かれる。
 security-platform/

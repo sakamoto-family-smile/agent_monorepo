@@ -54,9 +54,10 @@ docker-build:  ## Docker image を build（リポジトリルートから実行�
 		.
 
 docker-run:  ## Docker image をローカル起動
+	@# 値は argv に載せず (ps で見える)、変数名だけ渡して現在の環境から引き継がせる
 	docker run --rm -p 8080:8080 \
-		-e LINE_CHANNEL_SECRET="$$LINE_CHANNEL_SECRET" \
-		-e LINE_CHANNEL_ACCESS_TOKEN="$$LINE_CHANNEL_ACCESS_TOKEN" \
+		-e LINE_CHANNEL_SECRET \
+		-e LINE_CHANNEL_ACCESS_TOKEN \
 		$(IMAGE_NAME):$(IMAGE_TAG)
 
 # ---- GCP デプロイ系（Terraform 主導） ----

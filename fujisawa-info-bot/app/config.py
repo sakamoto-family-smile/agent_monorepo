@@ -13,6 +13,7 @@ env 名のルール:
 
 from __future__ import annotations
 
+import os
 from typing import Literal
 
 from pydantic import Field
@@ -66,6 +67,26 @@ class Settings(BaseSettings):
     # env: FUJISAWA_INFO_BOT_RAG_ENABLED / FUJISAWA_INFO_BOT_RAG_TOP_K
     rag_enabled: bool = Field(default=True)
     rag_top_k: int = Field(default=5)
+
+    # ── API docs ──────────────────────────────────────────────────────
+    # env: FUJISAWA_INFO_BOT_ENABLE_API_DOCS
+    # FastAPI の /docs・/redoc・/openapi.json を公開するか。 既定 (false) では
+    # Cloud Run 外 (= ローカル開発 / CI) のときだけ公開する。 本番で一時的に
+    # 見たい場合のみ明示的に true にする。
+    enable_api_docs: bool = Field(default=False)
+
+    @property
+    def running_on_cloud_run(self) -> bool:
+        """Cloud Run 上で動いているか。
+
+        本サービスには環境種別の設定値が無いため、 Cloud Run が全 revision に
+        必ず注入する予約済み env `K_SERVICE` の有無で判定する。
+        """
+        return bool(os.environ.get("K_SERVICE"))
+
+    @property
+    def api_docs_enabled(self) -> bool:
+        return self.enable_api_docs or not self.running_on_cloud_run
 
     @property
     def line_configured(self) -> bool:

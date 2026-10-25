@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import pytest
 
 import config
@@ -103,6 +105,19 @@ def test_html_falls_back_to_pre_on_conversion_error(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+class _FakeCredentials:
+    valid = True
+    token = "access-token"
+    service_account_email = "runtime@p.iam.gserviceaccount.com"
+
+
+@pytest.fixture(autouse=True)
+def _fake_google_auth(monkeypatch):
+    import google.auth
+
+    monkeypatch.setattr(google.auth, "default", lambda: (_FakeCredentials(), "p"))
+
+
 class _FakeBlob:
     def __init__(self):
         self.content_disposition = None
@@ -111,6 +126,10 @@ class _FakeBlob:
     def upload_from_string(self, data, content_type=None):
         self.uploaded = (data, content_type)
 
+    def generate_signed_url(self, **kwargs):
+        self.signed_kwargs = kwargs
+        return f"https://storage.googleapis.com/media-bkt/{self.name}?X-Goog-Signature=sig"
+
 
 class _FakeBucket:
     def __init__(self):
@@ -118,6 +137,7 @@ class _FakeBucket:
 
     def blob(self, name):
         b = _FakeBlob()
+        b.name = name
         self.blobs[name] = b
         return b
 
@@ -138,11 +158,36 @@ def test_gcs_image_url(monkeypatch):
     )
     from google.cloud import storage
 
-    monkeypatch.setattr(storage, "Client", _FakeClient)
+    fake_client = _FakeClient()
+    monkeypatch.setattr(storage, "Client", lambda: fake_client)
 
     url = media.store_chart_png(b"PNGDATA")
-    assert url.startswith("https://storage.googleapis.com/media-bkt/image/")
-    assert url.endswith(".png")
+    path = urlsplit(url).path
+    assert path.startswith("/media-bkt/image/") and path.endswith(".png")
+    assert "X-Goog-Signature=" in url
+
+    # 非公開バケット: runtime SA の IAM signBlob で V4 署名した GET URL を返す
+    blob = next(iter(fake_client._bucket.blobs.values()))
+    kw = blob.signed_kwargs
+    assert kw["version"] == "v4" and kw["method"] == "GET"
+    assert kw["service_account_email"] == "runtime@p.iam.gserviceaccount.com"
+    assert kw["access_token"] == "access-token"
+    assert kw["expiration"].total_seconds() == config.settings.media_signed_url_ttl_seconds
+
+
+def test_gcs_signing_failure_returns_none(monkeypatch):
+    """署名できない (権限不足等) ときは media なしで要約のみ配信できるよう None。"""
+    monkeypatch.setattr(config.settings, "media_backend", "gcs")
+    monkeypatch.setattr(config.settings, "media_gcs_bucket", "media-bkt")
+    from google.cloud import storage
+
+    monkeypatch.setattr(storage, "Client", _FakeClient)
+
+    def _boom(self, **kwargs):
+        raise RuntimeError("signBlob denied")
+
+    monkeypatch.setattr(_FakeBlob, "generate_signed_url", _boom)
+    assert media.store_chart_png(b"PNGDATA") is None
 
 
 def test_gcs_report_sets_attachment(monkeypatch):
@@ -154,7 +199,8 @@ def test_gcs_report_sets_attachment(monkeypatch):
     monkeypatch.setattr(storage, "Client", lambda: fake_client)
 
     url = media.store_report_md("# r")
-    assert "/report/" in url and url.endswith(".md")
+    path = urlsplit(url).path
+    assert "/report/" in path and path.endswith(".md")
     blob = next(iter(fake_client._bucket.blobs.values()))
     assert blob.content_disposition.startswith("attachment;")
 
@@ -169,7 +215,7 @@ def test_gcs_html_is_inline_not_attachment(monkeypatch):
     monkeypatch.setattr(storage, "Client", lambda: fake_client)
 
     url = media.store_report_html("# r")
-    assert url.endswith(".html")
+    assert urlsplit(url).path.endswith(".html")
     blob = next(iter(fake_client._bucket.blobs.values()))
     assert blob.content_disposition is None
     assert blob.uploaded[1] == "text/html; charset=utf-8"
