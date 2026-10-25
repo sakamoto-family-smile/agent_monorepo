@@ -33,6 +33,10 @@ class InvalidSignatureError(Exception):
     """LINE 署名検証失敗。"""
 
 
+class MalformedWebhookBodyError(Exception):
+    """署名は正しいが body が UTF-8 / JSON として解釈できない。"""
+
+
 _client_singleton: LineBotClient | None = None
 
 
@@ -78,11 +82,18 @@ class LineBotClient:
             raise InvalidSignatureError("signature mismatch")
 
     def parse_events(self, body: bytes, signature: str) -> list[Event]:
-        """署名検証 + パース。"""
+        """署名検証 + パース。
+
+        署名は decode 前の bytes で先に検証する。未認証の不正な body (非 UTF-8 等) で
+        500 を返さないため、また検証前に body を解釈しないため。
+        """
+        self.verify_signature(body, signature)
         try:
             return self._parser.parse(body.decode("utf-8"), signature)
         except _SDKInvalidSignatureError as exc:
             raise InvalidSignatureError(str(exc)) from exc
+        except ValueError as exc:  # UnicodeDecodeError / JSONDecodeError を含む
+            raise MalformedWebhookBodyError(str(exc)) from exc
 
     def reply_text(self, reply_token: str, messages: list[str]) -> None:
         """複数行のテキスト Reply Message。"""
@@ -110,6 +121,7 @@ class LineBotClient:
 __all__ = [
     "InvalidSignatureError",
     "LineBotClient",
+    "MalformedWebhookBodyError",
     "MessageEvent",
     "get_line_bot_client",
     "reset_line_bot_client",

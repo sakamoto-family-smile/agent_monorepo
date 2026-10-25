@@ -193,7 +193,7 @@ async def test_detail_renders_csrf_token_in_both_forms(client: TestClient) -> No
     resp = client.get("/questions/q_forms")
     assert resp.status_code == 200
     tokens = _CSRF_INPUT_RE.findall(resp.text)
-    assert len(tokens) == 2  # approve / reject
+    assert len(tokens) == 3  # approve / reject / header の logout
     assert len(set(tokens)) == 1
     # 同一 session では token は安定 (再描画で変わらない)
     again = client.get("/questions/q_forms")
