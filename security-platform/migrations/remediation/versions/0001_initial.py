@@ -75,7 +75,9 @@ def _create_db_info() -> None:
         sa.Column("key", sa.Text, primary_key=True),
         sa.Column("value", sa.Text, nullable=False),
     )
-    op.execute(f"INSERT INTO db_info (key, value) VALUES ('epoch', '{uuid.uuid4().hex}')")
+    op.get_bind().execute(
+        sa.text("INSERT INTO db_info (key, value) VALUES ('epoch', :v)"), {"v": uuid.uuid4().hex}
+    )
 
 
 def downgrade() -> None:

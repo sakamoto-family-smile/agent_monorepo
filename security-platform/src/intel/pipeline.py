@@ -145,11 +145,12 @@ class IntelPipeline:
                 return
 
     # ── meta / cursor ─────────────────────────────────────────────────────
-    def _get(self, table: str, key_col: str, val_col: str, key: str) -> str | None:
+    def _scalar(self, sql: str, key: str) -> str | None:
         with self.engine.connect() as conn:
-            return conn.execute(
-                text(f"SELECT {val_col} FROM {table} WHERE {key_col} = :k"), {"k": key}
-            ).scalar()
+            return conn.execute(text(sql), {"k": key}).scalar()
+
+    def _meta(self, key: str) -> str | None:
+        return self._scalar("SELECT value FROM meta WHERE key = :k", key)
 
     def _set_meta(self, key: str, value: str) -> None:
         with self.engine.begin() as conn:
@@ -160,7 +161,7 @@ class IntelPipeline:
             )
 
     def osv_cursor(self) -> str | None:
-        return self._get("source_cursors", "source", "cursor", OSV_CURSOR)
+        return self._scalar("SELECT cursor FROM source_cursors WHERE source = :k", OSV_CURSOR)
 
     def _advance_osv_cursor(self, value: str | None) -> None:
         current = self.osv_cursor()
@@ -175,7 +176,7 @@ class IntelPipeline:
             )
 
     def is_bootstrapped(self) -> bool:
-        return self._get("meta", "key", "value", META_BOOTSTRAPPED) is not None
+        return self._meta(META_BOOTSTRAPPED) is not None
 
     def _successful_runs(self, source: str) -> set[str]:
         with self.engine.connect() as conn:
@@ -192,8 +193,8 @@ class IntelPipeline:
             entries = kev_source.parse_kev(body)
             ctx.fetched = len(entries)
             sha = hashlib.sha256(body).hexdigest()
-            raw_ref = self._get("meta", "key", "value", META_KEV_RAW)
-            if sha != self._get("meta", "key", "value", META_KEV_SHA) or raw_ref is None:
+            raw_ref = self._meta(META_KEV_RAW)
+            if sha != self._meta(META_KEV_SHA) or raw_ref is None:
                 raw_ref = self.raw.relative(self.raw.write_bytes("kev", f"kev-{ctx.run_id}.json", body))
             with self.engine.begin() as conn:
                 touched = upsert_kev(conn, ctx, entries, raw_ref)
@@ -213,11 +214,11 @@ class IntelPipeline:
         with self._run("epss", "snapshot", emit=emit) as ctx:
             body = self.fetch_bytes(self.epss_url)
             sd = epss_source.score_date(body)
-            if sd is not None and sd == self._get("meta", "key", "value", META_EPSS_SCORE_DATE):
+            if sd is not None and sd == self._meta(META_EPSS_SCORE_DATE):
                 logger.info("epss %s already ingested; skipping", sd)
                 return
             model = epss_source.model_version(body)
-            prev_model = self._get("meta", "key", "value", META_EPSS_MODEL)
+            prev_model = self._meta(META_EPSS_MODEL)
             model_changed = prev_model is not None and model is not None and model != prev_model
             if model_changed:
                 logger.warning("EPSS model changed %s -> %s; skipping rise detection", prev_model, model)
@@ -291,11 +292,11 @@ class IntelPipeline:
             self._drain_dirty(ctx)
             head = self.osv.latest_modified()
             if bootstrap:
-                pinned = self._get("meta", "key", "value", META_BOOTSTRAP_HEAD)
+                pinned = self._meta(META_BOOTSTRAP_HEAD)
                 if pinned is None and head is not None:
                     self._set_meta(META_BOOTSTRAP_HEAD, head)
                 head = pinned or head
-            done = set(json.loads(self._get("meta", "key", "value", META_BOOTSTRAP_DONE_ECOS) or "[]"))
+            done = set(json.loads(self._meta(META_BOOTSTRAP_DONE_ECOS) or "[]"))
             total = 0
             try:
                 for eco in self.ecosystems or self.osv.list_ecosystems():
