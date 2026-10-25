@@ -25,7 +25,15 @@
 <body>
   <header>
     <h1>{{ service_name }}</h1>
-    <div class="user">{{ user_email }}</div>
+    <div class="user">
+      {{ user_email }}
+      {% if user_email %}
+        <form method="post" action="/logout" style="display: inline; margin-left: 8px;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" style="font-size: 12px; background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--fg); cursor: pointer;">ログアウト</button>
+        </form>
+      {% endif %}
+    </div>
   </header>
   <main>
     {% block content %}{% endblock %}
