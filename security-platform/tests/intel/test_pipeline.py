@@ -192,7 +192,7 @@ def test_migration_0002_backfills_existing_rows(env):
     """0001 時点で取り込んだデータ (kind 未分類・summary の深刻度なし) を 0002 が補正する。"""
     from alembic import command
 
-    from src.common.migrate import alembic_config, upgrade
+    from src.common.migrate import alembic_config
 
     pipeline = _bootstrap_with_mal_and_alsa(env)
     paths = env[3]
@@ -202,10 +202,76 @@ def test_migration_0002_backfills_existing_rows(env):
         conn.execute(text("UPDATE advisories SET severity = NULL WHERE advisory_id = 'ALSA-2026:A014'"))
     assert q(pipeline, "SELECT count(*) FROM advisories WHERE kind = 'malicious'") == [(0,)]
 
-    upgrade("intel", paths)
+    command.upgrade(alembic_config("intel", paths), "0002")
     assert q(pipeline, "SELECT kind FROM advisories WHERE advisory_id = 'MAL-2026-100'") == [("malicious",)]
     assert q(pipeline, "SELECT severity_label FROM osv_records WHERE record_id = 'ALSA-2026:A014'") == [("HIGH",)]
     assert q(pipeline, "SELECT advisory_id FROM advisories_dirty") == [("ALSA-2026:A014",)]
+
+
+CGA_NO_CVE = {
+    "id": "CGA-0000-aaaa-bbbb", "modified": "2026-10-01T00:00:00Z",
+    "upstream": ["GHSA-aaaa-bbbb-cccc"],
+    "affected": [{"package": {"ecosystem": "Wolfi", "name": "examplelib"}, "ranges": []}],
+}
+USN_BUNDLE = {
+    "id": "USN-9000-1", "modified": "2026-10-01T00:00:00Z",
+    "upstream": ["CVE-2026-1111", "CVE-2026-2001"],
+    "affected": [{"package": {"ecosystem": "Ubuntu:24.04:LTS", "name": "examplelib"}, "ranges": []}],
+}
+
+
+def test_severity_inherited_from_upstream(env):
+    """自分で深刻度を持たないレコードは upstream の Advisory から引き継ぐ (record_id でも CVE 番号でも引ける)。"""
+    pipeline, osv, _, _ = env
+    osv.zips["Wolfi"] = [CGA_NO_CVE]
+    osv.zips["Ubuntu"] = [USN_BUNDLE]
+    pipeline.bootstrap()
+    rows = {r[0]: r[1:] for r in q(pipeline, "SELECT advisory_id, cvss_score, severity FROM advisories "
+                                             "WHERE advisory_id IN ('CGA-0000-aaaa-bbbb', 'USN-9000-1', 'DSA-5999-1')")}
+    assert rows == {
+        "CGA-0000-aaaa-bbbb": (None, "CRITICAL"),  # GHSA のレコード ID 経由 (CVE-2026-1111)
+        "USN-9000-1": (None, "CRITICAL"),          # CVE 番号 = Advisory ID 経由。未知の CVE は無視
+        "DSA-5999-1": (None, None),                # upstream の CVE がどれも未取り込み
+    }
+
+
+def test_upstream_severity_change_propagates(env):
+    """upstream 側の深刻度が後から変わったら、引き継いでいる Advisory も再集計してイベントを出す。"""
+    pipeline, osv, _, _ = env
+    unscored = ghsa()
+    del unscored["severity"]
+    osv.zips["PyPI"] = [unscored, PYSEC]
+    osv.zips["Wolfi"] = [CGA_NO_CVE]
+    pipeline.bootstrap()
+    assert q(pipeline, "SELECT severity FROM advisories WHERE advisory_id = 'CGA-0000-aaaa-bbbb'") == [(None,)]
+
+    osv.records = {"GHSA-aaaa-bbbb-cccc": ghsa() | {"modified": "2026-10-21T00:00:00Z"}}
+    osv.modified = [ModifiedEntry("2026-10-21T00:00:00Z", "PyPI", "GHSA-aaaa-bbbb-cccc")]
+    pipeline.run_osv_incremental()
+    got = {e["advisory_id"]: e["change_types"] for e in events(pipeline)}
+    assert got == {"CVE-2026-1111": ["severity_changed"], "CGA-0000-aaaa-bbbb": ["severity_changed"]}
+    assert q(pipeline, "SELECT severity FROM advisories WHERE advisory_id = 'CGA-0000-aaaa-bbbb'") == [("CRITICAL",)]
+    assert q(pipeline, "SELECT count(*) FROM advisories_dirty") == [(0,)]
+
+
+def test_migration_0003_queues_unscored_advisories_with_upstream(env):
+    from alembic import command
+
+    from src.common.migrate import alembic_config, upgrade
+
+    pipeline, osv, _, paths = env
+    osv.zips["Wolfi"] = [CGA_NO_CVE]
+    pipeline.bootstrap()
+    command.downgrade(alembic_config("intel", paths), "0002")
+    with pipeline.engine.begin() as conn:
+        conn.execute(text("UPDATE advisories SET severity = NULL WHERE advisory_id = 'CGA-0000-aaaa-bbbb'"))
+    upgrade("intel", paths)
+    # DSA-5999-1 も深刻度なし + upstream ありなので対象 (再集計しても変わらない)
+    assert q(pipeline, "SELECT advisory_id FROM advisories_dirty ORDER BY 1") == [
+        ("CGA-0000-aaaa-bbbb",), ("DSA-5999-1",),
+    ]
+    pipeline.run_osv_incremental()
+    assert q(pipeline, "SELECT severity FROM advisories WHERE advisory_id = 'CGA-0000-aaaa-bbbb'") == [("CRITICAL",)]
 
 
 def test_bootstrap_resumes_after_failure(env):

@@ -220,6 +220,11 @@ OSV レコードを CVE 番号で 1 件の Advisory にまとめる (`src/intel/
 - CVE が 2 つ以上 (USN・DSA などのまとめ告知) → 連鎖的な合流を避けるため自分の ID で独立
 - CVE なし → エイリアス先の既存レコードに合流、無ければ自分の ID
 
+深刻度は自分のレコードの最大 CVSS、無ければ深刻度ラベル (AlmaLinux 等は summary 先頭の
+`Important:` 等から補う) で決める。どちらも無いときは `upstream` に挙がった Advisory 自身の深刻度の
+最大を引き継ぐ (Chainguard・Wolfi の CVE なしレコード、USN・DSA などのまとめ告知)。引き継ぎは 1 段だけで、
+upstream 側の深刻度が変わったら引き継いでいる Advisory も再集計する。`cvss_score` は自分のものだけを持つ。
+
 KEV・EPSS は Advisory 行に持たず、`v_advisories` ビューで含む CVE から都度引く。
 KEV にだけ載っている CVE (主に製品の脆弱性) は、パッケージ情報の無い Advisory として作る。
 
