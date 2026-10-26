@@ -1,5 +1,6 @@
 # 脆弱性対応 (intel / analytics) の共通イメージ。docker-compose.yml から使う。
-FROM python:3.12-slim-bookworm
+# OS の CA ストア (ca-certificates 20250419~deb12u2) は emSign ECC Root CA - G3 を含まない
+FROM python:3.15-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
