@@ -1,5 +1,6 @@
 """Application configuration loaded from .env and environment variables."""
 from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).parent.parent
@@ -68,6 +69,11 @@ class Settings(BaseSettings):
     epss_url: str = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
     epss_event_delta: float = 0.1  # この幅以上の上昇で advisory.changed を出す
     http_timeout_seconds: float = 60.0
+
+    # A2: 照合の入力。コンテナではモノレポを読み取り専用で /repo にマウントする
+    repo_dir: Path = BASE_DIR.parent
+    services_path: Path = BASE_DIR / "config" / "services.yaml"
+    detection_scan_interval_minutes: int = 60
 
     # 分析 DB (DuckDB) の再構築間隔
     analytics_interval_minutes: int = 60

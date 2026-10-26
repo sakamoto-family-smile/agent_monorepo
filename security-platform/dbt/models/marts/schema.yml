@@ -20,3 +20,10 @@ models:
         data_tests: [unique, not_null]
   - name: mart_daily_changes
     description: 日別・変化の種類別の件数
+  - name: mart_open_findings
+    description: 未対応の Finding (優先度・期限順、期限切れと残り日数つき)
+  - name: mart_findings_by_service
+    description: サービスごとの未対応件数 (優先度別・修正版あり・期限切れ)
+    columns:
+      - name: service_id
+        data_tests: [unique, not_null]

@@ -3,7 +3,7 @@
         scan-mcp scan-skills redteam cron \
         test clean logs \
         vuln-migrate intel-bootstrap intel-osv intel-osv-full intel-kev intel-epss \
-        intel-health analytics duck-ui up down ps logs-vuln
+        intel-health detection-scan detection-findings analytics duck-ui up down ps logs-vuln
 
 # ── defaults ────────────────────────────────────────────────────────────────
 DASHBOARD_PORT ?= 8000
@@ -45,6 +45,7 @@ help:
 	@echo "    intel-osv      OSV 差分取得       intel-osv-full  OSV 全量の再取得"
 	@echo "    intel-kev      CISA KEV           intel-epss      FIRST EPSS"
 	@echo "    intel-health   情報源ごとの最終成功時刻 (古ければ exit 1)"
+	@echo "    detection-scan lockfile を照合して findings を更新  detection-findings  未対応の Finding 一覧"
 	@echo "    analytics      dbt build → data/security.duckdb を差し替え"
 	@echo "    duck-ui        DuckDB UI を読み取り専用で開く (http://localhost:4213)"
 	@echo ""
@@ -145,6 +146,12 @@ intel-epss:
 
 intel-health:
 	$(INTEL_RUN) health
+
+detection-scan:
+	$(COMPOSE) run --rm --no-deps detection python -m src.detection scan
+
+detection-findings:
+	$(COMPOSE) run --rm --no-deps detection python -m src.detection findings
 
 analytics:
 	$(COMPOSE) run --rm --no-deps analytics python -m src.analytics build

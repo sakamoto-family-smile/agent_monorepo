@@ -15,3 +15,12 @@ sources:
       - name: epss_scores
       - name: source_runs
       - name: events
+
+  - name: detection
+    description: A2 内部該当検知の運用 DB (data/detection.db、読み取り専用で ATTACH)
+    database: detection
+    schema: main
+    tables:
+      - name: findings
+      - name: finding_transitions
+      - name: scan_runs

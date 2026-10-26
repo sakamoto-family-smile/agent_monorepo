@@ -50,6 +50,25 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # A2: lockfile の照合。モノレポを読み取り専用でマウントし、外部とは通信させない
+  # (通知は L2 の通知サービスが detection.db の events を読んで送る)
+  detection:
+    <<: *app
+    command: ["python", "-m", "src.detection", "serve"]
+    restart: unless-stopped
+    network_mode: none
+    volumes:
+      - ./data:/app/data
+      - ..:/repo:ro
+    environment:
+      DATA_DIR: /app/data
+      TZ: UTC
+      REPO_DIR: /repo
+      SERVICES_PATH: /repo/security-platform/config/services.yaml
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   analytics:
     <<: *app
     command: ["python", "-m", "src.analytics", "serve"]
