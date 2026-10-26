@@ -17,6 +17,8 @@ from .osv_record import is_cve
 
 SUMMARY_PREFERENCE = ("GHSA", "PYSEC", "GO", "RUSTSEC", "CVE")
 SEVERITY_ORDER = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "MODERATE": 2, "LOW": 1}
+# OSV の malicious-packages (MAL-) は脆弱性ではなく悪性パッケージの報告で、CVSS を持たない
+MALICIOUS_PREFIX = "MAL-"
 
 
 @dataclass(frozen=True)
@@ -34,11 +36,13 @@ class AdvisoryState:
     affected_hash: str
     fixed_hash: str
     affected_purls: tuple[str, ...]
+    kind: str = "vulnerability"  # vulnerability / malicious
 
     def comparable(self) -> dict[str, object]:
-        """変化検知と履歴に残す値 (affected_purls は件数が多いので除く)。"""
+        """変化検知と履歴に残す値 (affected_purls は件数が多いので除く。kind は分類なので除く)。"""
         d = asdict(self)
         d.pop("affected_purls")
+        d.pop("kind")
         d["cves"] = list(self.cves)
         return d
 
@@ -117,6 +121,7 @@ def _from_records(conn: Connection, advisory_id: str) -> AdvisoryState | None:
         affected_hash=_digest([f"{eco}:{name}:{rng}" for eco, name, _, rng, _ in affected]),
         fixed_hash=_digest(fixed),
         affected_purls=tuple(pkgs),
+        kind="malicious" if any(i.startswith(MALICIOUS_PREFIX) for i in ids) else "vulnerability",
     )
 
 
@@ -164,10 +169,10 @@ def save_state(conn: Connection, state: AdvisoryState) -> None:
             INSERT INTO advisories (advisory_id, kind, cves_json, summary, cvss_score, cvss_vector,
               severity, published_at, modified_at, withdrawn, record_count, affected_hash,
               fixed_hash, first_seen_at, updated_at)
-            VALUES (:advisory_id, 'vulnerability', :cves, :summary, :cvss_score, :cvss_vector,
+            VALUES (:advisory_id, :kind, :cves, :summary, :cvss_score, :cvss_vector,
               :severity, :published_at, :modified_at, :withdrawn, :record_count, :affected_hash,
               :fixed_hash, :now, :now)
-            ON CONFLICT(advisory_id) DO UPDATE SET cves_json = excluded.cves_json,
+            ON CONFLICT(advisory_id) DO UPDATE SET kind = excluded.kind, cves_json = excluded.cves_json,
               summary = excluded.summary, cvss_score = excluded.cvss_score,
               cvss_vector = excluded.cvss_vector, severity = excluded.severity,
               published_at = excluded.published_at, modified_at = excluded.modified_at,
@@ -176,7 +181,7 @@ def save_state(conn: Connection, state: AdvisoryState) -> None:
               updated_at = excluded.updated_at
             """
         ),
-        {**state.comparable(), "cves": json.dumps(list(state.cves)), "now": now},
+        {**state.comparable(), "kind": state.kind, "cves": json.dumps(list(state.cves)), "now": now},
     )
     conn.execute(text("DELETE FROM advisory_cves WHERE advisory_id = :a"), {"a": state.advisory_id})
     if state.cves:

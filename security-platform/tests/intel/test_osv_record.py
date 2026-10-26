@@ -63,3 +63,13 @@ def test_cveless_record_joins_alias_target():
     rec = parse_record({"id": "PYSEC-2026-9", "aliases": ["GHSA-zzzz-zzzz-zzzz"]})
     assert resolve_advisory_id(rec, {"GHSA-zzzz-zzzz-zzzz": "GHSA-zzzz-zzzz-zzzz"}.get) == "GHSA-zzzz-zzzz-zzzz"
     assert resolve_advisory_id(rec, lambda _a: None) == "PYSEC-2026-9"
+
+
+def test_severity_label_falls_back_to_summary_prefix():
+    """AlmaLinux 等は深刻度を summary 先頭 ("Important: ...") にだけ書く。"""
+    alsa = {"id": "ALSA-2026:A014", "summary": "Important: php:8.1 security update", "affected": []}
+    assert parse_record(alsa).severity_label == "HIGH"
+    assert parse_record({**alsa, "summary": "Moderate: x"}).severity_label == "MEDIUM"
+    assert parse_record({**alsa, "summary": "Importantly broken"}).severity_label is None
+    # 構造化フィールドがあればそちらを優先
+    assert parse_record({**alsa, "database_specific": {"severity": "LOW"}}).severity_label == "LOW"
