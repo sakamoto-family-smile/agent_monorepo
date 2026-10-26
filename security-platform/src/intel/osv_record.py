@@ -28,6 +28,8 @@ class Affected:
     ranges: list[dict[str, Any]]
     fixed: list[str]
     versions_count: int
+    # 列挙されたバージョン。範囲 (ECOSYSTEM / SEMVER) で判定できない項目だけ持つ (悪性パッケージ等)
+    versions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -89,9 +91,18 @@ def _best_cvss(severities: list[dict[str, Any]]) -> tuple[str | None, float | No
     return best
 
 
+# パッケージのバージョンと比べられる範囲の種類 (GIT はコミットの範囲なので比べられない)
+EVALUABLE_RANGE_TYPES = frozenset({"ECOSYSTEM", "SEMVER"})
+
+
+def has_evaluable_range(ranges: list[dict[str, Any]]) -> bool:
+    return any(isinstance(r, dict) and r.get("type") in EVALUABLE_RANGE_TYPES for r in ranges)
+
+
 def _parse_affected(entry: dict[str, Any]) -> Affected:
     pkg = entry.get("package") or {}
     ranges = entry.get("ranges") or []
+    versions = [v for v in entry.get("versions") or [] if isinstance(v, str)]
     fixed = sorted(
         {
             ev["fixed"]
@@ -106,7 +117,8 @@ def _parse_affected(entry: dict[str, Any]) -> Affected:
         purl=pkg.get("purl"),
         ranges=ranges,
         fixed=fixed,
-        versions_count=len(entry.get("versions") or []),
+        versions_count=len(versions),
+        versions=() if has_evaluable_range(ranges) else tuple(sorted(set(versions))),
     )
 
 

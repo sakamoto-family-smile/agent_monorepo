@@ -107,6 +107,7 @@ def _write_record(
             "ranges": json.dumps(a.ranges, sort_keys=True),
             "fixed": json.dumps(a.fixed),
             "vc": a.versions_count,
+            "versions": json.dumps(list(a.versions)) if a.versions else None,
         }
         for i, a in enumerate(rec.affected)
     ]
@@ -114,8 +115,8 @@ def _write_record(
         conn.execute(
             text(
                 "INSERT INTO record_affected (record_id, idx, ecosystem, name, purl, ranges_json, "
-                "fixed_json, versions_count) VALUES (:id, :idx, :ecosystem, :name, :purl, "
-                ":ranges, :fixed, :vc)"
+                "fixed_json, versions_count, versions_json) VALUES (:id, :idx, :ecosystem, :name, :purl, "
+                ":ranges, :fixed, :vc, :versions)"
             ),
             affected_rows,
         )
