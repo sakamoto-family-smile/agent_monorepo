@@ -128,21 +128,24 @@ class IntelPipeline:
         return parse_iso(v) if v else None
 
     def _drain_dirty(self, ctx: RunContext) -> None:
-        """advisories_dirty を空になるまで再集計する。前回の途中終了分もここで回収される。"""
+        """advisories_dirty を空になるまで再集計する。前回の途中終了分もここで回収される。
+
+        再集計の途中で下流の Advisory が積まれることがある (深刻度の引き継ぎ) ので、空の読み出しで終える。
+        """
         while True:
             with self.engine.begin() as conn:
                 ids = conn.execute(
                     text("SELECT advisory_id FROM advisories_dirty ORDER BY advisory_id LIMIT :n"),
                     {"n": BATCH},
                 ).scalars().all()
+                if not ids:
+                    return
                 for advisory_id in ids:
                     changes.apply(conn, ctx, advisory_id)
                     conn.execute(
                         text("DELETE FROM advisories_dirty WHERE advisory_id = :a"), {"a": advisory_id}
                     )
             ctx.outbox.flush()
-            if len(ids) < BATCH:
-                return
 
     # ── meta / cursor ─────────────────────────────────────────────────────
     def _scalar(self, sql: str, key: str) -> str | None:

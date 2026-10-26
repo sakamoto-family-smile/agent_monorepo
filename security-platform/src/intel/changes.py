@@ -12,10 +12,19 @@ from sqlalchemy import Connection, text
 
 from ..common.events import Outbox
 from ..common.timeutil import utc_now_iso
-from .rollup import AdvisoryState, compute_state, delete_state, load_state, save_state
+from .rollup import (
+    AdvisoryState,
+    compute_state,
+    delete_state,
+    load_state,
+    mark_upstream_dependents,
+    save_state,
+)
 
 EVENT_ADVISORY_CHANGED = "advisory.changed"
 EVENT_BOOTSTRAP_COMPLETED = "advisory.bootstrap_completed"
+# これらの変化があったら、深刻度を引き継いでいる下流の Advisory も再集計する
+SEVERITY_DEPENDENT_CHANGES = frozenset({"created", "removed", "severity_changed"})
 
 
 @dataclass
@@ -110,7 +119,10 @@ def apply(conn: Connection, ctx: RunContext, advisory_id: str) -> list[str]:
             delete_state(conn, advisory_id)
     else:
         save_state(conn, cur)
-    types = detect_changes(prev, cur) + sorted(ctx.pop_signals(advisory_id))
+    detected = detect_changes(prev, cur)
+    if SEVERITY_DEPENDENT_CHANGES.intersection(detected):
+        mark_upstream_dependents(conn, advisory_id)
+    types = detected + sorted(ctx.pop_signals(advisory_id))
     if types:
         _record(conn, ctx, advisory_id, types, prev, cur)
     return types

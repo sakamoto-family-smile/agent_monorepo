@@ -3,6 +3,11 @@
 advisories の行は osv_records (と KEV) からいつでも作り直せる集約値で、手で更新しない。
 KEV・EPSS は v_advisories ビューで都度結合するため、ここでは扱わない
 (KEV だけに載っている CVE の Advisory を作るときを除く)。
+
+深刻度は自分のレコードの CVSS (無ければ深刻度ラベル) で決め、どちらも無いときだけ
+upstream (派生元) の Advisory 自身の深刻度を引き継ぐ。Chainguard・Wolfi の CVE なし
+レコード (upstream が GHSA・GO) や、USN・DSA などのまとめ告知 (upstream が CVE) が対象。
+引き継ぐのは 1 段だけで、upstream 側が引き継いだ値は使わない (循環しても値が残らない)。
 """
 from __future__ import annotations
 
@@ -79,6 +84,49 @@ def _max_label(labels: list[str | None]) -> str | None:
     return "MEDIUM" if top == "MODERATE" else top
 
 
+def _severity_of(rows: list[tuple[float | None, str | None]]) -> str | None:
+    """(cvss_score, severity_label) の行の深刻度。最大の CVSS を優先し、無ければラベルの最大。"""
+    scores = [score for score, _ in rows if score is not None]
+    return severity_from_score(max(scores) if scores else None) or _max_label([lbl for _, lbl in rows])
+
+
+# advisory_id のレコードが upstream に挙げる ID を、レコード ID としても Advisory ID (CVE 番号) としても引く
+_UPSTREAM_RECORDS = text(
+    """
+    WITH ups AS (
+      SELECT x.alias FROM record_aliases x JOIN osv_records r ON r.record_id = x.record_id
+      WHERE r.advisory_id = :a AND x.relation = 'upstream'
+    ), targets AS (
+      SELECT alias AS advisory_id FROM ups
+      UNION SELECT u.advisory_id FROM osv_records u JOIN ups ON u.record_id = ups.alias
+    )
+    SELECT t.cvss_score, t.severity_label FROM osv_records t
+    WHERE t.advisory_id IN (SELECT advisory_id FROM targets) AND t.advisory_id != :a
+    """
+)
+
+
+def _upstream_severity(conn: Connection, advisory_id: str) -> str | None:
+    rows = [(r[0], r[1]) for r in conn.execute(_UPSTREAM_RECORDS, {"a": advisory_id}).all()]
+    return _severity_of(rows)
+
+
+def mark_upstream_dependents(conn: Connection, advisory_id: str) -> None:
+    """advisory_id を upstream に挙げている他の Advisory を再集計待ちに積む (深刻度の引き継ぎ用)。"""
+    conn.execute(
+        text(
+            """
+            INSERT OR IGNORE INTO advisories_dirty (advisory_id)
+            SELECT DISTINCT r.advisory_id FROM record_aliases x
+            JOIN osv_records r ON r.record_id = x.record_id
+            WHERE x.relation = 'upstream' AND r.advisory_id != :a
+              AND x.alias IN (SELECT :a UNION SELECT record_id FROM osv_records WHERE advisory_id = :a)
+            """
+        ),
+        {"a": advisory_id},
+    )
+
+
 def _from_records(conn: Connection, advisory_id: str) -> AdvisoryState | None:
     recs = conn.execute(
         text(
@@ -105,6 +153,7 @@ def _from_records(conn: Connection, advisory_id: str) -> AdvisoryState | None:
     fixed = [f"{eco}:{name}@{v}" for eco, name, _, _, fx in affected for v in json.loads(fx)]
     scored = [(r[3], r[4]) for r in recs if r[3] is not None]
     score, vector = max(scored, key=lambda t: t[0]) if scored else (None, None)
+    severity = _severity_of([(r[3], r[5]) for r in recs]) or _upstream_severity(conn, advisory_id)
     published = [r[7] for r in recs if r[7]]
     modified = [r[8] for r in recs if r[8]]
     return AdvisoryState(
@@ -113,7 +162,7 @@ def _from_records(conn: Connection, advisory_id: str) -> AdvisoryState | None:
         summary=_pick_summary([(r[1], r[2]) for r in recs]),
         cvss_score=score,
         cvss_vector=vector,
-        severity=severity_from_score(score) or _max_label([r[5] for r in recs]),
+        severity=severity,
         published_at=min(published) if published else None,
         modified_at=max(modified) if modified else None,
         withdrawn=all(bool(r[6]) for r in recs),
