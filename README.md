@@ -9,7 +9,7 @@
 | プロジェクト | 種別 | GCP デプロイ | 概要 | 分析基盤連携 |
 |---|---|---|---|---|
 | [`kanie-lab-agent`](./kanie-lab-agent/) | 実装 | 🟡 配備可 (Cloud Run) | 慶應 SFC 蟹江研究室 大学院入試準備の研究支援エージェント | ⬜ 未着手 |
-| [`stock-analysis-agent`](./stock-analysis-agent/) | 実装 | ⬜ ローカル | 日本株・米国株のテクニカル/ファンダメンタル/センチメント統合分析エージェント | ✅ 連携済 (PR #26) |
+| [`stock-analysis-agent`](./stock-analysis-agent/) | 実装 | ✅ 稼働中 (Cloud Run) | 日本株・米国株のテクニカル/ファンダメンタル/センチメント統合分析エージェント | ✅ 連携済 (PR #26) |
 | [`lifeplanner-agent`](./lifeplanner-agent/) | 実装 | ⬜ ローカル | Money Forward ME 起点の家族向けライフプランニング・30年シミュレーションエージェント | ✅ 連携済 (PR #27) |
 | [`hotcook-agent`](./hotcook-agent/) | 実装 | ⬜ ローカル | シャープ ホットクック (KN-HW24H) の食材ベース料理提案エージェント (Phase 1) | ✅ 連携済 (PR #31) |
 | [`piyolog-analytics`](./piyolog-analytics/) | 実装 | ✅ 稼働中 (Cloud Run) | ぴよログ (育児記録) を LINE Bot 経由で取り込んで家族で横断サマリ共有 (Phase 1) | ✅ 連携済 (PR #34) |
@@ -38,6 +38,7 @@
 | `driving-license-bot-line-bot` / `driving-license-bot-admin-ui` | driving-license-bot |
 | `fujisawa-info-bot` | fujisawa-info-bot |
 | `piyolog-analytics` | piyolog-analytics |
+| `stock-analysis-line` / `stock-analysis-worker` | stock-analysis-agent |
 
 ### Cloud Run Jobs（バッチ / ETL）
 
@@ -55,7 +56,7 @@
 - **`analytics-platform`**: terraform / Dockerfile / cloudbuild 整備済だが現状ローカル運用（Phase 5+ で GCP 配備予定）。
 - **`kanie-lab-agent`**: cloudbuild で Cloud Run（backend / frontend）へ配備可能だが現状未配備。
 
-> その他（`stock-analysis-agent` / `lifeplanner-agent` / `hotcook-agent` / `tech-news-agent` / `security-platform`）は Dockerfile によるコンテナ実行は可能だが GCP には未配備（ローカル / Docker Compose 運用）。`llm-client` / `edinet-client` はライブラリのため独立デプロイなし。
+> その他（`lifeplanner-agent` / `hotcook-agent` / `tech-news-agent` / `security-platform`）は Dockerfile によるコンテナ実行は可能だが GCP には未配備（ローカル / Docker Compose 運用）。`llm-client` / `edinet-client` はライブラリのため独立デプロイなし。
 
 ---
 

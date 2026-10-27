@@ -50,9 +50,9 @@ services:
 
   - id: stock-analysis-agent
     path: stock-analysis-agent/
-    exposure: none              # terraform は ingress=all。稼働させたら external に変更
-    deployed: false
-    lockfiles: []               # uv.lock 未作成
+    exposure: external          # LINE webhook (Cloud Run stock-analysis-line / -worker)
+    deployed: true
+    lockfiles: [uv.lock]
     auto_remediation: false
 
   - id: lifeplanner-agent

@@ -12,5 +12,3 @@ dist/
 build/
 .pytest_cache/
 
-# uv
-uv.lock
