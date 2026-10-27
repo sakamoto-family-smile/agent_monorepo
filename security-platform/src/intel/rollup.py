@@ -145,12 +145,13 @@ def _from_records(conn: Connection, advisory_id: str) -> AdvisoryState | None:
     ).scalars().all()
     cves = sorted({i for i in [*ids, *aliases, advisory_id] if is_cve(i)})
     affected = conn.execute(
-        text("SELECT f.ecosystem, f.name, f.purl, f.ranges_json, f.fixed_json FROM record_affected f "
+        text("SELECT f.ecosystem, f.name, f.purl, f.ranges_json, f.fixed_json, f.versions_json "
+             "FROM record_affected f "
              "JOIN osv_records r ON r.record_id = f.record_id WHERE r.advisory_id = :a"),
         {"a": advisory_id},
     ).all()
-    pkgs = sorted({purl or f"{eco}:{name}" for eco, name, purl, _, _ in affected})
-    fixed = [f"{eco}:{name}@{v}" for eco, name, _, _, fx in affected for v in json.loads(fx)]
+    pkgs = sorted({purl or f"{eco}:{name}" for eco, name, purl, _, _, _ in affected})
+    fixed = [f"{eco}:{name}@{v}" for eco, name, _, _, fx, _ in affected for v in json.loads(fx)]
     scored = [(r[3], r[4]) for r in recs if r[3] is not None]
     score, vector = max(scored, key=lambda t: t[0]) if scored else (None, None)
     severity = _severity_of([(r[3], r[5]) for r in recs]) or _upstream_severity(conn, advisory_id)
@@ -167,7 +168,9 @@ def _from_records(conn: Connection, advisory_id: str) -> AdvisoryState | None:
         modified_at=max(modified) if modified else None,
         withdrawn=all(bool(r[6]) for r in recs),
         record_count=len(recs),
-        affected_hash=_digest([f"{eco}:{name}:{rng}" for eco, name, _, rng, _ in affected]),
+        affected_hash=_digest([
+            f"{eco}:{name}:{rng}" + (f":{vers}" if vers else "") for eco, name, _, rng, _, vers in affected
+        ]),
         fixed_hash=_digest(fixed),
         affected_purls=tuple(pkgs),
         kind="malicious" if any(i.startswith(MALICIOUS_PREFIX) for i in ids) else "vulnerability",

@@ -242,7 +242,7 @@ KEV にだけ載っている CVE (主に製品の脆弱性) は、パッケー�
 | ビュー | 内容 |
 |---|---|
 | `v_advisories` | Advisory + `kev` / `kev_date_added` / `epss` / `epss_percentile` |
-| `v_advisory_affected` | 影響パッケージ (ecosystem / name / purl / ranges / fixed) |
+| `v_advisory_affected` | 影響パッケージ (ecosystem / name / purl / ranges / fixed / versions)。`versions_json` は範囲 (ECOSYSTEM / SEMVER) で判定できない項目 (悪性パッケージなど) だけが持ち、他は NULL |
 | `v_advisory_aliases` | 別名 (GHSA・PYSEC・DSA など) |
 
 ## 分析 DB の中身

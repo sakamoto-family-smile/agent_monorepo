@@ -73,3 +73,19 @@ def test_severity_label_falls_back_to_summary_prefix():
     assert parse_record({**alsa, "summary": "Importantly broken"}).severity_label is None
     # 構造化フィールドがあればそちらを優先
     assert parse_record({**alsa, "database_specific": {"severity": "LOW"}}).severity_label == "LOW"
+
+
+def test_versions_kept_only_without_evaluable_range():
+    """ECOSYSTEM / SEMVER の範囲があれば範囲で判定できるので、列挙された versions は持たない。"""
+    mal = {
+        "id": "MAL-2026-1", "modified": "2026-10-01T00:00:00Z",
+        "affected": [
+            {"package": {"ecosystem": "npm", "name": "evil"}, "versions": ["1.0.1", "1.0.0"]},
+            {"package": {"ecosystem": "PyPI", "name": "gitonly"},
+             "ranges": [{"type": "GIT", "repo": "https://x", "events": [{"introduced": "abc"}]}],
+             "versions": ["0.1"]},
+        ],
+    }
+    assert [a.versions for a in parse_record(mal).affected] == [("1.0.0", "1.0.1"), ("0.1",)]
+    assert parse_record(GHSA).affected[0].versions == ()
+    assert parse_record(GHSA).affected[0].versions_count == 2

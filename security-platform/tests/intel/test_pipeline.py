@@ -274,6 +274,37 @@ def test_migration_0003_queues_unscored_advisories_with_upstream(env):
     assert q(pipeline, "SELECT severity FROM advisories WHERE advisory_id = 'CGA-0000-aaaa-bbbb'") == [("CRITICAL",)]
 
 
+def test_affected_versions_exposed_in_contract_view(env):
+    pipeline, osv, _, _ = env
+    osv.zips["npm"].append(MAL | {"affected": [
+        {"package": {"ecosystem": "npm", "name": "evilpkg"}, "versions": ["1.0.0", "1.0.1"]}]})
+    pipeline.bootstrap()
+    rows = dict(q(pipeline, "SELECT record_id, versions_json FROM v_advisory_affected "
+                            "WHERE record_id IN ('MAL-2026-100', 'GHSA-aaaa-bbbb-cccc')"))
+    assert rows == {"MAL-2026-100": '["1.0.0", "1.0.1"]', "GHSA-aaaa-bbbb-cccc": None}
+
+
+def test_migration_0004_requeues_records_for_versions(env):
+    """0003 までに取り込んだ versions だけのレコードは、次の全量取得で取り直す (content_hash を空にする)。"""
+    from alembic import command
+
+    from src.common.migrate import alembic_config, upgrade
+
+    pipeline, osv, _, paths = env
+    osv.zips["npm"].append(MAL | {"affected": [
+        {"package": {"ecosystem": "npm", "name": "evilpkg"}, "versions": ["1.0.0"]}]})
+    pipeline.bootstrap()
+    command.downgrade(alembic_config("intel", paths), "0003")
+    upgrade("intel", paths)
+    hashes = dict(q(pipeline, "SELECT record_id, content_hash FROM osv_records"))
+    assert hashes["MAL-2026-100"] == ""
+    assert hashes["GHSA-aaaa-bbbb-cccc"] != ""
+    pipeline.run_osv_full()
+    assert q(pipeline, "SELECT versions_json FROM v_advisory_affected WHERE record_id = 'MAL-2026-100'") == [
+        ('["1.0.0"]',)
+    ]
+
+
 def test_bootstrap_resumes_after_failure(env):
     pipeline, osv, _, _ = env
     osv.fail_on = "Debian"
