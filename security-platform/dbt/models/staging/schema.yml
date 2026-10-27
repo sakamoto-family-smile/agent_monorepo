@@ -27,3 +27,13 @@ models:
     description: Advisory の変化 (1 変化 1 行)
   - name: stg_events
     description: サブシステム間イベント
+  - name: stg_findings
+    description: A2 の照合で見つかった Finding
+    columns:
+      - name: finding_id
+        data_tests: [unique, not_null]
+  - name: stg_scan_runs
+    description: 照合ジョブの実行記録
+    columns:
+      - name: run_id
+        data_tests: [unique, not_null]

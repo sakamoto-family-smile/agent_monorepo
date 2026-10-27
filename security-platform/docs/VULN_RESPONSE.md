@@ -8,7 +8,7 @@ PR まで自動で進める (B) ためのフレームワーク。まずはロー
 |---|---|---|
 | L0 | `data/` レイアウト、SQLite 3 ファイル + Alembic、イベント (outbox + JSONL)、dbt 雛形、`services.yaml`、docker compose | ✅ |
 | L1 | A1: OSV 全エコシステム (全量 + 差分)、CISA KEV、FIRST EPSS、名寄せ、変化検知、ブートストラップ。分析: 鮮度・リードタイム・エコシステム別・KEV カバレッジ | ✅ |
-| L2 | A2: lockfile からの SBOM、osv-scanner (オフライン) での照合、優先度、LINE / GitHub Issues 通知、取得停止のアラート | ⬜ |
+| L2 | A2: lockfile の照合・優先度 (✅)。コンテナイメージ・ランタイムの照合、LINE / GitHub Issues 通知、取得停止のアラート (⬜) | 🔶 |
 | L3 | B: git worktree での決定的更新、差分検査、PR 作成 | ⬜ |
 | L4 | A1 の非構造ソース: IPA・JPCERT 注意喚起、ベンダー告知、セキュリティニュース、VulnerableMCP。LLM で根拠付き抽出し、一次情報が見つからないものは `unconfirmed` として照合に使わない | ⬜ |
 
@@ -136,6 +136,8 @@ make vuln-migrate        # data/{intel,detection,remediation}.db を作成
 make intel-bootstrap     # 初回全量 (中断しても続きから再開)
 make intel-osv           # OSV 差分 / intel-osv-full / intel-kev / intel-epss
 make intel-health        # 情報源ごとの最終成功時刻 (古いものがあれば exit 1。DB には書かない)
+make detection-scan      # lockfile を照合して findings を更新 (常駐の detection も 1 時間ごとに実行)
+make detection-findings  # 未対応の Finding を優先度・期限順に表示
 make analytics           # dbt build → data/security.duckdb を差し替え
 ```
 
@@ -235,6 +237,30 @@ KEV にだけ載っている CVE (主に製品の脆弱性) は、パッケー�
 `kev_added` / `kev_removed` / `epss_increased` (0.1 以上の上昇)。
 1 回の実行で同じ Advisory に複数の変化があっても 1 イベントにまとめる。
 
+## A2 の照合 (lockfile)
+
+`detection` サービスが 1 時間ごとに `config/services.yaml` の全サービスを照合する (`src/detection/`)。
+モノレポは `/repo` に読み取り専用でマウントし、コンテナは外部と通信しない (`network_mode: none`)。
+
+1. lockfile (`uv.lock` / `package-lock.json` v2 以降) からコンポーネントを作る。
+   本番で読み込まれるもの (`runtime`) と、開発用の依存からしか届かないもの (`dev`) を分ける
+2. intel.db の契約ビューで照合する。範囲 (ECOSYSTEM / SEMVER) はバージョン順にイベントを評価し、
+   範囲を持たない項目 (悪性パッケージ等) は列挙バージョンで照合する。取り下げ済みは照合しない
+3. 優先度と期限を付けて findings と突き合わせる (新規 `open`・変化 `updated`・該当しなくなったら `resolved`)。
+   lockfile を読めなかったサービスの Finding は閉じない
+
+| 優先度 | 条件 | 期限 |
+|---|---|---|
+| P1 | 悪性パッケージ、または KEV 掲載 | 1 日 |
+| P2 | Critical、または EPSS 10% 以上 | 7 日 |
+| P3 | High | 30 日 |
+| P4 | それ以外 | なし |
+
+P1 以外は、dev 依存のみ、または未稼働・非公開のサービスなら 1 段下げる (重ねては下げない)。
+優先度が上がったら期限を今から数え直して早め、下がったら初回検知から数え直す。
+変化は detection.db の `finding.opened` / `finding.reopened` / `finding.updated` / `finding.resolved` に出る。
+分析 DB では `marts.mart_open_findings` / `marts.mart_findings_by_service` で見る。
+
 ## A2・B への読み取り契約
 
 `data/intel.db` を `mode=ro` で開き、次のビューだけを使う (テーブルを直接読まない)。
@@ -274,6 +300,7 @@ DuckDB の `sqlite` 拡張を使う。初回に extensions.duckdb.org から自�
 - osv-scanner DB は全量取得 (7 日ごと) のタイミングでしか更新されない。L2 で差分の反映方法を決める
 - NVD・JVN・ランタイムのリリース情報・OneCRL・非構造ソース (注意喚起・ニュース) は未対応
 - 既存の `src/collector/` / `src/analyzer/` (data/security.db) は当面そのまま残し、L2 で置き換える
+- A2 はまだ lockfile (PyPI・npm) だけ。コンテナの OS パッケージ・ランタイム本体・バイナリに組み込まれたものは照合しない
 - CVE の無いレコード同士の合流は取り込み順に依存する (CVE のあるものは順序に依存しない)。別名の連鎖は、キーが変わったレコードを辿って付け直す
 - OSV 側で削除されたレコードは検出しない (404 は `osv_missing` に残るだけ)
 - 止まっていた間の OSV の途中の変化は取り戻せない (OSV は最新版しか配らない)。EPSS は過去日のファイルがあるが、埋め戻しコマンドは未実装

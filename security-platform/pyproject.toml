@@ -11,6 +11,7 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "httpx>=0.27.0",
     "pyyaml>=6.0.2",
+    "packaging>=24.0",  # A2: PyPI のバージョン比較 (PEP 440)
     "python-dotenv>=1.0.0",
     "pydantic>=2.7.0",
     "pydantic-settings>=2.3.0",
