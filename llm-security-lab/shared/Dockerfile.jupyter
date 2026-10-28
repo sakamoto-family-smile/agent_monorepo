@@ -1,0 +1,43 @@
+# JupyterLab + uv + 本ラボの python 依存を含む image (proposal 0008 Phase 0a).
+#
+# Phase 0a (本 PR) は最低限の JupyterLab 起動だけ提供。
+# Phase 0b/0c で shared/llm_runtime / shared/attacks 等の依存を pyproject に
+# 追加すると、 この image にも自動で入る (uv sync 経由)。
+#
+# 注: JUPYTER_TOKEN がデフォルト `localdev` のままだと起動 log に警告を出す
+# (proposal §3.9 リスク対応)。 .env で 32 文字ランダム値を指定すること。
+
+FROM python:3.12-slim
+
+# uv (本 monorepo の標準パッケージマネージャ)
+RUN pip install --no-cache-dir uv==0.5.11
+
+# JupyterLab + ipykernel (notebook 実行用)。 本 image でしか使わないので
+# `uv pip install --system` で簡素に。
+RUN uv pip install --system --no-cache \
+    jupyterlab==4.* \
+    ipykernel==6.*
+
+WORKDIR /workspace
+
+# 後段で shared/ が mount されるが、 ビルド時にも置いておくと
+# `uv sync` がキャッシュ機構を使えるので速くなる (Phase 0c で activate)。
+COPY pyproject.toml ./
+
+EXPOSE 8888
+
+# 起動時 entrypoint:
+#   1. JUPYTER_TOKEN が `localdev` の場合は警告
+#   2. JupyterLab を 0.0.0.0:8888 で起動 (host 側は 127.0.0.1 にバインド済)
+CMD ["bash", "-c", "\
+    if [ \"${JUPYTER_TOKEN:-localdev}\" = \"localdev\" ]; then \
+      echo '[WARN] JUPYTER_TOKEN is the default \"localdev\". Set a 32-char random value in .env for safety (see proposal-0008 §3.9).' 1>&2; \
+    fi && \
+    jupyter lab \
+      --ip=0.0.0.0 \
+      --port=8888 \
+      --no-browser \
+      --notebook-dir=/workspace \
+      --ServerApp.token=\"${JUPYTER_TOKEN:-localdev}\" \
+      --ServerApp.root_dir=/workspace \
+    "]
