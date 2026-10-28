@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.detection.versions import in_range, is_affected, smallest_fix_above
+from src.detection.versions import in_range, is_affected, is_supported, smallest_fix_above, version_key
 
 
 def eco(*events: dict[str, str], type_: str = "ECOSYSTEM") -> dict:
@@ -45,3 +45,34 @@ def test_unevaluable_range_and_versions_list():
 def test_smallest_fix_above():
     assert smallest_fix_above("PyPI", "2.4.0", ["2.3.9", "3.0", "2.4.3"]) == "2.4.3"
     assert smallest_fix_above("PyPI", "3.1", ["2.4.3", "3.0"]) is None
+
+
+@pytest.mark.parametrize(("a", "b", "expected"), [
+    ("1.0", "1.0", 0),
+    ("1.0~rc1", "1.0", -1),           # ~ は正式版より前
+    ("1.0", "1.0+b1", -1),
+    ("1:1.0", "2.0", 1),              # epoch が最優先
+    ("3.0.22-1~deb12u2", "3.0.22-1~deb12u1", 1),
+    ("3.0.22-1~deb12u2", "3.0.22-1", -1),
+    ("2.36-9+deb12u14", "2.36-9+deb12u13", 1),
+    ("7.88.1-10+deb12u14", "7.88.1-10+deb12u5", 1),  # 数字の部分は数値で比べる
+    ("1.0a", "1.0+", -1),             # 英字は記号より前
+    ("1.0-1", "1.0", 1),
+    ("1.002", "1.2", 0),
+])
+def test_debian_version_order(a, b, expected):
+    ka, kb = version_key("Debian:12", a), version_key("Debian:12", b)
+    assert ((ka > kb) - (ka < kb)) == expected
+
+
+def test_debian_and_bitnami_ranges():
+    deb = [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "3.0.22-1~deb12u2"}]}]
+    assert is_affected("Debian:12", "3.0.22-1~deb12u1", deb, []) is True
+    assert is_affected("Debian:12", "3.0.22-1~deb12u2", deb, []) is False
+    assert is_affected("Debian:12", "1:0.1", deb, []) is False
+    assert smallest_fix_above("Debian:12", "1.0-1", ["0.9", "1.0-2", "1:0.1"]) == "1.0-2"
+    node = [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "22.23.2"},
+                                          {"introduced": "23.0.0"}, {"fixed": "24.18.1"}]}]
+    assert is_affected("Bitnami", "24.18.0", node, []) is True
+    assert is_affected("Bitnami", "24.22.1", node, []) is False
+    assert is_supported("Debian:13") and is_supported("Bitnami") and not is_supported("Ubuntu:24.04:LTS")

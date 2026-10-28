@@ -31,6 +31,11 @@ class DataPaths:
         return self.root / "osv-db"
 
     @property
+    def sbom_images_dir(self) -> Path:
+        """本番イメージの SBOM (``make detection-images`` が作る。<service_id>.json と blobs/)。"""
+        return self.root / "sbom" / "images"
+
+    @property
     def duckdb_path(self) -> Path:
         return self.root / "security.duckdb"
 
@@ -40,7 +45,7 @@ class DataPaths:
         return self.root / f"{name}.db"
 
     def ensure(self) -> None:
-        for d in (self.root, self.raw_dir, self.events_dir, self.osv_db_dir):
+        for d in (self.root, self.raw_dir, self.events_dir, self.osv_db_dir, self.sbom_images_dir):
             d.mkdir(parents=True, exist_ok=True)
 
 

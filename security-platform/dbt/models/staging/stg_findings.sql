@@ -13,6 +13,10 @@ select
     json_extract_string(evidence_json, '$.version') as version,
     json_extract_string(evidence_json, '$.ecosystem') as ecosystem,
     json_extract_string(evidence_json, '$.scope') as scope,
+    -- 見つかった元: source (lockfile) / image (本番イメージ)。この列を入れる前の Finding は lockfile 由来
+    coalesce(json_extract_string(evidence_json, '$.source_kind'), 'source') as source_kind,
+    coalesce(json_extract_string(evidence_json, '$.source'), json_extract_string(evidence_json, '$.lockfile'))
+        as source,
     json_extract_string(evidence_json, '$.severity') as severity,
     json_extract_string(evidence_json, '$.kind') as kind,
     cast(json_extract(evidence_json, '$.kev') as boolean) as kev,

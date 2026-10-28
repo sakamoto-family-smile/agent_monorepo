@@ -33,9 +33,13 @@ class Component:
 
 @dataclass(frozen=True)
 class ParsedLockfile:
+    """1 つの SBOM の元 (lockfile か本番イメージ)。kind は detection.db の sboms.kind。"""
+
     path: str
     sha256: str
     components: tuple[Component, ...]
+    kind: str = "source"
+    subject: str = ""  # 空なら lockfile の sha256
 
 
 class UnsupportedLockfile(ValueError):

@@ -1,7 +1,11 @@
 """OSV の影響範囲 (ranges / versions) とパッケージのバージョンの比較。
 
-対応するのは lockfile から照合するエコシステム (PyPI・npm) だけ。比べられないもの
-(未対応のエコシステム・解釈できないバージョン) は ``None`` を返し、呼び出し側で数える。
+対応するエコシステム:
+- PyPI (PEP 440)・npm (SemVer): lockfile とイメージ内のライブラリ
+- Debian:<版> (dpkg の比較規則): イメージの OS パッケージ
+- Bitnami (SemVer): イメージの実行環境 (Python・Node.js 本体)。Bitnami の Advisory は
+  上流のバージョン番号で範囲を持つので、公式イメージの /usr/local の本体と比べられる
+比べられないもの (未対応のエコシステム・解釈できないバージョン) は ``None`` を返し、呼び出し側で数える。
 範囲の評価は OSV スキーマの手順に従う: イベントをバージョン順に並べ、
 introduced で影響あり、fixed で影響なし、last_affected を超えたら影響なしにする。
 """
@@ -13,7 +17,8 @@ from typing import Any
 
 from packaging.version import InvalidVersion, Version
 
-SUPPORTED_ECOSYSTEMS = frozenset({"PyPI", "npm"})
+SEMVER_ECOSYSTEMS = frozenset({"npm", "Bitnami"})
+DEBIAN_PREFIX = "Debian:"
 EVALUABLE_RANGE_TYPES = frozenset({"ECOSYSTEM", "SEMVER"})
 
 _SEMVER = re.compile(
@@ -39,6 +44,83 @@ class _Min:
 MIN = _Min()
 
 
+def is_supported(ecosystem: str) -> bool:
+    return ecosystem == "PyPI" or ecosystem in SEMVER_ECOSYSTEMS or ecosystem.startswith(DEBIAN_PREFIX)
+
+
+def _dpkg_order(c: str) -> int:
+    # dpkg の verrevcmp: "~" は終端より前、英字は記号より前
+    if c == "~":
+        return -1
+    if c.isalpha():
+        return ord(c)
+    return ord(c) + 256
+
+
+def _dpkg_part_cmp(a: str, b: str) -> int:
+    """upstream_version / debian_revision どうしの比較 (dpkg の verrevcmp)。"""
+    i = j = 0
+    while i < len(a) or j < len(b):
+        while (i < len(a) and not a[i].isdigit()) or (j < len(b) and not b[j].isdigit()):
+            ac = _dpkg_order(a[i]) if i < len(a) and not a[i].isdigit() else 0
+            bc = _dpkg_order(b[j]) if j < len(b) and not b[j].isdigit() else 0
+            if ac != bc:
+                return -1 if ac < bc else 1
+            i += 1
+            j += 1
+        while i < len(a) and a[i] == "0":
+            i += 1
+        while j < len(b) and b[j] == "0":
+            j += 1
+        first_diff = 0
+        while i < len(a) and a[i].isdigit() and j < len(b) and b[j].isdigit():
+            if not first_diff:
+                first_diff = ord(a[i]) - ord(b[j])
+            i += 1
+            j += 1
+        if i < len(a) and a[i].isdigit():
+            return 1
+        if j < len(b) and b[j].isdigit():
+            return -1
+        if first_diff:
+            return -1 if first_diff < 0 else 1
+    return 0
+
+
+_DPKG = re.compile(r"^(?:(\d+):)?([0-9][A-Za-z0-9.+~:-]*?)(?:-([A-Za-z0-9.+~]+))?$")
+
+
+@total_ordering
+class DebianVersion:
+    """Debian のバージョン ([epoch:]upstream_version[-debian_revision])。"""
+
+    def __init__(self, value: str) -> None:
+        m = _DPKG.match(value)
+        if m is None:
+            raise ValueError(value)
+        self.epoch = int(m.group(1) or 0)
+        self.upstream = m.group(2)
+        self.revision = m.group(3) or ""
+
+    def _cmp(self, other: DebianVersion) -> int:
+        if self.epoch != other.epoch:
+            return -1 if self.epoch < other.epoch else 1
+        return _dpkg_part_cmp(self.upstream, other.upstream) or _dpkg_part_cmp(self.revision, other.revision)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, DebianVersion):
+            return NotImplemented
+        return self._cmp(other) == 0
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, DebianVersion):
+            return NotImplemented
+        return self._cmp(other) < 0
+
+    def __hash__(self) -> int:
+        return hash((self.epoch, self.upstream, self.revision))
+
+
 def _semver_key(value: str) -> tuple[Any, ...]:
     m = _SEMVER.match(value)
     if m is None:
@@ -60,8 +142,10 @@ def version_key(ecosystem: str, value: str) -> Any:
             return Version(value)
         except InvalidVersion as e:
             raise ValueError(value) from e
-    if ecosystem == "npm":
+    if ecosystem in SEMVER_ECOSYSTEMS:
         return _semver_key(value)
+    if ecosystem.startswith(DEBIAN_PREFIX):
+        return DebianVersion(value)
     raise ValueError(f"unsupported ecosystem: {ecosystem}")
 
 
