@@ -82,6 +82,14 @@ class Settings(BaseSettings):
     )
     image_sbom_max_age_days: int = 7  # これより古い SBOM は照合時に警告する
 
+    # 通知 (notify サービス)。LINE は line_channel_access_token / line_user_ids を使う。
+    # 認証情報は config/notify.env から notify コンテナにだけ渡す
+    github_issues_repo: str = ""  # 例: owner/security-findings (private リポジトリにする)
+    github_issues_token: str = ""  # そのリポジトリの Issues に書ける fine-grained token
+    notify_issue_min_priority: str = "P3"  # この優先度までを Issue にする
+    notify_digest_hour: int = 9  # 日次まとめを送る時刻 (notify_timezone の時)
+    notify_timezone: str = "Asia/Tokyo"
+
     # 分析 DB (DuckDB) の再構築間隔
     analytics_interval_minutes: int = 60
 

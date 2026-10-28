@@ -29,21 +29,13 @@ from ..common.scheduler import Job, Scheduler
 from ..common.timeutil import utc_now
 from ..config import settings
 from .pipeline import IntelPipeline
+from .schedule import STALE_FACTOR, schedule
 from .sources.osv import OsvClient
 
 logger = logging.getLogger(__name__)
 app = typer.Typer(add_completion=False, help="A1 情報取得")
 
 BOOTSTRAP_RETRY_SECONDS = 300
-
-
-def schedule() -> dict[str, timedelta]:
-    return {
-        "osv": timedelta(hours=1),
-        "kev": timedelta(hours=1),
-        "epss": timedelta(days=1),
-        "osv_full": timedelta(days=settings.osv_full_refresh_days),
-    }
 
 
 def build_pipeline(*, read_only: bool = False) -> IntelPipeline:
@@ -133,7 +125,7 @@ def health() -> None:
     now = utc_now()
     for source, interval in schedule().items():
         last = pipeline.last_success(source)
-        ok = last is not None and now - last < interval * 3
+        ok = last is not None and now - last < interval * STALE_FACTOR
         stale |= not ok
         typer.echo(f"{'OK   ' if ok else 'STALE'} {source:9} last_success={last}")
     missing = pipeline.missing_count()

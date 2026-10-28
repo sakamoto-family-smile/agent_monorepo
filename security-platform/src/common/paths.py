@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ..config import settings
 
-DB_NAMES: tuple[str, ...] = ("intel", "detection", "remediation")
+DB_NAMES: tuple[str, ...] = ("intel", "detection", "remediation", "notify")
 
 
 @dataclass(frozen=True)
