@@ -8,7 +8,7 @@ PR まで自動で進める (B) ためのフレームワーク。まずはロー
 |---|---|---|
 | L0 | `data/` レイアウト、SQLite 3 ファイル + Alembic、イベント (outbox + JSONL)、dbt 雛形、`services.yaml`、docker compose | ✅ |
 | L1 | A1: OSV 全エコシステム (全量 + 差分)、CISA KEV、FIRST EPSS、名寄せ、変化検知、ブートストラップ。分析: 鮮度・リードタイム・エコシステム別・KEV カバレッジ | ✅ |
-| L2 | A2: lockfile の照合・優先度 (✅)。コンテナイメージ・ランタイムの照合、LINE / GitHub Issues 通知、取得停止のアラート (⬜) | 🔶 |
+| L2 | A2: lockfile の照合・優先度 (✅)。本番イメージ (OS パッケージ・ランタイム本体・同梱ライブラリ) の照合 (✅)。LINE / GitHub Issues 通知、取得停止のアラート (⬜) | 🔶 |
 | L3 | B: git worktree での決定的更新、差分検査、PR 作成 | ⬜ |
 | L4 | A1 の非構造ソース: IPA・JPCERT 注意喚起、ベンダー告知、セキュリティニュース、VulnerableMCP。LLM で根拠付き抽出し、一次情報が見つからないものは `unconfirmed` として照合に使わない | ⬜ |
 
@@ -37,7 +37,7 @@ flowchart LR
     OSVDB[("data/osv-db/<br/>osv-scanner 用")]
 
     subgraph DET["detection サービス — A2 (L2)"]
-      SBOM["SBOM 生成<br/>lockfile → syft"] --> MAT["照合<br/>osv-scanner offline"]
+      SBOM["SBOM<br/>lockfile + 本番イメージ"] --> MAT["照合<br/>intel.db の契約ビュー"]
       MAT --> TRI["優先度・Triage"]
     end
     DDB[("data/detection.db<br/>Finding・events")]
@@ -55,6 +55,7 @@ flowchart LR
   end
 
   REPO["モノレポの lockfile<br/>config/services.yaml"]
+  IMGSBOM[("data/sbom/images/<br/>本番イメージの SBOM<br/>make detection-images (ホスト)")]
   NOTIFY["LINE / GitHub Issues"]
   PR["GitHub PR<br/>(マージは人)"]
   UI["DuckDB UI<br/>make duck-ui"]
@@ -136,8 +137,9 @@ make vuln-migrate        # data/{intel,detection,remediation}.db を作成
 make intel-bootstrap     # 初回全量 (中断しても続きから再開)
 make intel-osv           # OSV 差分 / intel-osv-full / intel-kev / intel-epss
 make intel-health        # 情報源ごとの最終成功時刻 (古いものがあれば exit 1。DB には書かない)
-make detection-scan      # lockfile を照合して findings を更新 (常駐の detection も 1 時間ごとに実行)
+make detection-scan      # lockfile・本番イメージを照合して findings を更新 (常駐の detection も 1 時間ごとに実行)
 make detection-findings  # 未対応の Finding を優先度・期限順に表示
+make detection-images    # 本番イメージの SBOM を作る (これだけホストで実行。下記)
 make analytics           # dbt build → data/security.duckdb を差し替え
 ```
 
@@ -156,6 +158,10 @@ Docker Desktop の VM をまたいで同じ WAL ファイルを共有するこ�
 | `RAW_RETENTION_DAYS` | 30 | KEV・EPSS・OSV 差分の生データ保持日数 |
 | `OSV_RAW_FULL_SNAPSHOTS_KEPT` | 2 | OSV 全量の保持世代数 (完了した実行だけを数える) |
 | `MIN_FREE_DISK_GB` | 10 | 空きがこれを下回ったら全量のダウンロードを止める |
+| `IMAGE_SBOM_MAX_AGE_DAYS` | 7 | 本番イメージの SBOM がこれより古いと照合時に警告する |
+
+`make detection-images` はホストで動くので、環境変数か `config/.env` の `GCP_PROJECT`
+(空なら gcloud の既定のプロジェクト) と `SYFT_IMAGE` (既定はダイジェスト固定の syft) を読む。
 
 ## 運用 (ローカル常駐)
 
@@ -183,7 +189,9 @@ Docker Desktop の VM をまたいで同じ WAL ファイルを共有するこ�
 |---|---|---|---|
 | 生データ | `data/raw/<source>/dt=YYYY-MM-DD/` | intel | 取得したものを改変せず保存 (書き込み後は読み取り専用)。OSV 全量は新しい 2 世代を保持 |
 | 運用 DB | `data/intel.db` | intel のみ | Advisory・KEV・EPSS・変化履歴・取得記録・イベント |
-| | `data/detection.db` / `data/remediation.db` | (L2 / L3) | スキーマのみ作成済み |
+| | | `data/detection.db` | detection のみ | Finding・SBOM・照合の実行記録・イベント |
+| | `data/remediation.db` | (L3) | スキーマのみ作成済み |
+| SBOM | `data/sbom/images/<service_id>.json` + `blobs/sha256-<digest>.cdx.json` | `make detection-images` (ホスト) | 本番イメージの SBOM (CycloneDX)。ダイジェストごとに 1 つ、参照されなくなったら消す |
 | イベント | 各 DB の `events` + `data/events/type=*/dt=*/<producer>.jsonl` | 発行側 | 受信側は発行側 DB を読み取り専用で開き、自分の `event_cursors` で位置を持つ |
 | 分析 DB | `data/security.duckdb` | analytics | dbt で組み立てる。スキーマ `staging` / `marts` / `history` |
 | osv-scanner DB | `data/osv-db/osv-scanner/<ecosystem>/all.zip` | intel | A2 (L2) のオフライン照合用。OSV 全量取得のたびに更新 |
@@ -237,13 +245,14 @@ KEV にだけ載っている CVE (主に製品の脆弱性) は、パッケー�
 `kev_added` / `kev_removed` / `epss_increased` (0.1 以上の上昇)。
 1 回の実行で同じ Advisory に複数の変化があっても 1 イベントにまとめる。
 
-## A2 の照合 (lockfile)
+## A2 の照合 (lockfile・本番イメージ)
 
 `detection` サービスが 1 時間ごとに `config/services.yaml` の全サービスを照合する (`src/detection/`)。
 モノレポは `/repo` に読み取り専用でマウントし、コンテナは外部と通信しない (`network_mode: none`)。
 
-1. lockfile (`uv.lock` / `package-lock.json` v2 以降) からコンポーネントを作る。
-   本番で読み込まれるもの (`runtime`) と、開発用の依存からしか届かないもの (`dev`) を分ける
+1. lockfile (`uv.lock` / `package-lock.json` v2 以降) と本番イメージの SBOM からコンポーネントを作る。
+   lockfile では本番で読み込まれるもの (`runtime`) と、開発用の依存からしか届かないもの (`dev`) を分ける。
+   同じパッケージが両方にあれば 1 つにまとめる (本番イメージに入っていれば `runtime`)
 2. intel.db の契約ビューで照合する。範囲 (ECOSYSTEM / SEMVER) はバージョン順にイベントを評価し、
    範囲を持たない項目 (悪性パッケージ等) は列挙バージョンで照合する。取り下げ済みは照合しない
 3. 優先度と期限を付けて findings と突き合わせる (新規 `open`・変化 `updated`・該当しなくなったら `resolved`)。
@@ -257,9 +266,38 @@ KEV にだけ載っている CVE (主に製品の脆弱性) は、パッケー�
 | P4 | それ以外 | なし |
 
 P1 以外は、dev 依存のみ、または未稼働・非公開のサービスなら 1 段下げる (重ねては下げない)。
+OS パッケージ (Debian) で修正版がまだ無いものは、P1 以外は P4 (期限なし) にする
+(こちらで打てる手が無いため。修正版が出れば本来の優先度に戻り、そこから期限を数える)。
 優先度が上がったら期限を今から数え直して早め、下がったら初回検知から数え直す。
 変化は detection.db の `finding.opened` / `finding.reopened` / `finding.updated` / `finding.resolved` に出る。
 分析 DB では `marts.mart_open_findings` / `marts.mart_findings_by_service` で見る。
+
+### 本番イメージの照合
+
+`services.yaml` の `images` に Cloud Run のサービス (`cloud_run`) かジョブ (`cloud_run_job`) を書くと、
+本番で今動いているイメージを照合する。detection コンテナはネットワークを持たないので、
+イメージの取得と SBOM の生成だけはホストで行う。
+
+```bash
+make detection-images   # = uv run python -m src.detection images (gcloud にログイン済み・docker が動くこと)
+```
+
+1. `gcloud run services|jobs describe` で今のイメージを調べ、Artifact Registry でダイジェストに解決する
+2. まだ SBOM の無いダイジェストだけ syft (`SYFT_IMAGE`、ダイジェスト固定) で CycloneDX にする。
+   レジストリの認証は `gcloud auth print-access-token` の短命なトークンを環境変数で渡す
+3. `data/sbom/images/<service_id>.json` を書き換える。1 つでも調べられなかったサービスは前回のまま残す
+
+権限は Cloud Run の閲覧 (`run.services.get` / `run.jobs.get`) と Artifact Registry の読み取りがあればよい。
+デプロイのたびに実行する。SBOM が `IMAGE_SBOM_MAX_AGE_DAYS` (既定 7 日) より古いと照合時に警告し、
+`images` に書いたのに SBOM が無いサービスは照合が欠けているものとして Finding を閉じない。
+
+| 中身 | エコシステム | 照合のしかた |
+|---|---|---|
+| OS パッケージ (`pkg:deb/debian`) | `Debian:<メジャー版>` | ソースパッケージ名 (purl の `upstream`) と Debian のバージョン (dpkg の比較規則) |
+| 実行環境の本体 (`/usr/local` の python・node、NodeSource の nodejs) | `Bitnami` | 上流のバージョン番号 (Bitnami の Advisory は上流の版で範囲を持つ) |
+| 同梱ライブラリ (`pkg:pypi` / `pkg:npm`) | `PyPI` / `npm` | lockfile と同じ。ベースイメージの pip など lockfile に無いものも拾う |
+
+Ubuntu・Alpine の OS パッケージやその他の種類は SBOM には残すが、照合は未対応 (件数だけ数える)。
 
 ## A2・B への読み取り契約
 
@@ -300,7 +338,9 @@ DuckDB の `sqlite` 拡張を使う。初回に extensions.duckdb.org から自�
 - osv-scanner DB は全量取得 (7 日ごと) のタイミングでしか更新されない。L2 で差分の反映方法を決める
 - NVD・JVN・ランタイムのリリース情報・OneCRL・非構造ソース (注意喚起・ニュース) は未対応
 - 既存の `src/collector/` / `src/analyzer/` (data/security.db) は当面そのまま残し、L2 で置き換える
-- A2 はまだ lockfile (PyPI・npm) だけ。コンテナの OS パッケージ・ランタイム本体・バイナリに組み込まれたものは照合しない
+- A2 のイメージ照合は Debian の OS パッケージと Python・Node.js の本体まで。Ubuntu・Alpine・Go などのバイナリに組み込まれたものは照合しない
+- 本番イメージの SBOM はホストの `make detection-images` で作る (自動では更新しない)。デプロイ後に実行し忘れると、7 日後から照合時に警告が出る
+- Debian の Advisory は Debian 公式のパッケージを前提にしている。Debian 以外の apt リポジトリから入れたものは、既知のもの (NodeSource の nodejs) だけ上流の版で照合し、それ以外は誤検知になり得る
 - CVE の無いレコード同士の合流は取り込み順に依存する (CVE のあるものは順序に依存しない)。別名の連鎖は、キーが変わったレコードを辿って付け直す
 - OSV 側で削除されたレコードは検出しない (404 は `osv_missing` に残るだけ)
 - 止まっていた間の OSV の途中の変化は取り戻せない (OSV は最新版しか配らない)。EPSS は過去日のファイルがあるが、埋め戻しコマンドは未実装

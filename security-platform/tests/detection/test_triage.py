@@ -37,3 +37,14 @@ def test_context_lowers_one_step_but_not_p1():
     assert triage(adv(severity="LOW"), comp("dev"), PROD).priority == "P4"
     assert triage(adv(kind="malicious"), comp("dev"), IDLE).priority == "P1"
     assert triage(adv(kev=True), comp(), IDLE).priority == "P1"
+
+
+def test_debian_without_fix_is_p4_unless_p1():
+    deb = Component("Debian:12", "curl", "7.88.1-10", "pkg:deb/debian/curl@7.88.1-10?distro=debian-12", False,
+                    "runtime")
+    t = triage(adv(severity="CRITICAL"), deb, PROD)
+    assert (t.priority, t.reasons) == ("P4", ("深刻度 Critical", "Debian で未修正 (P4 に下げる)"))
+    assert triage(adv(severity="CRITICAL"), deb, PROD, "7.88.1-11").priority == "P2"
+    assert triage(adv(kev=True), deb, PROD).priority == "P1"
+    assert triage(adv(severity="LOW"), deb, PROD).reasons == ("深刻度 Low",)
+    assert triage(adv(severity="CRITICAL"), comp(), PROD).priority == "P2"  # 言語パッケージは対象外

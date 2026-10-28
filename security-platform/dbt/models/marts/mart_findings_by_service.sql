@@ -7,6 +7,7 @@ select
     count(*) filter (where priority = 'P3') as p3,
     count(*) filter (where priority = 'P4') as p4,
     count(*) filter (where fixed_version is not null) as fixable,
+    count(*) filter (where source_kind = 'image') as from_image,
     count(*) filter (where due_at is not null and due_at < now()) as overdue,
     min(due_at) as next_due_at
 from {{ ref('stg_findings') }}

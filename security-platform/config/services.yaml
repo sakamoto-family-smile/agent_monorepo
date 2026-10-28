@@ -1,9 +1,11 @@
 # 資産台帳 (A2 内部該当検知の入力)。人が書くのはサービスのメタデータだけ。
-# パッケージの一覧は lockfile から作る SBOM が正 (旧 inventory.yaml の手書き一覧は使わない)。
+# パッケージの一覧は lockfile と本番イメージから作る SBOM が正 (旧 inventory.yaml の手書き一覧は使わない)。
 #
 #   exposure:         external (インターネット公開) / internal / none (ローカルのみ)
 #   deployed:         本番で稼働しているか (優先度の判定に使う。README の GCP デプロイ状況と一致させる)
 #   lockfiles:        SBOM を作る lockfile (path からの相対)。空なら照合対象外 (lock を先に作る)
+#   images:           本番イメージの取り出し元 (cloud_run: <サービス名> / cloud_run_job: <ジョブ名>)。
+#                     make detection-images で SBOM を作り、OS パッケージ・実行環境・同梱ライブラリを照合する
 #   auto_remediation: B (自動改修) の対象にするか
 services:
   - id: piyolog-analytics
@@ -11,6 +13,8 @@ services:
     exposure: external          # LINE webhook
     deployed: true
     lockfiles: [uv.lock]
+    images:
+      - { cloud_run: piyolog-analytics }
     auto_remediation: true
 
   - id: driving-license-bot
@@ -18,6 +22,10 @@ services:
     exposure: external          # LINE webhook / admin UI
     deployed: true
     lockfiles: [uv.lock]
+    images:
+      - { cloud_run: driving-license-bot-line-bot }
+      - { cloud_run: driving-license-bot-admin-ui }
+      - { cloud_run_job: driving-license-bot-batch }
     auto_remediation: true
 
   - id: fujisawa-info-bot
@@ -25,6 +33,8 @@ services:
     exposure: external          # LINE webhook
     deployed: true
     lockfiles: [uv.lock]
+    images:
+      - { cloud_run: fujisawa-info-bot }
     auto_remediation: true
 
   - id: fujisawa-platform
@@ -32,6 +42,15 @@ services:
     exposure: internal          # Cloud Run Jobs (ETL)
     deployed: true
     lockfiles: []               # uv.lock 未作成
+    images:
+      - { cloud_run_job: fujisawa-weekly-crawl }
+      - { cloud_run_job: fujisawa-wayback-backfill }
+      - { cloud_run_job: fujisawa-half-yearly-facility }
+      - { cloud_run_job: fujisawa-yearly-navi }
+      - { cloud_run_job: fujisawa-biyearly-admission-1st }
+      - { cloud_run_job: fujisawa-biyearly-admission-2nd }
+      - { cloud_run_job: fujisawa-monthly-stats-compute }
+      - { cloud_run_job: fujisawa-monthly-vacancy }
     auto_remediation: false
 
   - id: kanie-lab-agent-backend
@@ -53,6 +72,10 @@ services:
     exposure: external          # LINE webhook (Cloud Run stock-analysis-line / -worker)
     deployed: true
     lockfiles: [uv.lock]
+    images:
+      - { cloud_run: stock-analysis-line }
+      - { cloud_run: stock-analysis-worker }
+      - { cloud_run_job: stock-edinet-index }
     auto_remediation: false
 
   - id: lifeplanner-agent

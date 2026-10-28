@@ -22,6 +22,8 @@ config/vuln.env
 data/raw/
 data/events/
 data/osv-db/
+# 本番イメージの SBOM (make detection-images で作り直せる)
+data/sbom/
 data/.dbt/
 data/.locks/
 data/*.duckdb

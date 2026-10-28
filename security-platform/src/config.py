@@ -74,6 +74,13 @@ class Settings(BaseSettings):
     repo_dir: Path = BASE_DIR.parent
     services_path: Path = BASE_DIR / "config" / "services.yaml"
     detection_scan_interval_minutes: int = 60
+    # A2: 本番イメージの SBOM (make detection-images はホストで gcloud と docker を使う)
+    gcp_project: str = ""  # 空なら gcloud の既定のプロジェクト
+    syft_image: str = (  # ダイジェストで固定する (タグの付け替えで中身が変わらないように)
+        "anchore/syft:v1.54.1-nonroot"
+        "@sha256:253a86a52d9ba12a4b5e4a2919edbadddfffc46c2d9c37856dcedc89ae6cd5c0"
+    )
+    image_sbom_max_age_days: int = 7  # これより古い SBOM は照合時に警告する
 
     # 分析 DB (DuckDB) の再構築間隔
     analytics_interval_minutes: int = 60

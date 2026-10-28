@@ -1,4 +1,4 @@
-"""A2 の照合ジョブ: services.yaml → lockfile → 照合 → 優先度 → findings。
+"""A2 の照合ジョブ: services.yaml → lockfile・本番イメージの SBOM → 照合 → 優先度 → findings。
 
 1 回の照合で全サービスを最初から照合し、結果を findings と突き合わせる。
 - 新しく該当したもの → open (以前 resolved なら reopened)
@@ -6,6 +6,7 @@
 - 該当しなくなったもの (更新済み・Advisory の取り下げ等) → resolved
 変化は detection.db の events (finding.*) に、状態遷移は finding_transitions に残す。
 intel.db は読み取り専用で開き、契約のビューだけを読む。
+本番イメージの SBOM は ``make detection-images`` (images.py) が data/sbom/images/ に置いたものを読む。
 """
 from __future__ import annotations
 
@@ -15,8 +16,8 @@ import logging
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,8 @@ from ..common.events import Outbox
 from ..common.paths import DataPaths
 from ..common.services import Service
 from ..common.timeutil import parse_iso, to_iso, utc_now, utc_now_iso
+from .image_sbom import InvalidSbom, parse_image_sbom
+from .images import blob_path, is_digest, read_manifest, repository_of
 from .lockfiles import Component, ParsedLockfile, UnsupportedLockfile, parse_lockfile
 from .matcher import Match, Matcher
 from .triage import PRIORITIES, Triage, due_at, triage
@@ -51,7 +54,7 @@ class ScanResult:
     updated: int = 0
     resolved: int = 0
     warnings: list[str] = field(default_factory=list)
-    # lockfile を読めなかったサービス。照合結果が欠けているので、その Finding は閉じない
+    # lockfile・イメージの SBOM を読めなかったサービス。照合結果が欠けているので、その Finding は閉じない
     incomplete: set[str] = field(default_factory=set)
 
 
@@ -62,7 +65,7 @@ class Desired:
     service: Service
     match: Match
     triage: Triage
-    lockfile: str
+    source: ParsedLockfile  # 見つかった元 (lockfile か本番イメージ)
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -79,19 +82,20 @@ class Desired:
             "cvss_score": adv.cvss_score, "kev": adv.kev, "epss": adv.epss, "cves": list(adv.cves),
             "record_ids": list(self.match.record_ids), "ecosystem": comp.ecosystem,
             "package": comp.name, "version": comp.version, "scope": comp.scope,
-            "lockfile": self.lockfile, "reasons": list(self.triage.reasons),
+            "source": self.source.path, "source_kind": self.source.kind, "reasons": list(self.triage.reasons),
         }
 
 
 class DetectionPipeline:
     def __init__(
         self, engine: Engine, intel_engine: Engine, paths: DataPaths, repo_root: Path,
-        services: list[Service],
+        services: list[Service], image_sbom_max_age: timedelta = timedelta(days=7),
     ) -> None:
         self.engine = engine
         self.paths = paths
         self.repo_root = repo_root
         self.services = services
+        self.image_sbom_max_age = image_sbom_max_age
         self.matcher = Matcher(intel_engine)
 
     # ── 実行記録 ──────────────────────────────────────────────────────────
@@ -137,15 +141,16 @@ class DetectionPipeline:
             with self.engine.begin() as conn:
                 self._sync_services(conn, now)
                 for svc in self.services:
-                    parsed = self._parse_service(svc, result)
+                    parsed = self._parse_service(svc, result) + self._parse_images(svc, result, now)
                     self._save_sboms(conn, svc, parsed, now)
-                    comps = _dedupe([(c, lf.path) for lf in parsed for c in lf.components])
+                    comps = _dedupe([(c, lf) for lf in parsed for c in lf.components])
                     result.services += 1
                     result.components += len(comps)
                     matches, _ = self.matcher.match([c for c, _ in comps])
                     where = {c.purl: lf for c, lf in comps}
                     for m in matches:
-                        d = Desired(svc, m, triage(m.advisory, m.component, svc), where[m.component.purl])
+                        tri = triage(m.advisory, m.component, svc, m.fixed_version)
+                        d = Desired(svc, m, tri, where[m.component.purl])
                         desired[d.key] = d
             outbox = Outbox(self.paths.events_dir, "detection")
             try:
@@ -174,6 +179,47 @@ class DetectionPipeline:
                 self._warn(result, svc, f"{rel} を読めません ({e})")
         return out
 
+    def _parse_images(self, svc: Service, result: ScanResult, now: datetime) -> list[ParsedLockfile]:
+        """services.yaml の images と、make detection-images が作ったマニフェストを突き合わせて読む。"""
+        if not svc.images:
+            return []
+        sbom_dir = self.paths.sbom_images_dir
+        try:
+            manifest = read_manifest(sbom_dir, svc.id)
+        except ValueError as e:
+            self._warn(result, svc, str(e))
+            return []
+        if manifest is None:
+            self._warn(result, svc, "本番イメージの SBOM がありません (make detection-images)")
+            return []
+        entries = [e for e in manifest["images"] if isinstance(e, dict)]
+        missing = sorted({r.key for r in svc.images} - {e.get("ref") for e in entries})
+        if missing:
+            self._warn(result, svc, f"SBOM の無いイメージがあります: {', '.join(missing)} (make detection-images)")
+        try:
+            generated = parse_iso(str(manifest["generated_at"]))
+        except (KeyError, ValueError):
+            generated = None
+        if generated is None or now - generated > self.image_sbom_max_age:
+            # 再デプロイ後に作り直していない恐れ。照合は続ける (古くても何もないよりよい)
+            message = f"{svc.id}: 本番イメージの SBOM が古くなっています (make detection-images)"
+            logger.warning(message)
+            result.warnings.append(message)
+        out: dict[str, ParsedLockfile] = {}
+        for e in entries:
+            digest = str(e.get("digest") or "")
+            if digest in out:
+                continue  # 同じイメージを使うサービス・ジョブはまとめて 1 回
+            if not is_digest(digest):
+                self._warn(result, svc, f"マニフェストのダイジェストが不正です ({e.get('ref')})")
+                continue
+            repository = repository_of(str(e.get("image") or ""))
+            try:
+                out[digest] = parse_image_sbom(blob_path(sbom_dir, digest), f"image:{repository}@{digest}", digest)
+            except InvalidSbom as err:
+                self._warn(result, svc, f"本番イメージの SBOM を読めません ({err})")
+        return list(out.values())
+
     @staticmethod
     def _warn(result: ScanResult, svc: Service, message: str) -> None:
         logger.warning("%s: %s", svc.id, message)
@@ -197,7 +243,7 @@ class DetectionPipeline:
             )
 
     def _save_sboms(self, conn: Connection, svc: Service, parsed: list[ParsedLockfile], now: datetime) -> None:
-        """lockfile の内容 (sha256) ごとに 1 つの SBOM。同じ内容なら作り直さない。"""
+        """lockfile の内容 (sha256)・イメージのダイジェストごとに 1 つの SBOM。同じなら作り直さない。"""
         current = []
         for lf in parsed:
             sbom_id = f"sbom_{hashlib.sha256(f'{svc.id}\n{lf.path}\n{lf.sha256}'.encode()).hexdigest()[:20]}"
@@ -207,8 +253,9 @@ class DetectionPipeline:
                 continue
             conn.execute(
                 text("INSERT INTO sboms (sbom_id, service_id, kind, subject, path, is_current, generated_at) "
-                     "VALUES (:i, :s, 'source', :subj, :p, 0, :t)"),
-                {"i": sbom_id, "s": svc.id, "subj": f"sha256:{lf.sha256}", "p": lf.path, "t": to_iso(now)},
+                     "VALUES (:i, :s, :k, :subj, :p, 0, :t)"),
+                {"i": sbom_id, "s": svc.id, "k": lf.kind, "subj": lf.subject or f"sha256:{lf.sha256}",
+                 "p": lf.path, "t": to_iso(now)},
             )
             rows = [{"i": sbom_id, "purl": c.purl, "e": c.ecosystem, "n": c.name, "v": c.version,
                      "d": c.is_direct} for c in lf.components]
@@ -218,8 +265,7 @@ class DetectionPipeline:
                          "is_direct) VALUES (:i, :purl, :e, :n, :v, :d)"),
                     rows,
                 )
-        conn.execute(text("UPDATE sboms SET is_current = 0 WHERE service_id = :s AND kind = 'source'"),
-                     {"s": svc.id})
+        conn.execute(text("UPDATE sboms SET is_current = 0 WHERE service_id = :s"), {"s": svc.id})
         for sbom_id in current:
             conn.execute(text("UPDATE sboms SET is_current = 1 WHERE sbom_id = :i"), {"i": sbom_id})
 
@@ -351,14 +397,24 @@ class DetectionPipeline:
         ]
 
 
-def _dedupe(items: list[tuple[Component, str]]) -> list[tuple[Component, str]]:
-    """同じ purl が複数の lockfile にあれば、runtime・direct を優先して 1 つにする。"""
+def _dedupe(items: list[tuple[Component, ParsedLockfile]]) -> list[tuple[Component, ParsedLockfile]]:
+    """同じ purl が複数の lockfile・イメージにあれば 1 つにまとめる。
+
+    元は runtime・direct のものを優先する。scope と is_direct はどれか 1 つでも当てはまれば立てる
+    (lockfile では dev 依存でも、本番イメージに入っていれば runtime)。
+    """
     def rank(c: Component) -> tuple[bool, bool]:
         return (c.scope != "runtime", not c.is_direct)
 
-    best: dict[str, tuple[Component, str]] = {}
+    best: dict[str, tuple[Component, ParsedLockfile]] = {}
     for c, lf in items:
         prev = best.get(c.purl)
-        if prev is None or rank(c) < rank(prev[0]):
+        if prev is None:
             best[c.purl] = (c, lf)
+            continue
+        top, src = (c, lf) if rank(c) < rank(prev[0]) else prev
+        best[c.purl] = (replace(
+            top, is_direct=c.is_direct or prev[0].is_direct,
+            scope="runtime" if "runtime" in (c.scope, prev[0].scope) else "dev",
+        ), src)
     return list(best.values())

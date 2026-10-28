@@ -7,8 +7,10 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 
+from src.common.timeutil import utc_now_iso
+
 from src.common.db import make_engine
-from src.common.services import Service
+from src.common.services import ImageRef, Service
 from src.detection.pipeline import DetectionPipeline
 from tests.intel.test_pipeline import MAL, PYSEC, ghsa
 from tests.intel.test_pipeline import env as intel_env  # noqa: F401  (fixture)
@@ -30,12 +32,50 @@ def package_lock(**pins: str) -> str:
     return json.dumps({"lockfileVersion": 3, "packages": pkgs})
 
 
+HIGH = [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"}]
+CRITICAL = [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}]
+
+
+def osv_rec(rec_id: str, cve: str, eco: str, name: str, events: list[dict[str, str]], severity: list) -> dict:
+    return {"id": rec_id, "modified": "2026-10-01T00:00:00Z", "aliases": [cve], "severity": severity,
+            "affected": [{"package": {"ecosystem": eco, "name": name},
+                          "ranges": [{"type": "SEMVER" if eco == "Bitnami" else "ECOSYSTEM", "events": events}]}]}
+
+
+DEB_OPENSSL = osv_rec("DEBIAN-CVE-2026-3001", "CVE-2026-3001", "Debian:12", "openssl",
+                      [{"introduced": "0"}, {"fixed": "3.0.22-1~deb12u2"}], HIGH)
+DEB_CURL = osv_rec("DEBIAN-CVE-2026-3002", "CVE-2026-3002", "Debian:12", "curl", [{"introduced": "0"}], CRITICAL)
+BIT_NODE = osv_rec("BIT-node-2026-4001", "CVE-2026-4001", "Bitnami", "node",
+                   [{"introduced": "0"}, {"fixed": "24.20.0"}], HIGH)
+DIGEST = "sha256:" + "d" * 64
+IMAGE_REFS = (ImageRef(cloud_run="web"), ImageRef(cloud_run_job="web-batch"))
+
+
+def image_sbom(paths, service_id: str, *purls: str, refs=IMAGE_REFS, generated_at: str | None = None) -> None:
+    """make detection-images が置くのと同じ形で SBOM とマニフェストを書く。"""
+    d = paths.sbom_images_dir
+    (d / "blobs").mkdir(parents=True, exist_ok=True)
+    comps = [{"type": "library", "name": "x", "purl": p} for p in purls]
+    comps.append({"type": "operating-system", "name": "debian", "version": "12.15"})
+    (d / "blobs" / f"{DIGEST.replace(':', '-')}.cdx.json").write_text(
+        json.dumps({"bomFormat": "CycloneDX", "components": comps}))
+    images = [{"ref": r.key, "image": "registry.test/app/web:abc", "digest": DIGEST,
+               "sbom": f"{DIGEST.replace(':', '-')}.cdx.json"} for r in refs]
+    (d / f"{service_id}.json").write_text(json.dumps({
+        "service_id": service_id, "generated_at": generated_at or utc_now_iso(), "images": images}))
+
+
 @pytest.fixture
 def setup(intel_env, tmp_path):  # noqa: F811
     intel, osv, _, paths = intel_env
     osv.zips["npm"].append(MAL | {"affected": [
         {"package": {"ecosystem": "npm", "name": "evilpkg"}, "versions": ["1.0.0"]}]})
-    intel.bootstrap()  # CVE-2026-1111 (examplelib < 2.4.3, CRITICAL, KEV) と MAL-2026-100 (evilpkg 1.0.0)
+    osv.zips["Debian"] += [DEB_OPENSSL, DEB_CURL]
+    osv.zips["Bitnami"] = [BIT_NODE]
+    # CVE-2026-1111 (examplelib < 2.4.3, CRITICAL, KEV) と MAL-2026-100 (evilpkg 1.0.0)
+    # イメージ用: CVE-2026-3001 (Debian openssl, HIGH, 修正あり)・CVE-2026-3002 (Debian curl, CRITICAL, 未修正)・
+    # CVE-2026-4001 (Bitnami node < 24.20.0, HIGH)
+    intel.bootstrap()
     repo = tmp_path / "repo"
     (repo / "api").mkdir(parents=True)
     (repo / "front").mkdir()
@@ -135,3 +175,99 @@ def test_withdrawn_advisory_resolves_finding(setup):
     intel.run_osv_full()
     assert p.run_scan().resolved == 1
     assert q(p, "SELECT state FROM findings WHERE advisory_id = 'CVE-2026-1111'") == [("resolved",)]
+
+
+@pytest.fixture
+def image_setup(intel_env, setup):  # noqa: F811
+    """api の lockfile に加えて、本番イメージを持つ web サービスを照合する。"""
+    _, repo, osv, intel = setup
+    paths = intel_env[3]
+    (repo / "web").mkdir()
+    services = [
+        Service(id="api", path="api/", exposure="external", deployed=True, lockfiles=("uv.lock",),
+                images=(ImageRef(cloud_run="api"),)),
+        Service(id="web", path="web/", exposure="external", deployed=True, images=IMAGE_REFS),
+    ]
+
+    def make() -> DetectionPipeline:
+        return DetectionPipeline(
+            make_engine(paths.sqlite_path("detection")),
+            make_engine(paths.sqlite_path("intel"), read_only=True),
+            paths, repo, services,
+        )
+
+    return make, paths
+
+
+WEB_PURLS = (
+    "pkg:deb/debian/libssl3@3.0.22-1~deb12u1?distro=debian-12.15&upstream=openssl",
+    "pkg:deb/debian/curl@7.88.1-10%2Bdeb12u15?distro=debian-12.15",
+    "pkg:deb/debian/nodejs@24.19.0-1nodesource1?distro=debian-12.15",
+    "pkg:pypi/examplelib@2.4.0",
+)
+
+
+def test_image_sbom_findings(image_setup):
+    make, paths = image_setup
+    image_sbom(paths, "web", *WEB_PURLS)
+    p = make()
+    r = p.run_scan()
+    assert r.incomplete == {"api"}  # api は images を書いたのに SBOM が無い
+    assert "api: 本番イメージの SBOM がありません (make detection-images)" in r.warnings
+    rows = {(r[0], r[1]): r[2:] for r in q(p, """
+        SELECT advisory_id, purl, priority, fixed_version, dependency_path,
+               json_extract(evidence_json, '$.source_kind'), json_extract(evidence_json, '$.reasons')
+        FROM findings WHERE service_id = 'web'""")}
+    assert rows == {
+        ("CVE-2026-3001", "pkg:deb/debian/openssl@3.0.22-1~deb12u1?distro=debian-12"):
+            ("P3", "3.0.22-1~deb12u2", "transitive", "image", '["深刻度 High"]'),
+        ("CVE-2026-3002", "pkg:deb/debian/curl@7.88.1-10%2Bdeb12u15?distro=debian-12"):
+            ("P4", None, "transitive", "image", '["深刻度 Critical","Debian で未修正 (P4 に下げる)"]'),
+        ("CVE-2026-4001", "pkg:generic/node@24.19.0"):
+            ("P3", "24.20.0", "transitive", "image", '["深刻度 High"]'),
+        ("CVE-2026-1111", "pkg:pypi/examplelib@2.4.0"):
+            ("P1", "2.4.3", "transitive", "image", '["KEV 掲載 (悪用を確認)"]'),
+    }
+    assert q(p, "SELECT kind, subject, path, is_current FROM sboms WHERE service_id = 'web'") == [
+        ("image", DIGEST, f"image:registry.test/app/web@{DIGEST}", 1)]
+
+
+def test_lockfile_and_image_merge_into_one_finding(image_setup):
+    """同じパッケージが lockfile と本番イメージの両方にあれば 1 件 (lockfile の direct を残す)。"""
+    make, paths = image_setup
+    image_sbom(paths, "web", *WEB_PURLS)
+    image_sbom(paths, "api", "pkg:pypi/examplelib@2.4.0", refs=(ImageRef(cloud_run="api"),))
+    p = make()
+    r = p.run_scan()
+    assert r.incomplete == set()
+    assert q(p, "SELECT dependency_path, json_extract(evidence_json, '$.source_kind') FROM findings "
+                "WHERE service_id = 'api'") == [("direct", "source")]
+
+
+def test_missing_or_stale_image_sbom(image_setup):
+    make, paths = image_setup
+    image_sbom(paths, "web", *WEB_PURLS)
+    p = make()
+    p.run_scan()
+    image_sbom(paths, "web", *WEB_PURLS, refs=IMAGE_REFS[:1], generated_at="2026-01-01T00:00:00Z")
+    r = p.run_scan()
+    assert "web: SBOM の無いイメージがあります: cloud_run_job:web-batch (make detection-images)" in r.warnings
+    assert "web: 本番イメージの SBOM が古くなっています (make detection-images)" in r.warnings
+    assert r.resolved == 0  # 欠けているので閉じない
+    (paths.sbom_images_dir / "web.json").unlink()
+    assert make().run_scan().resolved == 0
+    assert q(p, "SELECT count(*) FROM findings WHERE service_id = 'web' AND state = 'open'") == [(4,)]
+
+
+def test_broken_manifest_does_not_stop_scan(image_setup):
+    make, paths = image_setup
+    image_sbom(paths, "web", *WEB_PURLS)
+    manifest = paths.sbom_images_dir / "web.json"
+    data = json.loads(manifest.read_text())
+    data["generated_at"] = "yesterday"
+    data["images"][1]["digest"] = "../../intel.db"
+    manifest.write_text(json.dumps(data))
+    r = make().run_scan()
+    assert "web: マニフェストのダイジェストが不正です (cloud_run_job:web-batch)" in r.warnings
+    assert "web: 本番イメージの SBOM が古くなっています (make detection-images)" in r.warnings
+    assert r.opened == 5  # 正しい方のイメージは照合する (api の lockfile 1 件 + web 4 件)

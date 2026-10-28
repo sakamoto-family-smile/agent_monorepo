@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import Engine, bindparam, text
 
 from .lockfiles import Component, canonical_pypi_name
-from .versions import SUPPORTED_ECOSYSTEMS, is_affected, smallest_fix_above
+from .versions import is_affected, is_supported, smallest_fix_above
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class Matcher:
         stats = MatchStats(components=len(components))
         by_eco: dict[str, list[Component]] = defaultdict(list)
         for c in components:
-            if c.ecosystem not in SUPPORTED_ECOSYSTEMS:
+            if not is_supported(c.ecosystem):
                 stats.unsupported += 1
                 continue
             by_eco[c.ecosystem].append(c)

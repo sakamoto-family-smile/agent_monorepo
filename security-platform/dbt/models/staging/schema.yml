@@ -32,6 +32,12 @@ models:
     columns:
       - name: finding_id
         data_tests: [unique, not_null]
+      - name: source_kind
+        description: 見つかった元 (source = lockfile / image = 本番イメージ)
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [source, image]
   - name: stg_scan_runs
     description: 照合ジョブの実行記録
     columns:

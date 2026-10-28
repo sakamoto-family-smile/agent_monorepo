@@ -10,6 +10,7 @@ select
     kev,
     epss,
     scope,
+    source_kind,
     dependency_path,
     due_at,
     due_at is not null and due_at < now() as overdue,

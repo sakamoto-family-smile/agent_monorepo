@@ -11,6 +11,10 @@ P1 以外は、次のどちらかなら 1 段下げる (重ねては下げない
 - dev 依存からしか届かない (本番では読み込まれない)
 - 本番で稼働しておらず外部にも公開していないサービス
 悪性パッケージは入れた時点 (開発機・CI) で被害が出るので下げない。
+
+OS パッケージ (Debian) で修正版がまだ無いものは、P1 以外は P4 (期限なし) にする。
+こちらで打てる手が無く、期限を付けても超過が積み上がるだけなので。修正版が出れば
+次の照合で本来の優先度に戻り、そこから期限を数える。
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ from datetime import datetime, timedelta
 from ..common.services import Service
 from .lockfiles import Component
 from .matcher import AdvisoryInfo
+from .versions import DEBIAN_PREFIX
 
 PRIORITIES = ("P1", "P2", "P3", "P4")
 EPSS_HIGH = 0.1
@@ -46,9 +51,15 @@ def _base(adv: AdvisoryInfo) -> tuple[str, str]:
     return "P4", f"深刻度 {adv.severity.title() if adv.severity else 'なし'}"
 
 
-def triage(adv: AdvisoryInfo, component: Component, service: Service) -> Triage:
+def triage(
+    adv: AdvisoryInfo, component: Component, service: Service, fixed_version: str | None = None,
+) -> Triage:
     priority, reason = _base(adv)
     reasons = [reason]
+    if priority != "P1" and fixed_version is None and component.ecosystem.startswith(DEBIAN_PREFIX):
+        if priority != "P4":
+            reasons.append("Debian で未修正 (P4 に下げる)")
+        return Triage("P4", tuple(reasons))
     if priority != "P1":
         if component.scope == "dev":
             reasons.append("dev 依存のみ (1 段下げ)")

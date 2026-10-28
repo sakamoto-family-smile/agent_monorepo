@@ -1,17 +1,20 @@
 """A2 内部該当検知の CLI。
 
-    python -m src.detection scan        # 全サービスの lockfile を照合して findings を更新
+    python -m src.detection scan        # 全サービスの lockfile・本番イメージを照合して findings を更新
     python -m src.detection findings    # 未対応の Finding を優先度順に表示 (読み取りのみ)
     python -m src.detection serve       # docker compose 用の常駐 (定期的に scan)
+    python -m src.detection images      # 本番イメージの SBOM を作る (ホストで実行)
 
 書き込みを伴うコマンドは data/.locks/detection.lock を取ってから動く。
-ホストの macOS からは実行せず、``make detection-*`` (= docker compose run) を使う。
+images 以外はホストの macOS からは実行せず、``make detection-*`` (= docker compose run) を使う。
+images は gcloud と docker を使うのでホストで実行する (``make detection-images``)。SQLite には触らない。
 """
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
 from datetime import timedelta
+from pathlib import Path
 
 import typer
 
@@ -22,6 +25,7 @@ from ..common.paths import default_paths
 from ..common.scheduler import Job, Scheduler
 from ..common.services import load_services
 from ..config import settings
+from .images import ImageSbomFetcher
 from .pipeline import JOB_SCAN, DetectionPipeline
 
 app = typer.Typer(add_completion=False, help="A2 内部該当検知")
@@ -37,6 +41,7 @@ def build_pipeline(*, read_only: bool = False) -> DetectionPipeline:
         paths,
         settings.repo_dir,
         load_services(settings.services_path),
+        timedelta(days=settings.image_sbom_max_age_days),
     )
 
 
@@ -75,6 +80,19 @@ def findings() -> None:
         typer.echo(f"{f['priority']} {due} {f['service_id']:26} {f['package']}=={f['version']} {fix} "
                    f"[{f['advisory_id']}] {'; '.join(f['reasons'])}")
     typer.echo(f"{len(rows)} open")
+
+
+@app.command()
+def images() -> None:
+    """Cloud Run で動いている本番イメージの SBOM を作る (gcloud・docker を使うのでホストで実行)。"""
+    paths = default_paths()
+    fetcher = ImageSbomFetcher(paths.sbom_images_dir, settings.syft_image, settings.gcp_project)
+    r = fetcher.fetch(load_services(Path(settings.services_path)))
+    typer.echo(f"{r.services} services / {r.images} images (新規 SBOM {r.generated}, 削除 {r.removed})")
+    for e in r.errors:
+        typer.echo(f"ERROR {e}")
+    if r.errors:
+        raise typer.Exit(1)
 
 
 @app.command()

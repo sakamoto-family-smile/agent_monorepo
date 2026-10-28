@@ -3,7 +3,7 @@
         scan-mcp scan-skills redteam cron \
         test clean logs \
         vuln-migrate intel-bootstrap intel-osv intel-osv-full intel-kev intel-epss \
-        intel-health detection-scan detection-findings analytics duck-ui up down ps logs-vuln
+        intel-health detection-scan detection-findings detection-images analytics duck-ui up down ps logs-vuln
 
 # ── defaults ────────────────────────────────────────────────────────────────
 DASHBOARD_PORT ?= 8000
@@ -45,7 +45,8 @@ help:
 	@echo "    intel-osv      OSV 差分取得       intel-osv-full  OSV 全量の再取得"
 	@echo "    intel-kev      CISA KEV           intel-epss      FIRST EPSS"
 	@echo "    intel-health   情報源ごとの最終成功時刻 (古ければ exit 1)"
-	@echo "    detection-scan lockfile を照合して findings を更新  detection-findings  未対応の Finding 一覧"
+	@echo "    detection-scan lockfile・本番イメージを照合して findings を更新  detection-findings  未対応の Finding 一覧"
+	@echo "    detection-images 本番イメージの SBOM を作る (ホストで gcloud・docker を使う。デプロイのたびに実行)"
 	@echo "    analytics      dbt build → data/security.duckdb を差し替え"
 	@echo "    duck-ui        DuckDB UI を読み取り専用で開く (http://localhost:4213)"
 	@echo ""
@@ -152,6 +153,11 @@ detection-scan:
 
 detection-findings:
 	$(COMPOSE) run --rm --no-deps detection python -m src.detection findings
+
+# ホストで実行する (gcloud の認証と docker を使う。SQLite には触らず data/sbom/images/ に書くだけ)
+detection-images:
+	mkdir -p data/sbom/images
+	uv run python -m src.detection images
 
 analytics:
 	$(COMPOSE) run --rm --no-deps analytics python -m src.analytics build
