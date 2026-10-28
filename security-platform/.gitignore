@@ -15,6 +15,7 @@ data/*.db-shm
 data/*.db-wal
 
 config/vuln.env
+config/notify.env
 
 # 脆弱性対応のデータ。生データ・osv-scanner DB は再取得できるが、次は再構築できない:
 # 運用 DB の履歴 (advisory_history / events / source_runs)、分析 DB のスナップショット (history.snp_*)、

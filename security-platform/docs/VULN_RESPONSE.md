@@ -8,7 +8,7 @@ PR まで自動で進める (B) ためのフレームワーク。まずはロー
 |---|---|---|
 | L0 | `data/` レイアウト、SQLite 3 ファイル + Alembic、イベント (outbox + JSONL)、dbt 雛形、`services.yaml`、docker compose | ✅ |
 | L1 | A1: OSV 全エコシステム (全量 + 差分)、CISA KEV、FIRST EPSS、名寄せ、変化検知、ブートストラップ。分析: 鮮度・リードタイム・エコシステム別・KEV カバレッジ | ✅ |
-| L2 | A2: lockfile の照合・優先度 (✅)。本番イメージ (OS パッケージ・ランタイム本体・同梱ライブラリ) の照合 (✅)。LINE / GitHub Issues 通知、取得停止のアラート (⬜) | 🔶 |
+| L2 | A2: lockfile・本番イメージ (OS パッケージ・ランタイム本体・同梱ライブラリ) の照合と優先度、例外 (誤検知・リスク受容)。通知: P1 の即時通知・日次まとめ (LINE)、GitHub Issues (private リポジトリ)、取得停止のアラート | ✅ |
 | L3 | B: git worktree での決定的更新、差分検査、PR 作成 | ⬜ |
 | L4 | A1 の非構造ソース: IPA・JPCERT 注意喚起、ベンダー告知、セキュリティニュース、VulnerableMCP。LLM で根拠付き抽出し、一次情報が見つからないものは `unconfirmed` として照合に使わない | ⬜ |
 
@@ -47,6 +47,14 @@ flowchart LR
     end
     RDB[("data/remediation.db")]
 
+    subgraph NTF["notify サービス (外部と通信するのはここだけ)"]
+      NEV["P1 の即時通知"]
+      NHL["取得停止の監視"]
+      NDG["日次まとめ"]
+      NIS["Issues の同期"]
+    end
+    NDB[("data/notify.db<br/>カーソル・送信記録・監視状態")]
+
     subgraph AN["analytics サービス"]
       DBT["dbt-duckdb<br/>security_build_*.duckdb → 差し替え"]
     end
@@ -56,7 +64,7 @@ flowchart LR
 
   REPO["モノレポの lockfile<br/>config/services.yaml"]
   IMGSBOM[("data/sbom/images/<br/>本番イメージの SBOM<br/>make detection-images (ホスト)")]
-  NOTIFY["LINE / GitHub Issues"]
+  NOTIFY["LINE (専用 Bot)<br/>GitHub Issues (private)"]
   PR["GitHub PR<br/>(マージは人)"]
   UI["DuckDB UI<br/>make duck-ui"]
 
@@ -70,12 +78,17 @@ flowchart LR
   NEWS -.-> LLM
   LLM -.-> NRM
 
-  REPO -.-> SBOM
+  REPO --> SBOM
   IDB -. "v_advisories (読み取り専用)" .-> MAT
   IDB -. "advisory.changed" .-> MAT
-  OSVDB -.-> MAT
-  TRI -.-> DDB
-  TRI -.-> NOTIFY
+  TRI --> DDB
+  IMGSBOM --> SBOM
+  DDB -- "finding.* (読み取り専用)" --> NEV
+  IDB -- "source_runs" --> NHL
+  DDB --> NDG
+  DDB --> NIS
+  NEV & NHL & NDG & NIS --> NOTIFY
+  NEV & NHL & NDG & NIS --> NDB
   DDB -. "finding.remediate" .-> WK
   GUARD -.-> PR
   WK -.-> RDB
@@ -87,8 +100,7 @@ flowchart LR
   DUCK --> UI
 
   classDef planned stroke-dasharray: 5 5
-  class NEWS,LLM,SBOM,MAT,TRI,DDB,WK,GUARD,RDB,NOTIFY,PR planned
-  style DET stroke-dasharray: 5 5
+  class NEWS,LLM,WK,GUARD,RDB,PR planned
   style REM stroke-dasharray: 5 5
 ```
 
@@ -140,6 +152,10 @@ make intel-health        # 情報源ごとの最終成功時刻 (古いものが
 make detection-scan      # lockfile・本番イメージを照合して findings を更新 (常駐の detection も 1 時間ごとに実行)
 make detection-findings  # 未対応の Finding を優先度・期限順に表示
 make detection-images    # 本番イメージの SBOM を作る (これだけホストで実行。下記)
+make detection-exceptions ARGS="list"   # 例外の一覧 (add / revoke は下記)
+make notify-test         # LINE にテスト送信
+make notify-digest       # 日次まとめを今すぐ送る (その日にまだ送っていなければ)
+make notify-health       # 取得停止の監視項目の今の状態
 make analytics           # dbt build → data/security.duckdb を差し替え
 ```
 
@@ -189,12 +205,13 @@ Docker Desktop の VM をまたいで同じ WAL ファイルを共有するこ�
 |---|---|---|---|
 | 生データ | `data/raw/<source>/dt=YYYY-MM-DD/` | intel | 取得したものを改変せず保存 (書き込み後は読み取り専用)。OSV 全量は新しい 2 世代を保持 |
 | 運用 DB | `data/intel.db` | intel のみ | Advisory・KEV・EPSS・変化履歴・取得記録・イベント |
-| | | `data/detection.db` | detection のみ | Finding・SBOM・照合の実行記録・イベント |
+| | `data/detection.db` | detection のみ | Finding・SBOM・例外・照合の実行記録・イベント |
+| | `data/notify.db` | notify のみ | イベントのカーソル・送った通知・監視項目の状態・Issue の対応 |
 | | `data/remediation.db` | (L3) | スキーマのみ作成済み |
 | SBOM | `data/sbom/images/<service_id>.json` + `blobs/sha256-<digest>.cdx.json` | `make detection-images` (ホスト) | 本番イメージの SBOM (CycloneDX)。ダイジェストごとに 1 つ、参照されなくなったら消す |
 | イベント | 各 DB の `events` + `data/events/type=*/dt=*/<producer>.jsonl` | 発行側 | 受信側は発行側 DB を読み取り専用で開き、自分の `event_cursors` で位置を持つ |
 | 分析 DB | `data/security.duckdb` | analytics | dbt で組み立てる。スキーマ `staging` / `marts` / `history` |
-| osv-scanner DB | `data/osv-db/osv-scanner/<ecosystem>/all.zip` | intel | A2 (L2) のオフライン照合用。OSV 全量取得のたびに更新 |
+| osv-scanner DB | `data/osv-db/osv-scanner/<ecosystem>/all.zip` | intel | osv-scanner でのオフライン照合用。OSV 全量取得のたびに更新 (A2 は intel.db の契約ビューで照合するので使っていない) |
 
 DuckDB を運用 DB にしないのは、同時に書き込めるのが 1 プロセスだけで、書き込み中は他から
 開けないため。dbt は `security_build_<ランダム>.duckdb` に作ってから `security.duckdb` に置き換えるので、
@@ -299,6 +316,55 @@ make detection-images   # = uv run python -m src.detection images (gcloud にロ
 
 Ubuntu・Alpine の OS パッケージやその他の種類は SBOM には残すが、照合は未対応 (件数だけ数える)。
 
+### 例外 (誤検知・リスク受容)
+
+影響しないと判断した Finding は例外にする。例外は **detection.db にだけ** 持ち、モノレポ (public) には置かない
+(理由付きの一覧は「受け入れたリスクの一覧」になり、公開すると攻撃の手がかりになるため)。
+
+```bash
+make detection-exceptions ARGS='add --advisory CVE-2019-1010022 --package glibc --kind false_positive \
+  --reason "上流が脆弱性と認めていない (disputed)"'                      # --service 省略で全サービス
+make detection-exceptions ARGS='add --service piyolog-analytics --advisory CVE-2026-xxxx --kind risk_accepted \
+  --reason "該当の機能を使っていない。次のベースイメージ更新で解消" --expires 2026-12-31'
+make detection-exceptions ARGS='list'            # --all で期限切れ・取り消し済みも
+make detection-exceptions ARGS='revoke exc_...'  # 取り消し (行は残る)
+```
+
+- `false_positive` (誤検知) は期限なしでもよい。`risk_accepted` (受け入れ) は期限が必須で最長 180 日
+- パッケージは名前で指定する (版が上がっても外れない)。省略するとその Advisory の全パッケージ
+- 次の照合で該当する Finding は `suppressed` になり、通知・Issue・期限の対象から外れる。
+  期限切れ・取り消しで `open` に戻り (`finding.reopened`)、期限はそこから数える
+
+## 通知 (notify)
+
+外部と通信するのは notify サービスだけ。送り先の認証情報 (`config/notify.env`) もこのコンテナにだけ渡す。
+detection.db・intel.db は読み取り専用で開き、自分の notify.db にだけ書く。
+
+| 種類 | タイミング | 送り先 | 内容 |
+|---|---|---|---|
+| P1 の即時通知 | 5 分ごとに `finding.*` を読む | LINE | P1 の新規・再発・P1 への引き上げ。導入時 (と detection.db の作り直し) より前のイベントは送らない |
+| 取得停止のアラート | 30 分ごと | LINE | 状態が変わったときだけ (停止・復旧)。対象は下表 |
+| 日次まとめ | 毎日 `NOTIFY_DIGEST_HOUR` 時 (既定 9 時) 以降の最初の確認 | LINE | 優先度別の件数、前回からの新規・解消・期限切れ、7 日以内に切れる例外、止まっているもの |
+| Issues | 30 分ごと | GitHub Issues | `NOTIFY_ISSUE_MIN_PRIORITY` (既定 P3) までの未対応を、パッケージごとに 1 Issue。内容が変われば更新、なくなればクローズ、再発で再オープン |
+
+| 監視項目 | 止まっているとみなす条件 |
+|---|---|
+| `intel:<source>` | 最終成功が取得間隔の 3 倍より古い (osv・kev 3 時間、epss 3 日、osv_full 21 日) |
+| `detection:scan` | 照合の最終成功が照合間隔の 3 倍より古い (3 時間) |
+| `sbom:<service>` | 本番イメージの SBOM が `IMAGE_SBOM_MAX_AGE_DAYS` (7 日) より古い |
+
+送った通知は `notifications.dedupe_key` で記録し、LINE には `X-Line-Retry-Key` を付けるので、途中で落ちても二重に送らない。
+送り先が未設定なら送らずに `skipped` として記録し、処理は進める。Issues は 1 回の同期で最大 40 件まで変更する (残りは次回)。
+
+### 準備
+
+1. **LINE**: LINE Developers で通知専用の Messaging API チャネルを作り、長期のチャネルアクセストークンを発行する。
+   Bot を友だち追加し、自分の userId (チャネル基本設定の「あなたのユーザー ID」) を控える
+2. **GitHub**: **private** リポジトリを作り (例: `gh repo create <owner>/security-findings --private`)、
+   fine-grained personal access token をそのリポジトリだけ・Issues の Read and write で発行する。
+   モノレポ (public) には立てない (未対応の脆弱性の一覧になるため)
+3. `cp config/notify.env.example config/notify.env` に書き、`make up` → `make notify-test`
+
 ## A2・B への読み取り契約
 
 `data/intel.db` を `mode=ro` で開き、次のビューだけを使う (テーブルを直接読まない)。
@@ -334,10 +400,14 @@ DuckDB の `sqlite` 拡張を使う。初回に extensions.duckdb.org から自�
 
 ## 既知の制約
 
-- 取得停止のアラート (FR-I07) は `HEALTHCHECK_PING_BASE` の外部監視で受ける。LINE への直接通知は L2 で入れる
-- osv-scanner DB は全量取得 (7 日ごと) のタイミングでしか更新されない。L2 で差分の反映方法を決める
+- 取得停止のアラートは notify が LINE に送るが、Mac のスリープや Docker Desktop の停止では notify 自体も止まる。
+  そちらは引き続き `HEALTHCHECK_PING_BASE` の外部監視 (ping の途絶) で受ける (notify のジョブも `sec-notify_*` に ping する)
+- detection はモノレポの作業ツリーをそのまま読む。作業ツリーで別のブランチに切り替えている間に照合が走ると、
+  そのブランチの lockfile で照合され、Finding が一時的に解消・再発することがある (P1 なら通知が飛ぶ)。
+  作業は別の git worktree で行う
 - NVD・JVN・ランタイムのリリース情報・OneCRL・非構造ソース (注意喚起・ニュース) は未対応
-- 既存の `src/collector/` / `src/analyzer/` (data/security.db) は当面そのまま残し、L2 で置き換える
+- 既存の `src/collector/` / `src/analyzer/` / `src/notifier/` (data/security.db) は当面そのまま残す。
+  A1・A2・notify と役割が重なるので、使っていないことを確かめてから整理する
 - A2 のイメージ照合は Debian の OS パッケージと Python・Node.js の本体まで。Ubuntu・Alpine・Go などのバイナリに組み込まれたものは照合しない
 - 本番イメージの SBOM はホストの `make detection-images` で作る (自動では更新しない)。デプロイ後に実行し忘れると、7 日後から照合時に警告が出る
 - Debian の Advisory は Debian 公式のパッケージを前提にしている。Debian 以外の apt リポジトリから入れたものは、既知のもの (NodeSource の nodejs) だけ上流の版で照合し、それ以外は誤検知になり得る

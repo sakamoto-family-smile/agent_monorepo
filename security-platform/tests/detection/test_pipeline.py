@@ -271,3 +271,73 @@ def test_broken_manifest_does_not_stop_scan(image_setup):
     assert "web: マニフェストのダイジェストが不正です (cloud_run_job:web-batch)" in r.warnings
     assert "web: 本番イメージの SBOM が古くなっています (make detection-images)" in r.warnings
     assert r.opened == 5  # 正しい方のイメージは照合する (api の lockfile 1 件 + web 4 件)
+
+
+# ── 例外 (誤検知・リスク受容) ───────────────────────────────────────────────
+
+def test_exception_suppresses_then_revoke_reopens(setup):
+    from src.detection.exceptions import ExceptionStore
+
+    make, *_ = setup
+    p = make()
+    p.run_scan()
+    store = ExceptionStore(p.engine)
+    exc = store.add("*", "CVE-2026-1111", "ExampleLib", "false_positive", "使っていない関数の脆弱性", None)
+    r = p.run_scan()
+    assert (r.suppressed, r.open_findings) == (1, 1)
+    assert q(p, "SELECT state, due_at, json_extract(evidence_json, '$.exception_id') FROM findings "
+                "WHERE advisory_id = 'CVE-2026-1111'") == [("suppressed", None, exc.exception_id)]
+    assert events(p)[-1][0] == "finding.suppressed"
+    assert p.run_scan().suppressed == 0  # 抑止したままなら何も起きない
+
+    assert store.revoke(exc.exception_id) and not store.revoke(exc.exception_id)
+    r = p.run_scan()
+    assert r.opened == 1
+    kind, payload = events(p)[-1]
+    assert (kind, payload["priority"]) == ("finding.reopened", "P1")
+    assert q(p, "SELECT state, due_at IS NOT NULL FROM findings WHERE advisory_id = 'CVE-2026-1111'") == [
+        ("open", 1)]
+    assert q(p, "SELECT from_state, to_state FROM finding_transitions ORDER BY id")[-2:] == [
+        ("open", "suppressed"), ("suppressed", "open")]
+
+
+def test_exception_scope_and_expiry(setup):
+    from datetime import timedelta
+
+    from src.common.timeutil import utc_now
+    from src.detection.exceptions import ExceptionStore
+
+    make, repo, *_ = setup
+    p = make()
+    p.run_scan()  # 初回にスキーマを作る
+    store = ExceptionStore(p.engine)
+    store.add("front", "CVE-2026-1111", None, "false_positive", "別サービス向け", None)  # 当たらない
+    store.add("api", "CVE-2026-1111", "otherpkg", "false_positive", "別パッケージ向け", None)  # 当たらない
+    past = utc_now() - timedelta(days=30)
+    store.add("api", "CVE-2026-1111", None, "risk_accepted", "期限切れ", past + timedelta(days=1), now=past)
+    assert p.run_scan().suppressed == 0
+    store.add("api", "CVE-2026-1111", None, "risk_accepted", "次の更新まで", utc_now() + timedelta(days=7))
+    assert p.run_scan().suppressed == 1
+    # 抑止中に更新されて該当しなくなれば resolved
+    (repo / "api/uv.lock").write_text(uv_lock(ExampleLib="2.4.3", other="1.0"))
+    assert p.run_scan().resolved == 1
+    assert q(p, "SELECT state FROM findings WHERE advisory_id = 'CVE-2026-1111'") == [("resolved",)]
+
+
+def test_exception_validation():
+    from datetime import timedelta
+
+    from src.common.timeutil import utc_now
+    from src.detection.exceptions import validate
+
+    now = utc_now()
+    for kind, reason, expires in [
+        ("ignore", "x", None),                                   # 未知の種類
+        ("false_positive", " ", None),                           # 理由なし
+        ("risk_accepted", "x", None),                            # 期限なし
+        ("risk_accepted", "x", now + timedelta(days=181)),       # 期限が長すぎる
+        ("false_positive", "x", now - timedelta(days=1)),        # 期限が過去
+    ]:
+        with pytest.raises(ValueError):
+            validate(kind, reason, expires, now)
+    validate("risk_accepted", "x", now + timedelta(days=180), now)

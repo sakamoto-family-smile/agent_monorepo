@@ -50,8 +50,8 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # A2: lockfile の照合。モノレポを読み取り専用でマウントし、外部とは通信させない
-  # (通知は L2 の通知サービスが detection.db の events を読んで送る)
+  # A2: lockfile・本番イメージの SBOM の照合。モノレポを読み取り専用でマウントし、外部とは通信させない
+  # (通知は notify が detection.db の events を読んで送る)
   detection:
     <<: *app
     command: ["python", "-m", "src.detection", "serve"]
@@ -77,6 +77,21 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # L2 / L3 で追加:
-  # detection:   python -m src.detection serve    (detection.db の唯一の書き込み元)
+  # 通知: P1 の即時通知・取得停止の監視・日次まとめ (LINE)、GitHub Issues (private リポジトリ)。
+  # 外部と通信するのはこのサービスだけで、送り先の認証情報 (config/notify.env) もここにだけ渡す。
+  # notify.db にだけ書き、detection.db・intel.db は読み取り専用で開く
+  notify:
+    <<: *app
+    command: ["python", "-m", "src.notify", "serve"]
+    restart: unless-stopped
+    env_file:
+      - path: config/vuln.env
+        required: false
+      - path: config/notify.env
+        required: false
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # L3 で追加:
   # remediation: python -m src.remediation serve  (remediation.db の唯一の書き込み元)

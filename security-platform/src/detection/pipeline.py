@@ -4,6 +4,7 @@
 - 新しく該当したもの → open (以前 resolved なら reopened)
 - 優先度・修正版などが変わったもの → updated
 - 該当しなくなったもの (更新済み・Advisory の取り下げ等) → resolved
+- 例外 (exceptions.py) に当たるもの → suppressed。例外の期限切れ・取り消しで open に戻す (reopened)
 変化は detection.db の events (finding.*) に、状態遷移は finding_transitions に残す。
 intel.db は読み取り専用で開き、契約のビューだけを読む。
 本番イメージの SBOM は ``make detection-images`` (images.py) が data/sbom/images/ に置いたものを読む。
@@ -27,6 +28,7 @@ from ..common.events import Outbox
 from ..common.paths import DataPaths
 from ..common.services import Service
 from ..common.timeutil import parse_iso, to_iso, utc_now, utc_now_iso
+from .exceptions import ExceptionStore, FindingException, find_exception
 from .image_sbom import InvalidSbom, parse_image_sbom
 from .images import blob_path, is_digest, read_manifest, repository_of
 from .lockfiles import Component, ParsedLockfile, UnsupportedLockfile, parse_lockfile
@@ -38,10 +40,12 @@ logger = logging.getLogger(__name__)
 JOB_SCAN = "scan"
 STATE_OPEN = "open"
 STATE_RESOLVED = "resolved"
+STATE_SUPPRESSED = "suppressed"
 EVENT_OPENED = "finding.opened"
 EVENT_REOPENED = "finding.reopened"
 EVENT_UPDATED = "finding.updated"
 EVENT_RESOLVED = "finding.resolved"
+EVENT_SUPPRESSED = "finding.suppressed"
 
 
 @dataclass
@@ -53,6 +57,7 @@ class ScanResult:
     opened: int = 0
     updated: int = 0
     resolved: int = 0
+    suppressed: int = 0
     warnings: list[str] = field(default_factory=list)
     # lockfile・イメージの SBOM を読めなかったサービス。照合結果が欠けているので、その Finding は閉じない
     incomplete: set[str] = field(default_factory=set)
@@ -66,6 +71,11 @@ class Desired:
     match: Match
     triage: Triage
     source: ParsedLockfile  # 見つかった元 (lockfile か本番イメージ)
+    exception: FindingException | None = None  # 当てはまる例外 (あれば suppressed にする)
+
+    @property
+    def state(self) -> str:
+        return STATE_SUPPRESSED if self.exception else STATE_OPEN
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -83,6 +93,7 @@ class Desired:
             "record_ids": list(self.match.record_ids), "ecosystem": comp.ecosystem,
             "package": comp.name, "version": comp.version, "scope": comp.scope,
             "source": self.source.path, "source_kind": self.source.kind, "reasons": list(self.triage.reasons),
+            "exception_id": self.exception.exception_id if self.exception else None,
         }
 
 
@@ -138,6 +149,7 @@ class DetectionPipeline:
         with self._run(JOB_SCAN) as result:
             now = utc_now()
             desired: dict[tuple[str, str, str], Desired] = {}
+            exceptions = ExceptionStore(self.engine).active(now)
             with self.engine.begin() as conn:
                 self._sync_services(conn, now)
                 for svc in self.services:
@@ -150,7 +162,8 @@ class DetectionPipeline:
                     where = {c.purl: lf for c, lf in comps}
                     for m in matches:
                         tri = triage(m.advisory, m.component, svc, m.fixed_version)
-                        d = Desired(svc, m, tri, where[m.component.purl])
+                        exc = find_exception(exceptions, svc.id, m.advisory.advisory_id, m.component.name)
+                        d = Desired(svc, m, tri, where[m.component.purl], exc)
                         desired[d.key] = d
             outbox = Outbox(self.paths.events_dir, "detection")
             try:
@@ -161,8 +174,9 @@ class DetectionPipeline:
                 raise
             outbox.flush()
             logger.info(
-                "scan: %d services, %d components, %d open (+%d / ~%d / -%d)", result.services,
+                "scan: %d services, %d components, %d open (+%d / ~%d / -%d / suppressed %d)", result.services,
                 result.components, result.open_findings, result.opened, result.updated, result.resolved,
+                result.suppressed,
             )
             return result
 
@@ -283,17 +297,25 @@ class DetectionPipeline:
         }
         for key, d in desired.items():
             row = existing.get(key)
-            if row is None:
+            if row is None and d.exception:
+                self._suppress(conn, outbox, d, None, now)
+                result.suppressed += 1
+            elif row is None:
                 self._open(conn, outbox, d, now)
                 result.opened += 1
-            elif row[4] == STATE_RESOLVED:
+            elif row[4] != STATE_SUPPRESSED and d.exception:
+                self._suppress(conn, outbox, d, row, now)
+                result.suppressed += 1
+            elif row[4] == STATE_SUPPRESSED and d.exception:
+                self._write(conn, d, row[0], None, now, insert=False)  # 抑止したまま中身だけ最新にする
+            elif row[4] in (STATE_RESOLVED, STATE_SUPPRESSED):
                 self._reopen(conn, outbox, d, row, now)
                 result.opened += 1
             elif self._update(conn, outbox, d, row, now):
                 result.updated += 1
         for key, row in existing.items():
             # services.yaml から外したサービスの Finding も、照合しなくなったので閉じる
-            if key not in desired and row[4] == STATE_OPEN and key[0] not in result.incomplete:
+            if key not in desired and row[4] in (STATE_OPEN, STATE_SUPPRESSED) and key[0] not in result.incomplete:
                 self._resolve(conn, outbox, row, now)
                 result.resolved += 1
         result.open_findings = conn.execute(
@@ -326,16 +348,17 @@ class DetectionPipeline:
             "fix_type": "upgrade" if d.match.fixed_version else "none", "fixed": d.match.fixed_version,
             "ev": json.dumps(d.evidence(), ensure_ascii=False, sort_keys=True), "now": to_iso(now),
         }
+        params["state"] = d.state
         if insert:
             conn.execute(text("""
                 INSERT INTO findings (finding_id, service_id, advisory_id, purl, dependency_path, trigger,
                   priority, due_at, fix_type, fixed_version, state, evidence_json, first_seen_at, updated_at)
-                VALUES (:id, :s, :a, :p, :dep, 'scan', :prio, :due, :fix_type, :fixed, 'open', :ev, :now, :now)
+                VALUES (:id, :s, :a, :p, :dep, 'scan', :prio, :due, :fix_type, :fixed, :state, :ev, :now, :now)
             """), params)
         else:
             conn.execute(text("""
                 UPDATE findings SET dependency_path = :dep, priority = :prio, due_at = :due,
-                  fix_type = :fix_type, fixed_version = :fixed, state = 'open', evidence_json = :ev,
+                  fix_type = :fix_type, fixed_version = :fixed, state = :state, evidence_json = :ev,
                   updated_at = :now, closed_at = NULL
                 WHERE finding_id = :id
             """), params)
@@ -349,8 +372,21 @@ class DetectionPipeline:
     def _reopen(self, conn: Connection, outbox: Outbox, d: Desired, row: Any, now: datetime) -> None:
         due = due_at(d.triage.priority, now)
         self._write(conn, d, row[0], due, now, insert=False)
-        self._transition(conn, row[0], STATE_RESOLVED, STATE_OPEN, "detected again", now)
+        reason = "exception expired or revoked" if row[4] == STATE_SUPPRESSED else "detected again"
+        self._transition(conn, row[0], row[4], STATE_OPEN, reason, now)
         outbox.publish(conn, EVENT_REOPENED, self._payload(d, row[0], due))
+
+    def _suppress(self, conn: Connection, outbox: Outbox, d: Desired, row: Any | None, now: datetime) -> None:
+        """例外に当たる Finding。期限は持たない (例外が外れたときに今から数える)。"""
+        assert d.exception is not None
+        finding_id = row[0] if row is not None else d.finding_id
+        self._write(conn, d, finding_id, None, now, insert=row is None)
+        reason = f"exception {d.exception.exception_id} ({d.exception.kind})"
+        self._transition(conn, finding_id, row[4] if row is not None else None, STATE_SUPPRESSED, reason, now)
+        outbox.publish(conn, EVENT_SUPPRESSED, {
+            **self._payload(d, finding_id, None), "exception_id": d.exception.exception_id,
+            "exception_kind": d.exception.kind,
+        })
 
     def _update(self, conn: Connection, outbox: Outbox, d: Desired, row: Any, now: datetime) -> bool:
         prev_priority, prev_due, prev_fixed, prev_ev = row[5], row[6], row[7], row[8]
@@ -377,7 +413,7 @@ class DetectionPipeline:
             text("UPDATE findings SET state = :s, closed_at = :t, updated_at = :t WHERE finding_id = :id"),
             {"s": STATE_RESOLVED, "t": to_iso(now), "id": row[0]},
         )
-        self._transition(conn, row[0], STATE_OPEN, STATE_RESOLVED, "no longer matched", now)
+        self._transition(conn, row[0], row[4], STATE_RESOLVED, "no longer matched", now)
         outbox.publish(conn, EVENT_RESOLVED, {
             "finding_id": row[0], "service_id": row[1], "advisory_id": row[2], "purl": row[3],
             "priority": row[5],

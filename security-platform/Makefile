@@ -3,7 +3,7 @@
         scan-mcp scan-skills redteam cron \
         test clean logs \
         vuln-migrate intel-bootstrap intel-osv intel-osv-full intel-kev intel-epss \
-        intel-health detection-scan detection-findings detection-images analytics duck-ui up down ps logs-vuln
+        intel-health detection-scan detection-findings detection-images detection-exceptions notify-test notify-digest notify-health analytics duck-ui up down ps logs-vuln
 
 # ── defaults ────────────────────────────────────────────────────────────────
 DASHBOARD_PORT ?= 8000
@@ -47,6 +47,8 @@ help:
 	@echo "    intel-health   情報源ごとの最終成功時刻 (古ければ exit 1)"
 	@echo "    detection-scan lockfile・本番イメージを照合して findings を更新  detection-findings  未対応の Finding 一覧"
 	@echo "    detection-images 本番イメージの SBOM を作る (ホストで gcloud・docker を使う。デプロイのたびに実行)"
+	@echo "    detection-exceptions ARGS='list|add ...|revoke <id>'  例外 (誤検知・リスク受容) の管理"
+	@echo "    notify-test    LINE にテスト送信   notify-digest  日次まとめを今すぐ送る   notify-health  監視項目の状態"
 	@echo "    analytics      dbt build → data/security.duckdb を差し替え"
 	@echo "    duck-ui        DuckDB UI を読み取り専用で開く (http://localhost:4213)"
 	@echo ""
@@ -153,6 +155,18 @@ detection-scan:
 
 detection-findings:
 	$(COMPOSE) run --rm --no-deps detection python -m src.detection findings
+
+detection-exceptions:
+	$(COMPOSE) run --rm --no-deps detection python -m src.detection exceptions $(ARGS)
+
+notify-test:
+	$(COMPOSE) run --rm --no-deps notify python -m src.notify test
+
+notify-digest:
+	$(COMPOSE) run --rm --no-deps notify python -m src.notify digest
+
+notify-health:
+	$(COMPOSE) run --rm --no-deps notify python -m src.notify health
 
 # ホストで実行する (gcloud の認証と docker を使う。SQLite には触らず data/sbom/images/ に書くだけ)
 detection-images:
