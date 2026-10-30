@@ -7,9 +7,10 @@
 | P3 | High | 30 日 |
 | P4 | それ以外 (Medium・Low・深刻度なし) | なし |
 
-P1 以外は、次のどちらかなら 1 段下げる (重ねては下げない)。
+P1 以外は、次のどれかなら 1 段下げる (重ねては下げない)。
 - dev 依存からしか届かない (本番では読み込まれない)
 - 本番で稼働しておらず外部にも公開していないサービス
+- 開発 PC のツール (外部に公開しておらず、使うのは本人だけ)
 悪性パッケージは入れた時点 (開発機・CI) で被害が出るので下げない。
 
 OS パッケージ (Debian) で修正版がまだ無いものは、P1 以外は P4 (期限なし) にする。
@@ -63,6 +64,8 @@ def triage(
     if priority != "P1":
         if component.scope == "dev":
             reasons.append("dev 依存のみ (1 段下げ)")
+        elif service.kind == "host":
+            reasons.append("開発 PC のツール (1 段下げ)")
         elif not service.deployed and service.exposure == "none":
             reasons.append("未稼働・非公開のサービス (1 段下げ)")
         if len(reasons) > 1:

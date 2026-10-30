@@ -22,7 +22,7 @@ from sqlalchemy import Engine, text
 from ..common.timeutil import to_iso
 from ..detection.triage import PRIORITIES
 from .channels import GitHubIssues
-from .messages import FindingRow, load_findings, sorted_versions
+from .messages import FindingRow, load_findings, sorted_versions, source_label
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ def _render(key: str, fs: list[FindingRow], tz: ZoneInfo) -> IssueDraft:
     ]
     for f in sorted(fs, key=lambda f: (f.priority, f.service_id, f.advisory_id)):
         lines.append(f"| {f.priority} | {f.service_id} | {f.version} | {f.advisory_id} | {f.fixed_version or '-'} "
-                     f"| {'・'.join(f.reasons)} | {'本番イメージ' if f.source_kind == 'image' else 'lockfile'} |")
+                     f"| {'・'.join(f.reasons)} | {source_label(f.source_kind)} |")
     lines += ["", "解消 (更新・例外の登録) すると次の同期で自動的にクローズします。"]
     return IssueDraft(key, title, "\n".join(lines), ["security", priority])
 

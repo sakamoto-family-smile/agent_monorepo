@@ -36,6 +36,11 @@ class DataPaths:
         return self.root / "sbom" / "images"
 
     @property
+    def sbom_hosts_dir(self) -> Path:
+        """開発 PC のツール一覧 (``make detection-host`` が作る。<host_id>.json)。"""
+        return self.root / "sbom" / "hosts"
+
+    @property
     def duckdb_path(self) -> Path:
         return self.root / "security.duckdb"
 
@@ -45,7 +50,8 @@ class DataPaths:
         return self.root / f"{name}.db"
 
     def ensure(self) -> None:
-        for d in (self.root, self.raw_dir, self.events_dir, self.osv_db_dir, self.sbom_images_dir):
+        for d in (self.root, self.raw_dir, self.events_dir, self.osv_db_dir, self.sbom_images_dir,
+                  self.sbom_hosts_dir):
             d.mkdir(parents=True, exist_ok=True)
 
 

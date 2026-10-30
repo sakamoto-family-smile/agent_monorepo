@@ -5,6 +5,8 @@
 - Debian:<版> (dpkg の比較規則): イメージの OS パッケージ
 - Bitnami (SemVer): イメージの実行環境 (Python・Node.js 本体)。Bitnami の Advisory は
   上流のバージョン番号で範囲を持つので、公式イメージの /usr/local の本体と比べられる
+- VSCode / VSCode:<マーケットプレイス> (SemVer): 開発 PC のエディタ拡張 (host_inventory.py)。
+  VS Code は ``VSCode``、Open VSX から入れるエディタ (Cursor など) は ``VSCode:https://open-vsx.org``
 比べられないもの (未対応のエコシステム・解釈できないバージョン) は ``None`` を返し、呼び出し側で数える。
 範囲の評価は OSV スキーマの手順に従う: イベントをバージョン順に並べ、
 introduced で影響あり、fixed で影響なし、last_affected を超えたら影響なしにする。
@@ -19,6 +21,8 @@ from packaging.version import InvalidVersion, Version
 
 SEMVER_ECOSYSTEMS = frozenset({"npm", "Bitnami"})
 DEBIAN_PREFIX = "Debian:"
+VSCODE = "VSCode"
+OPEN_VSX = "VSCode:https://open-vsx.org"
 EVALUABLE_RANGE_TYPES = frozenset({"ECOSYSTEM", "SEMVER"})
 
 _SEMVER = re.compile(
@@ -44,8 +48,16 @@ class _Min:
 MIN = _Min()
 
 
+def is_vscode(ecosystem: str) -> bool:
+    return ecosystem == VSCODE or ecosystem.startswith(f"{VSCODE}:")
+
+
+def _is_semver(ecosystem: str) -> bool:
+    return ecosystem in SEMVER_ECOSYSTEMS or is_vscode(ecosystem)
+
+
 def is_supported(ecosystem: str) -> bool:
-    return ecosystem == "PyPI" or ecosystem in SEMVER_ECOSYSTEMS or ecosystem.startswith(DEBIAN_PREFIX)
+    return ecosystem == "PyPI" or _is_semver(ecosystem) or ecosystem.startswith(DEBIAN_PREFIX)
 
 
 def _dpkg_order(c: str) -> int:
@@ -142,7 +154,7 @@ def version_key(ecosystem: str, value: str) -> Any:
             return Version(value)
         except InvalidVersion as e:
             raise ValueError(value) from e
-    if ecosystem in SEMVER_ECOSYSTEMS:
+    if _is_semver(ecosystem):
         return _semver_key(value)
     if ecosystem.startswith(DEBIAN_PREFIX):
         return DebianVersion(value)

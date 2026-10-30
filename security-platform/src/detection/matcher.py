@@ -2,7 +2,7 @@
 
 intel.db は読み取り契約のビュー (v_advisories / v_advisory_affected) だけを読む。
 PyPI の名前は OSV 側の表記 (例: "Brotli") と lockfile 側 (正規化済み) で違うので、
-OSV 側の名前一覧を正規化して引き当てる。取り下げ済みの Advisory は照合しない。
+OSV 側の名前一覧を正規化して引き当てる。エディタ拡張の ID (publisher.name) も大文字小文字を区別しない。取り下げ済みの Advisory は照合しない。
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import Engine, bindparam, text
 
 from .lockfiles import Component, canonical_pypi_name
-from .versions import is_affected, is_supported, smallest_fix_above
+from .versions import is_affected, is_supported, is_vscode, smallest_fix_above
 
 logger = logging.getLogger(__name__)
 
@@ -59,22 +59,27 @@ class MatchStats:
 class Matcher:
     def __init__(self, intel_engine: Engine) -> None:
         self._intel = intel_engine
-        self._pypi_names: dict[str, list[str]] | None = None
+        self._names: dict[str, dict[str, list[str]]] = {}  # エコシステム → 正規化した名前 → OSV の表記
 
     def _osv_names(self, comp: Component) -> list[str]:
-        if comp.ecosystem != "PyPI":
+        if comp.ecosystem == "PyPI":
+            normalize = canonical_pypi_name
+        elif is_vscode(comp.ecosystem):
+            normalize = str.lower
+        else:
             return [comp.name]
-        if self._pypi_names is None:
+        if comp.ecosystem not in self._names:
             with self._intel.connect() as conn:
                 rows = conn.execute(
-                    text("SELECT DISTINCT name FROM v_advisory_affected WHERE ecosystem = 'PyPI'")
+                    text("SELECT DISTINCT name FROM v_advisory_affected WHERE ecosystem = :e"),
+                    {"e": comp.ecosystem},
                 ).scalars().all()
             names: dict[str, list[str]] = defaultdict(list)
             for n in rows:
                 if n:
-                    names[canonical_pypi_name(n)].append(n)
-            self._pypi_names = dict(names)
-        return self._pypi_names.get(canonical_pypi_name(comp.name), [])
+                    names[normalize(n)].append(n)
+            self._names[comp.ecosystem] = dict(names)
+        return self._names[comp.ecosystem].get(normalize(comp.name), [])
 
     def _affected_rows(self, ecosystem: str, names: list[str]) -> list[tuple]:
         stmt = text(
