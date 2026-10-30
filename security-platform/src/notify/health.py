@@ -3,6 +3,7 @@
 - intel:<source>: 情報源ごとの最終成功が取得間隔の STALE_FACTOR 倍より古い
 - detection:scan: 照合の最終成功が照合間隔の STALE_FACTOR 倍より古い
 - sbom:<service>: 本番イメージの SBOM (make detection-images) が IMAGE_SBOM_MAX_AGE_DAYS より古い
+- host:<host_id>: 開発 PC のツール一覧 (launchd の make detection-host) が HOST_INVENTORY_MAX_AGE_HOURS より古い
 
 どれも各サービスの DB・ファイルを読み取り専用で見るだけ。状態が変わったときの通知は pipeline が行う。
 """
@@ -17,6 +18,11 @@ from sqlalchemy import Engine, text
 from sqlalchemy.exc import OperationalError
 
 from ..common.timeutil import parse_iso
+from ..detection.host_inventory import (
+    InvalidInventory,
+    list_inventories,
+    read_inventory,
+)
 from ..detection.images import read_manifest
 from ..intel.schedule import STALE_FACTOR
 
@@ -81,4 +87,20 @@ def detection_checks(
         ok = generated is not None and now - generated <= sbom_max_age
         detail = "SBOM がありません" if generated is None else f"SBOM 作成 {(now - generated).days} 日前"
         out.append(Check(f"sbom:{service_id}", ok, f"{detail} (make detection-images)"))
+    return out
+
+
+def host_checks(hosts_dir: Path, max_age: timedelta, now: datetime) -> list[Check]:
+    """開発 PC ごとのツール一覧の新しさ。一覧ファイルを消したホストは監視しない。"""
+    out = []
+    for path in list_inventories(hosts_dir):
+        key = f"host:{path.stem}"
+        try:
+            generated = parse_iso(str(read_inventory(path)["generated_at"]))
+        except (InvalidInventory, KeyError, ValueError) as e:
+            out.append(Check(key, False, str(e)))
+            continue
+        hours = (now - generated).total_seconds() / 3600
+        out.append(Check(key, now - generated <= max_age,
+                         f"ツール一覧の作成 {hours:.0f} 時間前 (launchd の make detection-host)"))
     return out

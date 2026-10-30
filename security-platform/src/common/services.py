@@ -46,6 +46,8 @@ class Service(BaseModel):
     lockfiles: tuple[str, ...] = ()
     images: tuple[ImageRef, ...] = ()
     auto_remediation: bool = False
+    # host: 開発 PC (services.yaml には書かない。data/sbom/hosts/ の一覧から照合のたびに作る)
+    kind: Literal["service", "host"] = "service"
 
     @field_validator("path")
     @classmethod

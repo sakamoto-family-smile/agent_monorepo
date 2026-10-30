@@ -8,6 +8,9 @@
 変化は detection.db の events (finding.*) に、状態遷移は finding_transitions に残す。
 intel.db は読み取り専用で開き、契約のビューだけを読む。
 本番イメージの SBOM は ``make detection-images`` (images.py) が data/sbom/images/ に置いたものを読む。
+開発 PC のツール一覧は ``make detection-host`` (host_inventory.py) が data/sbom/hosts/ に置いたものを読み、
+1 台を 1 つのサービス (``host-<host_id>``) として照合する。今は入っていない過去の版も、
+悪性パッケージとだけは host_history_days のあいだ照合する (登録が遅れて届くため)。
 """
 from __future__ import annotations
 
@@ -29,6 +32,13 @@ from ..common.paths import DataPaths
 from ..common.services import Service
 from ..common.timeutil import parse_iso, to_iso, utc_now, utc_now_iso
 from .exceptions import ExceptionStore, FindingException, find_exception
+from .host_inventory import (
+    InvalidInventory,
+    list_inventories,
+    parsed,
+    read_inventory,
+    to_components,
+)
 from .image_sbom import InvalidSbom, parse_image_sbom
 from .images import blob_path, is_digest, read_manifest, repository_of
 from .lockfiles import Component, ParsedLockfile, UnsupportedLockfile, parse_lockfile
@@ -46,6 +56,9 @@ EVENT_REOPENED = "finding.reopened"
 EVENT_UPDATED = "finding.updated"
 EVENT_RESOLVED = "finding.resolved"
 EVENT_SUPPRESSED = "finding.suppressed"
+HOST_PREFIX = "host-"
+KIND_HOST = "host"
+KIND_HOST_HISTORY = "host_history"  # 今は入っていないが、過去に入っていた版 (悪性パッケージとだけ照合)
 
 
 @dataclass
@@ -101,12 +114,14 @@ class DetectionPipeline:
     def __init__(
         self, engine: Engine, intel_engine: Engine, paths: DataPaths, repo_root: Path,
         services: list[Service], image_sbom_max_age: timedelta = timedelta(days=7),
+        host_history: timedelta = timedelta(days=90),
     ) -> None:
         self.engine = engine
         self.paths = paths
         self.repo_root = repo_root
         self.services = services
         self.image_sbom_max_age = image_sbom_max_age
+        self.host_history = host_history
         self.matcher = Matcher(intel_engine)
 
     # ── 実行記録 ──────────────────────────────────────────────────────────
@@ -151,16 +166,20 @@ class DetectionPipeline:
             desired: dict[tuple[str, str, str], Desired] = {}
             exceptions = ExceptionStore(self.engine).active(now)
             with self.engine.begin() as conn:
-                self._sync_services(conn, now)
-                for svc in self.services:
-                    parsed = self._parse_service(svc, result) + self._parse_images(svc, result, now)
-                    self._save_sboms(conn, svc, parsed, now)
-                    comps = _dedupe([(c, lf) for lf in parsed for c in lf.components])
+                services = self.services + self._host_services(result)
+                self._sync_services(conn, services, now)
+                for svc in services:
+                    sources = self._parse_service(svc, result) + self._parse_images(svc, result, now) \
+                        + self._parse_host(conn, svc, result, now)
+                    self._save_sboms(conn, svc, sources, now)
+                    comps = _dedupe([(c, lf) for lf in sources for c in lf.components])
                     result.services += 1
                     result.components += len(comps)
                     matches, _ = self.matcher.match([c for c, _ in comps])
                     where = {c.purl: lf for c, lf in comps}
                     for m in matches:
+                        if where[m.component.purl].kind == KIND_HOST_HISTORY and m.advisory.kind != "malicious":
+                            continue  # 消えた版の脆弱性はもう関係ない。悪性なら入れた時点で被害が出ている
                         tri = triage(m.advisory, m.component, svc, m.fixed_version)
                         exc = find_exception(exceptions, svc.id, m.advisory.advisory_id, m.component.name)
                         d = Desired(svc, m, tri, where[m.component.purl], exc)
@@ -234,14 +253,65 @@ class DetectionPipeline:
                 self._warn(result, svc, f"本番イメージの SBOM を読めません ({err})")
         return list(out.values())
 
+    # ── 開発 PC ───────────────────────────────────────────────────────────
+    def _host_services(self, result: ScanResult) -> list[Service]:
+        """data/sbom/hosts/ の一覧 1 つを 1 つのサービスにする (ホスト名は git に入れない)。"""
+        out = []
+        for path in list_inventories(self.paths.sbom_hosts_dir):
+            host = path.stem
+            svc = Service(id=f"{HOST_PREFIX}{host}", path=f"hosts/{host}/", exposure="internal", deployed=True,
+                          kind=KIND_HOST)
+            if svc.id in {s.id for s in self.services}:
+                self._warn(result, svc, "services.yaml のサービスと ID が重なっています")
+                continue
+            out.append(svc)
+        return out
+
+    def _parse_host(self, conn: Connection, svc: Service, result: ScanResult, now: datetime) -> list[ParsedLockfile]:
+        if svc.kind != KIND_HOST:
+            return []
+        host = svc.id.removeprefix(HOST_PREFIX)
+        try:
+            data = read_inventory(self.paths.sbom_hosts_dir / f"{host}.json")
+            seen_at = parse_iso(str(data["generated_at"]))
+        except (InvalidInventory, KeyError, ValueError) as e:
+            self._warn(result, svc, f"ツール一覧を読めません ({e})")
+            return []
+        if data["host"] != host:
+            self._warn(result, svc, f"ツール一覧のホスト名が違います ({data['host']})")
+            return []
+        for err in data.get("errors") or []:
+            result.warnings.append(f"{svc.id}: 収集できなかったもの: {err}")
+        current = to_components(data)
+        for c in current:
+            conn.execute(text("""
+                INSERT INTO host_components (host_id, purl, ecosystem, name, version, is_direct,
+                  first_seen_at, last_seen_at)
+                VALUES (:h, :p, :e, :n, :v, :d, :t, :t)
+                ON CONFLICT(host_id, purl) DO UPDATE SET is_direct = excluded.is_direct,
+                  last_seen_at = MAX(host_components.last_seen_at, excluded.last_seen_at)
+            """), {"h": host, "p": c.purl, "e": c.ecosystem, "n": c.name, "v": c.version, "d": c.is_direct,
+                   "t": to_iso(seen_at)})
+        in_use = {c.purl for c in current}
+        rows = conn.execute(text(
+            "SELECT purl, ecosystem, name, version, is_direct FROM host_components "
+            "WHERE host_id = :h AND last_seen_at >= :since ORDER BY purl"
+        ), {"h": host, "since": to_iso(now - self.host_history)}).all()
+        past = [Component(r[1], r[2], r[3], r[0], bool(r[4]), "runtime") for r in rows if r[0] not in in_use]
+        out = [parsed(f"host:{host}", current, KIND_HOST)]
+        if past:
+            days = self.host_history.days
+            out.append(parsed(f"host:{host} (過去 {days} 日に入っていた版)", past, KIND_HOST_HISTORY))
+        return out
+
     @staticmethod
     def _warn(result: ScanResult, svc: Service, message: str) -> None:
         logger.warning("%s: %s", svc.id, message)
         result.warnings.append(f"{svc.id}: {message}")
         result.incomplete.add(svc.id)
 
-    def _sync_services(self, conn: Connection, now: datetime) -> None:
-        for s in self.services:
+    def _sync_services(self, conn: Connection, services: list[Service], now: datetime) -> None:
+        for s in services:
             conn.execute(
                 text("""
                     INSERT INTO services (service_id, path, exposure, deployed, auto_remediation,
