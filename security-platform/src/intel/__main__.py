@@ -83,7 +83,9 @@ def _setup(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    # リクエスト URL を INFO で出すので止める (Healthchecks の Ping key が URL に入る)
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 @app.command()
