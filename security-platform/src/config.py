@@ -81,10 +81,10 @@ class Settings(BaseSettings):
         "@sha256:253a86a52d9ba12a4b5e4a2919edbadddfffc46c2d9c37856dcedc89ae6cd5c0"
     )
     image_sbom_max_age_days: int = 7  # これより古い SBOM は照合時に警告する
-    # A2: 開発 PC のツール一覧 (make detection-host はホストで実行。launchd で 1 時間ごと)
+    # A2: 開発 PC のツール一覧 (make detection-host はホストで実行。launchd で 1 日 1 回)
     host_id: str = ""  # 空ならホスト名から作る
     host_inventory_roots: str = "~/development"  # CSV。この下の .mcp.json を探す
-    host_inventory_max_age_hours: int = 48  # これより古い一覧は「収集が止まっている」と通知する
+    host_inventory_max_age_hours: int = 48  # これより古い一覧は「収集が止まっている」と通知する (1 日 1 回なので 1 回の取りこぼしは許す)
     host_history_days: int = 90  # 過去に入っていた版も、悪性パッケージとはこの日数ぶん照合する
 
     # 通知 (notify サービス)。LINE は line_channel_access_token / line_user_ids を使う。

@@ -47,7 +47,7 @@ help:
 	@echo "    intel-health   情報源ごとの最終成功時刻 (古ければ exit 1)"
 	@echo "    detection-scan lockfile・本番イメージを照合して findings を更新  detection-findings  未対応の Finding 一覧"
 	@echo "    detection-images 本番イメージの SBOM を作る (ホストで gcloud・docker を使う。デプロイのたびに実行)"
-	@echo "    detection-host   開発 PC のツール一覧を作る (ホストで実行)。定期実行は host-inventory-install (launchd、1 時間ごと)"
+	@echo "    detection-host   開発 PC のツール一覧を作る (ホストで実行)。定期実行は host-inventory-install (launchd、1 日 1 回)"
 	@echo "    detection-exceptions ARGS='list|add ...|revoke <id>'  例外 (誤検知・リスク受容) の管理"
 	@echo "    notify-test    LINE にテスト送信   notify-digest  日次まとめを今すぐ送る   notify-health  監視項目の状態"
 	@echo "    analytics      dbt build → data/security.duckdb を差し替え"

@@ -4,7 +4,7 @@
     python -m src.detection findings    # 未対応の Finding を優先度順に表示 (読み取りのみ)
     python -m src.detection serve       # docker compose 用の常駐 (定期的に scan)
     python -m src.detection images      # 本番イメージの SBOM を作る (ホストで実行)
-    python -m src.detection host        # 開発 PC のツール一覧を作る (ホストで実行。launchd で 1 時間ごと)
+    python -m src.detection host        # 開発 PC のツール一覧を作る (ホストで実行。launchd で 1 日 1 回)
     python -m src.detection exceptions add|list|revoke   # 例外 (誤検知・リスク受容) の管理
 
 書き込みを伴うコマンドは data/.locks/detection.lock を取ってから動く。

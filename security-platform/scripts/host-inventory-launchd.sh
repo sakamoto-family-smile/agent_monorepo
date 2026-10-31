@@ -1,11 +1,12 @@
 #!/bin/bash
-# 開発 PC のツール一覧 (make detection-host) を launchd で 1 時間ごとに作る。
+# 開発 PC のツール一覧 (make detection-host) を launchd で 1 日 1 回 (8:30) 作る。
 #
 #   scripts/host-inventory-launchd.sh install     # 登録してすぐ 1 回動かす
 #   scripts/host-inventory-launchd.sh uninstall   # 止めて登録を消す
 #   scripts/host-inventory-launchd.sh status
 #
-# スリープ中に過ぎた回は、復帰したときにまとめて 1 回動く (launchd の StartInterval)。
+# スリープ中に過ぎた回は、復帰したときに 1 回動く (launchd の StartCalendarInterval)。ログイン時にも 1 回動く。
+# 9:00 の日次まとめの前に作っておく
 # 結果は data/sbom/hosts/<host_id>.json。照合は detection コンテナの次の scan で行う。
 set -euo pipefail
 
@@ -36,7 +37,8 @@ case "${1:-}" in
   <dict>
     <key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
-  <key>StartInterval</key><integer>3600</integer>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
   <key>RunAtLoad</key><true/>
   <key>ProcessType</key><string>Background</string>
   <key>LowPriorityIO</key><true/>
@@ -55,7 +57,7 @@ PLIST
     echo "削除しました: $PLIST"
     ;;
   status)
-    launchctl print "$DOMAIN/$LABEL" | grep -E "state|last exit|run interval" || echo "未登録"
+    launchctl print "$DOMAIN/$LABEL" | grep -E "state|last exit|Hour|Minute" || echo "未登録"
     ;;
   *)
     echo "usage: $0 install|uninstall|status" >&2

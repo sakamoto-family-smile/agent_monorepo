@@ -64,7 +64,7 @@ flowchart LR
 
   REPO["モノレポの lockfile<br/>config/services.yaml"]
   IMGSBOM[("data/sbom/images/<br/>本番イメージの SBOM<br/>make detection-images (ホスト)")]
-  HOSTINV[("data/sbom/hosts/<br/>開発 PC のツール一覧<br/>launchd で 1 時間ごと (ホスト)")]
+  HOSTINV[("data/sbom/hosts/<br/>開発 PC のツール一覧<br/>launchd で 1 日 1 回 (ホスト)")]
   NOTIFY["LINE (専用 Bot)<br/>GitHub Issues (private)"]
   PR["GitHub PR<br/>(マージは人)"]
   UI["DuckDB UI<br/>make duck-ui"]
@@ -332,7 +332,7 @@ detection コンテナにホームディレクトリは見せず、一覧はホ�
 
 ```bash
 make detection-host            # = uv run python -m src.detection host (1 回だけ作る)
-make host-inventory-install    # launchd に登録して 1 時間ごとに作る (スリープ中の回は復帰時に 1 回)
+make host-inventory-install    # launchd に登録して毎日 8:30 に作る (スリープ中の回は復帰時、ログイン時にも 1 回)
 make host-inventory-uninstall
 ```
 
