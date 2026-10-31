@@ -56,6 +56,14 @@ def load_findings(engine: Engine, where: str, params: dict[str, Any] | None = No
     return out
 
 
+SOURCE_LABELS = {"source": "lockfile", "image": "本番イメージ", "host": "開発 PC",
+                 "host_history": "開発 PC (過去に入っていた版)"}
+
+
+def source_label(kind: str) -> str:
+    return SOURCE_LABELS.get(kind, kind)
+
+
 def _date(dt: datetime | None, tz: ZoneInfo) -> str:
     return dt.astimezone(tz).strftime("%m/%d") if dt else "-"
 

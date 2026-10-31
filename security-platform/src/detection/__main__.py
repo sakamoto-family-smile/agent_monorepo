@@ -4,11 +4,13 @@
     python -m src.detection findings    # 未対応の Finding を優先度順に表示 (読み取りのみ)
     python -m src.detection serve       # docker compose 用の常駐 (定期的に scan)
     python -m src.detection images      # 本番イメージの SBOM を作る (ホストで実行)
+    python -m src.detection host        # 開発 PC のツール一覧を作る (ホストで実行。launchd で 1 日 1 回)
     python -m src.detection exceptions add|list|revoke   # 例外 (誤検知・リスク受容) の管理
 
 書き込みを伴うコマンドは data/.locks/detection.lock を取ってから動く。
 images 以外はホストの macOS からは実行せず、``make detection-*`` (= docker compose run) を使う。
 images は gcloud と docker を使うのでホストで実行する (``make detection-images``)。SQLite には触らない。
+host もホストのホームディレクトリを読むのでホストで実行する (``make detection-host``)。SQLite には触らない。
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ from ..common.services import load_services
 from ..common.timeutil import parse_iso, utc_now
 from ..config import settings
 from .exceptions import KINDS, ExceptionStore
+from .host_inventory import collect, default_host_id, write_inventory
 from .images import ImageSbomFetcher
 from .pipeline import JOB_SCAN, DetectionPipeline
 
@@ -47,6 +50,7 @@ def build_pipeline(*, read_only: bool = False) -> DetectionPipeline:
         settings.repo_dir,
         load_services(settings.services_path),
         timedelta(days=settings.image_sbom_max_age_days),
+        timedelta(days=settings.host_history_days),
     )
 
 
@@ -98,6 +102,20 @@ def images() -> None:
         typer.echo(f"ERROR {e}")
     if r.errors:
         raise typer.Exit(1)
+
+
+@app.command()
+def host() -> None:
+    """開発 PC のツール一覧を作る (ホームディレクトリを読むのでホストで実行)。照合は次の scan。"""
+    paths = default_paths()
+    roots = [Path(r.strip()).expanduser() for r in settings.host_inventory_roots.split(",") if r.strip()]
+    inv = collect(settings.host_id or default_host_id(), Path.home(), roots)
+    path = write_inventory(paths.sbom_hosts_dir, inv)
+    unpinned = sum(not m.pinned for m in inv.mcp_servers)
+    typer.echo(f"{path.name}: {len(inv.components)} components / MCP {len(inv.mcp_servers)} "
+               f"(版の固定なし {unpinned})")
+    for e in inv.errors:
+        typer.echo(f"WARN {e}")
 
 
 @exceptions_app.command("add")

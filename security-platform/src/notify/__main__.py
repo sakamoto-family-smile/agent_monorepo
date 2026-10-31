@@ -58,7 +58,9 @@ def build_pipeline() -> NotifyPipeline:
             ZoneInfo(settings.notify_timezone), settings.notify_digest_hour, settings.notify_issue_min_priority,
             timedelta(minutes=settings.detection_scan_interval_minutes),
             timedelta(days=settings.image_sbom_max_age_days), schedule(),
+            timedelta(hours=settings.host_inventory_max_age_hours),
         ),
+        paths.sbom_hosts_dir,
     )
 
 

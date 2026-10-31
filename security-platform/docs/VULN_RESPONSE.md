@@ -64,6 +64,7 @@ flowchart LR
 
   REPO["モノレポの lockfile<br/>config/services.yaml"]
   IMGSBOM[("data/sbom/images/<br/>本番イメージの SBOM<br/>make detection-images (ホスト)")]
+  HOSTINV[("data/sbom/hosts/<br/>開発 PC のツール一覧<br/>launchd で 1 日 1 回 (ホスト)")]
   NOTIFY["LINE (専用 Bot)<br/>GitHub Issues (private)"]
   PR["GitHub PR<br/>(マージは人)"]
   UI["DuckDB UI<br/>make duck-ui"]
@@ -83,6 +84,7 @@ flowchart LR
   IDB -. "advisory.changed" .-> MAT
   TRI --> DDB
   IMGSBOM --> SBOM
+  HOSTINV --> SBOM
   DDB -- "finding.* (読み取り専用)" --> NEV
   IDB -- "source_runs" --> NHL
   DDB --> NDG
@@ -151,7 +153,8 @@ make intel-osv           # OSV 差分 / intel-osv-full / intel-kev / intel-epss
 make intel-health        # 情報源ごとの最終成功時刻 (古いものがあれば exit 1。DB には書かない)
 make detection-scan      # lockfile・本番イメージを照合して findings を更新 (常駐の detection も 1 時間ごとに実行)
 make detection-findings  # 未対応の Finding を優先度・期限順に表示
-make detection-images    # 本番イメージの SBOM を作る (これだけホストで実行。下記)
+make detection-images    # 本番イメージの SBOM を作る (ホストで実行。下記)
+make detection-host      # 開発 PC のツール一覧を作る (ホストで実行。定期実行は make host-inventory-install)
 make detection-exceptions ARGS="list"   # 例外の一覧 (add / revoke は下記)
 make notify-test         # LINE にテスト送信
 make notify-digest       # 日次まとめを今すぐ送る (その日にまだ送っていなければ)
@@ -175,9 +178,13 @@ Docker Desktop の VM をまたいで同じ WAL ファイルを共有するこ�
 | `OSV_RAW_FULL_SNAPSHOTS_KEPT` | 2 | OSV 全量の保持世代数 (完了した実行だけを数える) |
 | `MIN_FREE_DISK_GB` | 10 | 空きがこれを下回ったら全量のダウンロードを止める |
 | `IMAGE_SBOM_MAX_AGE_DAYS` | 7 | 本番イメージの SBOM がこれより古いと照合時に警告する |
+| `HOST_HISTORY_DAYS` | 90 | 開発 PC で過去に入っていた版を、悪性パッケージとだけ照合し続ける日数 |
+| `HOST_INVENTORY_MAX_AGE_HOURS` | 48 | 開発 PC のツール一覧がこれより古いと、収集が止まっているとして通知する |
 
 `make detection-images` はホストで動くので、環境変数か `config/.env` の `GCP_PROJECT`
 (空なら gcloud の既定のプロジェクト) と `SYFT_IMAGE` (既定はダイジェスト固定の syft) を読む。
+`make detection-host` も同じく `config/.env` の `HOST_ID` (空ならホスト名) と
+`HOST_INVENTORY_ROOTS` (`.mcp.json` を探す場所。既定 `~/development`) を読む。
 
 ## 運用 (ローカル常駐)
 
@@ -209,6 +216,7 @@ Docker Desktop の VM をまたいで同じ WAL ファイルを共有するこ�
 | | `data/notify.db` | notify のみ | イベントのカーソル・送った通知・監視項目の状態・Issue の対応 |
 | | `data/remediation.db` | (L3) | スキーマのみ作成済み |
 | SBOM | `data/sbom/images/<service_id>.json` + `blobs/sha256-<digest>.cdx.json` | `make detection-images` (ホスト) | 本番イメージの SBOM (CycloneDX)。ダイジェストごとに 1 つ、参照されなくなったら消す |
+| ツール一覧 | `data/sbom/hosts/<host_id>.json` | `make detection-host` (ホスト、launchd) | 開発 PC のツール一覧 (独自の JSON)。本人だけが読める権限 (0600) で書く。過去の版は detection.db の `host_components` |
 | イベント | 各 DB の `events` + `data/events/type=*/dt=*/<producer>.jsonl` | 発行側 | 受信側は発行側 DB を読み取り専用で開き、自分の `event_cursors` で位置を持つ |
 | 分析 DB | `data/security.duckdb` | analytics | dbt で組み立てる。スキーマ `staging` / `marts` / `history` |
 | osv-scanner DB | `data/osv-db/osv-scanner/<ecosystem>/all.zip` | intel | osv-scanner でのオフライン照合用。OSV 全量取得のたびに更新 (A2 は intel.db の契約ビューで照合するので使っていない) |
@@ -262,7 +270,7 @@ KEV にだけ載っている CVE (主に製品の脆弱性) は、パッケー�
 `kev_added` / `kev_removed` / `epss_increased` (0.1 以上の上昇)。
 1 回の実行で同じ Advisory に複数の変化があっても 1 イベントにまとめる。
 
-## A2 の照合 (lockfile・本番イメージ)
+## A2 の照合 (lockfile・本番イメージ・開発 PC)
 
 `detection` サービスが 1 時間ごとに `config/services.yaml` の全サービスを照合する (`src/detection/`)。
 モノレポは `/repo` に読み取り専用でマウントし、コンテナは外部と通信しない (`network_mode: none`)。
@@ -282,7 +290,7 @@ KEV にだけ載っている CVE (主に製品の脆弱性) は、パッケー�
 | P3 | High | 30 日 |
 | P4 | それ以外 | なし |
 
-P1 以外は、dev 依存のみ、または未稼働・非公開のサービスなら 1 段下げる (重ねては下げない)。
+P1 以外は、dev 依存のみ、未稼働・非公開のサービス、開発 PC のツールのどれかなら 1 段下げる (重ねては下げない)。
 OS パッケージ (Debian) で修正版がまだ無いものは、P1 以外は P4 (期限なし) にする
 (こちらで打てる手が無いため。修正版が出れば本来の優先度に戻り、そこから期限を数える)。
 優先度が上がったら期限を今から数え直して早め、下がったら初回検知から数え直す。
@@ -315,6 +323,38 @@ make detection-images   # = uv run python -m src.detection images (gcloud にロ
 | 同梱ライブラリ (`pkg:pypi` / `pkg:npm`) | `PyPI` / `npm` | lockfile と同じ。ベースイメージの pip など lockfile に無いものも拾う |
 
 Ubuntu・Alpine の OS パッケージやその他の種類は SBOM には残すが、照合は未対応 (件数だけ数える)。
+
+### 開発 PC の照合
+
+開発 PC に入れたツール (エディタ拡張・MCP サーバー・Claude Code など) も照合する。
+乗っ取られた拡張や改ざんされたパッケージは、入れた時点で PC の認証情報 (gh・gcloud・API キー) が狙われるため。
+detection コンテナにホームディレクトリは見せず、一覧はホストで作る。
+
+```bash
+make detection-host            # = uv run python -m src.detection host (1 回だけ作る)
+make host-inventory-install    # launchd に登録して毎日 8:30 に作る (スリープ中の回は復帰時、ログイン時にも 1 回)
+make host-inventory-uninstall
+```
+
+| 集めるもの | 読む場所 | エコシステム |
+|---|---|---|
+| Claude Code (ネイティブ版) | `~/.local/bin/claude` のリンク先の版 | `npm` (`@anthropic-ai/claude-code` と同じ版番号) |
+| VS Code の拡張 | `~/.vscode/extensions/*/package.json` | `VSCode` (Marketplace) |
+| Cursor・Windsurf・VSCodium・Kiro などの拡張 | `~/.<editor>/extensions/*/package.json` | `VSCode:https://open-vsx.org` |
+| npm のグローバル・npx のキャッシュ | `npm root -g`・`~/.npm/_npx/*/node_modules` (依存も含む) | `npm` |
+| uv tool・uvx・pipx | 各環境の `*.dist-info/METADATA` (依存も含む) | `PyPI` |
+| MCP サーバー | `~/.claude.json`・Claude Desktop・Cursor の設定と `HOST_INVENTORY_ROOTS` の下の `.mcp.json` | 版を 1 つに固定した `npx`・`uvx` の起動パッケージ |
+| Homebrew | `brew info --json=v2 --installed` | 一覧に残すだけ (OSV に無いので照合しない) |
+
+- 読むのはマニフェストと設定ファイルだけで、拡張やパッケージのコードは実行しない。
+  MCP の設定は起動コマンドとパッケージ名だけを読み、env やそれ以外の引数 (トークン・接続文字列) は残さない
+- 1 台を 1 つのサービス `host-<host_id>` として照合する。ホスト名は git に入れない (`services.yaml` には書かない)
+- 悪性パッケージ (MAL) の登録は数日遅れることがあるので、更新などで消えた版も
+  `HOST_HISTORY_DAYS` (90 日) のあいだは悪性パッケージとだけ照合する。当たれば P1 で、見つかった元は「開発 PC (過去に入っていた版)」。
+  更新しても入れた時点の被害は消えないので、認証情報の取り替えなどを済ませたら例外 (`risk_accepted`) で閉じる
+- 版を固定していない MCP サーバー (`npx -y pkg`・`@latest`) は、起動のたびに最新版を取りに行く。
+  設定からは版が分からないので、npx のキャッシュに入った実物で照合する (一覧の `mcp_servers` に固定の有無を残す)
+- 一覧が `HOST_INVENTORY_MAX_AGE_HOURS` (48 時間) より古いと、notify が `host:<host_id>` の停止として通知する
 
 ### 例外 (誤検知・リスク受容)
 
@@ -352,6 +392,7 @@ detection.db・intel.db は読み取り専用で開き、自分の notify.db に
 | `intel:<source>` | 最終成功が取得間隔の 3 倍より古い (osv・kev 3 時間、epss 3 日、osv_full 21 日) |
 | `detection:scan` | 照合の最終成功が照合間隔の 3 倍より古い (3 時間) |
 | `sbom:<service>` | 本番イメージの SBOM が `IMAGE_SBOM_MAX_AGE_DAYS` (7 日) より古い |
+| `host:<host_id>` | 開発 PC のツール一覧が `HOST_INVENTORY_MAX_AGE_HOURS` (48 時間) より古い (launchd が止まっている・PC を使っていない) |
 
 送った通知は `notifications.dedupe_key` で記録し、LINE には `X-Line-Retry-Key` を付けるので、途中で落ちても二重に送らない。
 送り先が未設定なら送らずに `skipped` として記録し、処理は進める。Issues は 1 回の同期で最大 40 件まで変更する (残りは次回)。
@@ -410,6 +451,9 @@ DuckDB の `sqlite` 拡張を使う。初回に extensions.duckdb.org から自�
   A1・A2・notify と役割が重なるので、使っていないことを確かめてから整理する
 - A2 のイメージ照合は Debian の OS パッケージと Python・Node.js の本体まで。Ubuntu・Alpine・Go などのバイナリに組み込まれたものは照合しない
 - 本番イメージの SBOM はホストの `make detection-images` で作る (自動では更新しない)。デプロイ後に実行し忘れると、7 日後から照合時に警告が出る
+- 開発 PC で照合できるのは OSV にあるもの (npm・PyPI・VS Code / Open VSX の拡張) だけ。Claude Code のプラグイン・スキル、
+  ブラウザ拡張、JetBrains のプラグイン、Homebrew は照合しない。OSV への登録より早い告知 (ベンダー・ニュース) は L4 で扱う
+- 開発 PC で 48 時間以上ツール一覧を作っていない (旅行などで PC を使っていない) と、取得停止として通知が来る
 - Debian の Advisory は Debian 公式のパッケージを前提にしている。Debian 以外の apt リポジトリから入れたものは、既知のもの (NodeSource の nodejs) だけ上流の版で照合し、それ以外は誤検知になり得る
 - CVE の無いレコード同士の合流は取り込み順に依存する (CVE のあるものは順序に依存しない)。別名の連鎖は、キーが変わったレコードを辿って付け直す
 - OSV 側で削除されたレコードは検出しない (404 は `osv_missing` に残るだけ)

@@ -3,7 +3,7 @@
         scan-mcp scan-skills redteam cron \
         test clean logs \
         vuln-migrate intel-bootstrap intel-osv intel-osv-full intel-kev intel-epss \
-        intel-health detection-scan detection-findings detection-images detection-exceptions notify-test notify-digest notify-health analytics duck-ui up down ps logs-vuln
+        intel-health detection-scan detection-findings detection-images detection-host host-inventory-install host-inventory-uninstall detection-exceptions notify-test notify-digest notify-health analytics duck-ui up down ps logs-vuln
 
 # ── defaults ────────────────────────────────────────────────────────────────
 DASHBOARD_PORT ?= 8000
@@ -47,6 +47,7 @@ help:
 	@echo "    intel-health   情報源ごとの最終成功時刻 (古ければ exit 1)"
 	@echo "    detection-scan lockfile・本番イメージを照合して findings を更新  detection-findings  未対応の Finding 一覧"
 	@echo "    detection-images 本番イメージの SBOM を作る (ホストで gcloud・docker を使う。デプロイのたびに実行)"
+	@echo "    detection-host   開発 PC のツール一覧を作る (ホストで実行)。定期実行は host-inventory-install (launchd、1 日 1 回)"
 	@echo "    detection-exceptions ARGS='list|add ...|revoke <id>'  例外 (誤検知・リスク受容) の管理"
 	@echo "    notify-test    LINE にテスト送信   notify-digest  日次まとめを今すぐ送る   notify-health  監視項目の状態"
 	@echo "    analytics      dbt build → data/security.duckdb を差し替え"
@@ -172,6 +173,16 @@ notify-health:
 detection-images:
 	mkdir -p data/sbom/images
 	uv run python -m src.detection images
+
+# ホストで実行する (ホームディレクトリのエディタ拡張・npm・MCP の設定を読む。data/sbom/hosts/ に書くだけ)
+detection-host:
+	uv run python -m src.detection host
+
+host-inventory-install:
+	scripts/host-inventory-launchd.sh install
+
+host-inventory-uninstall:
+	scripts/host-inventory-launchd.sh uninstall
 
 analytics:
 	$(COMPOSE) run --rm --no-deps analytics python -m src.analytics build
