@@ -5,6 +5,7 @@
     python -m src.intel osv-full      # OSV 全量の再取得
     python -m src.intel kev / epss
     python -m src.intel reports       # L4: config/feeds.yaml のフィードの記事
+    python -m src.intel extract       # L4: 記事の抽出の受け渡し (結果の取り込みと依頼)
     python -m src.intel health        # 情報源ごとの最終成功時刻 (読み取りのみ)
     python -m src.intel serve         # docker compose 用の常駐 (ブートストラップ → 定期実行)
 
@@ -127,6 +128,13 @@ def reports() -> None:
 
 
 @app.command()
+def extract() -> None:
+    r = locked(build_pipeline().run_extract)()
+    typer.echo(f"ingested={r.ingested} claims={r.claims} grounded={r.grounded} retried={r.retried} "
+               f"failed={r.failed} queued={r.queued} skipped={r.skipped}")
+
+
+@app.command()
 def health() -> None:
     """間隔の 3 倍以上成功していない情報源があれば終了コード 1。DB には書かない。"""
     try:
@@ -165,6 +173,7 @@ def serve() -> None:
         "epss": pipeline.run_epss,
         "osv_full": pipeline.run_osv_full,
         "reports": pipeline.run_reports,
+        "extract": pipeline.run_extract,
     }
     jobs = [Job(name, interval, locked(runners[name])) for name, interval in schedule().items()]
     Scheduler(jobs, pipeline.last_success, on_result=pinger).run_forever()
