@@ -23,13 +23,15 @@ from ..common.events import Outbox
 from ..common.paths import DataPaths
 from ..common.raw_store import RawStore
 from ..common.timeutil import parse_iso, to_iso, utc_now_iso
-from . import changes
+from . import changes, reports
 from .changes import RunContext
 from .osv_record import OsvRecord, parse_record
 from .records import existing_hashes, upsert_osv_record
+from .reports import FetchFeed
 from .signals import upsert_epss, upsert_kev
 from .sources import epss as epss_source
 from .sources import kev as kev_source
+from .sources.feeds import FeedConfig
 from .sources.osv import (
     MalformedRecord,
     ModifiedEntry,
@@ -77,6 +79,8 @@ class IntelPipeline:
         ecosystems: list[str] | None = None,
         raw_retention: timedelta = timedelta(days=30),
         min_free_bytes: int = 0,
+        feeds: list[FeedConfig] | None = None,
+        fetch_feed: FetchFeed | None = None,
     ) -> None:
         self.engine = engine
         self.paths = paths
@@ -90,6 +94,8 @@ class IntelPipeline:
         self.keep_full = full_snapshots_kept
         self.ecosystems = ecosystems
         self.raw_retention = raw_retention
+        self.feeds = feeds or []
+        self.fetch_feed = fetch_feed
 
     # ── 実行記録 ──────────────────────────────────────────────────────────
     @contextmanager
@@ -241,6 +247,19 @@ class IntelPipeline:
                         )
             ctx.outbox.flush()
             self.raw.prune_older_than("epss", self.raw_retention)
+
+    # ── L4: フィードの記事 ────────────────────────────────────────────────
+    def run_reports(self, *, emit: bool = True) -> reports.ReportsResult:
+        """config/feeds.yaml のフィードを取得して reports に取り込む。fetched は新しい記事の数。"""
+        if self.fetch_feed is None:
+            raise RuntimeError("fetch_feed is not configured")
+        with self._run("reports", "incremental", emit=emit) as ctx:
+            r = reports.collect(self.engine, self.raw, self.feeds, self.fetch_feed, ctx.run_id, utc_now_iso())
+            ctx.fetched, ctx.changed, ctx.skipped = r.new, r.updated, len(r.failed)
+            logger.info("reports: %d new, %d updated, %d unchanged feeds, failed: %s",
+                        r.new, r.updated, r.unchanged_feeds, ", ".join(r.failed) or "-")
+            self.raw.prune_older_than(reports.RAW_SOURCE, self.raw_retention)
+        return r
 
     # ── OSV 全量 ──────────────────────────────────────────────────────────
     def _ingest_records(

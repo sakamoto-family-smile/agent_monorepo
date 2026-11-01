@@ -2,7 +2,7 @@
         dashboard proxy collector analyzer digest \
         scan-mcp scan-skills redteam cron \
         test clean logs \
-        vuln-migrate intel-bootstrap intel-osv intel-osv-full intel-kev intel-epss \
+        vuln-migrate intel-bootstrap intel-osv intel-osv-full intel-kev intel-epss intel-reports \
         intel-health detection-scan detection-findings detection-images detection-host host-inventory-install host-inventory-uninstall detection-exceptions notify-test notify-digest notify-health analytics duck-ui up down ps logs-vuln
 
 # ── defaults ────────────────────────────────────────────────────────────────
@@ -44,6 +44,7 @@ help:
 	@echo "    intel-bootstrap 初回全量取り込み (OSV 全エコシステム + KEV + EPSS、再開可)"
 	@echo "    intel-osv      OSV 差分取得       intel-osv-full  OSV 全量の再取得"
 	@echo "    intel-kev      CISA KEV           intel-epss      FIRST EPSS"
+	@echo "    intel-reports  注意喚起・公式の告知・調査会社のフィード (config/feeds.yaml)"
 	@echo "    intel-health   情報源ごとの最終成功時刻 (古ければ exit 1)"
 	@echo "    detection-scan lockfile・本番イメージを照合して findings を更新  detection-findings  未対応の Finding 一覧"
 	@echo "    detection-images 本番イメージの SBOM を作る (ホストで gcloud・docker を使う。デプロイのたびに実行)"
@@ -147,6 +148,9 @@ intel-kev:
 
 intel-epss:
 	$(INTEL_RUN) epss
+
+intel-reports:
+	$(INTEL_RUN) reports
 
 intel-health:
 	$(INTEL_RUN) health

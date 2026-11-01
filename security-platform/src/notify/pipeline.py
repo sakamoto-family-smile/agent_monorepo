@@ -29,7 +29,7 @@ from ..common.events import Consumer, Event
 from ..common.timeutil import parse_iso, to_iso, utc_now
 from . import issues, messages
 from .channels import GitHubIssues, LineChannel
-from .health import Check, detection_checks, host_checks, intel_checks
+from .health import Check, detection_checks, feed_checks, host_checks, intel_checks
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,8 @@ class NotifyPipeline:
     # ── 取得停止の監視 ────────────────────────────────────────────────────
     def checks(self, now: datetime) -> list[Check]:
         hosts = host_checks(self.hosts_dir, self.cfg.host_max_age, now) if self.hosts_dir else []
-        return intel_checks(self._intel(), self.cfg.intel_schedule, now) + detection_checks(
+        intel = self._intel()
+        return intel_checks(intel, self.cfg.intel_schedule, now) + feed_checks(intel, now) + detection_checks(
             self._detection(), self.cfg.scan_interval, self.sbom_dir, self.cfg.sbom_max_age, now) + hosts
 
     def run_health(self) -> None:

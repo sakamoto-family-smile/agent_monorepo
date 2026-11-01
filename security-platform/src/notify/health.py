@@ -1,6 +1,7 @@
 """取得停止などの監視項目 (FR-I07)。
 
 - intel:<source>: 情報源ごとの最終成功が取得間隔の STALE_FACTOR 倍より古い
+- feed:<feed_id>: L4 のフィードの最終成功が FEED_STALE より古い (一度も取れていなければ FEED_FIRST_FAILURES 回失敗で)
 - detection:scan: 照合の最終成功が照合間隔の STALE_FACTOR 倍より古い
 - sbom:<service>: 本番イメージの SBOM (make detection-images) が IMAGE_SBOM_MAX_AGE_DAYS より古い
 - host:<host_id>: 開発 PC のツール一覧 (launchd の make detection-host) が HOST_INVENTORY_MAX_AGE_HOURS より古い
@@ -24,7 +25,7 @@ from ..detection.host_inventory import (
     read_inventory,
 )
 from ..detection.images import read_manifest
-from ..intel.schedule import STALE_FACTOR
+from ..intel.schedule import FEED_STALE, STALE_FACTOR
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,30 @@ def intel_checks(engine: Engine | None, schedule: dict[str, timedelta], now: dat
             return [Check("intel", False, f"intel.db を読めません ({e.orig})")]
         ok = last is not None and now - last < interval * STALE_FACTOR
         out.append(Check(f"intel:{source}", ok, _age(now, last)))
+    return out
+
+
+FEED_FIRST_FAILURES = 3
+
+
+def feed_checks(engine: Engine | None, now: datetime, max_age: timedelta = FEED_STALE) -> list[Check]:
+    """config/feeds.yaml にあるフィードごと。intel.db が読めないときは intel_checks が知らせるので何も返さない。"""
+    if engine is None:
+        return []
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text(
+                "SELECT feed_id, last_success_at, last_error, consecutive_failures FROM feeds "
+                "WHERE enabled = 1 ORDER BY feed_id"
+            )).all()
+    except OperationalError:
+        return []
+    out = []
+    for feed_id, last_success, last_error, failures in rows:
+        last = parse_iso(last_success) if last_success else None
+        ok = now - last <= max_age if last else failures < FEED_FIRST_FAILURES
+        detail = _age(now, last) + (f" / 直近の失敗: {last_error[:200]}" if failures and last_error else "")
+        out.append(Check(f"feed:{feed_id}", ok, detail))
     return out
 
 

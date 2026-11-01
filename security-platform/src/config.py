@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     epss_url: str = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
     epss_event_delta: float = 0.1  # この幅以上の上昇で advisory.changed を出す
     http_timeout_seconds: float = 60.0
+    # L4: 注意喚起・公式の告知・調査会社のフィード (イメージに焼き込む)
+    feeds_path: Path = BASE_DIR / "config" / "feeds.yaml"
 
     # A2: 照合の入力。コンテナではモノレポを読み取り専用で /repo にマウントする
     repo_dir: Path = BASE_DIR.parent

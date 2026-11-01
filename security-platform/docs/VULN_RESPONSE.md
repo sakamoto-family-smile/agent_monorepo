@@ -10,7 +10,7 @@ PR まで自動で進める (B) ためのフレームワーク。まずはロー
 | L1 | A1: OSV 全エコシステム (全量 + 差分)、CISA KEV、FIRST EPSS、名寄せ、変化検知、ブートストラップ。分析: 鮮度・リードタイム・エコシステム別・KEV カバレッジ | ✅ |
 | L2 | A2: lockfile・本番イメージ (OS パッケージ・ランタイム本体・同梱ライブラリ) の照合と優先度、例外 (誤検知・リスク受容)。通知: P1 の即時通知・日次まとめ (LINE)、GitHub Issues (private リポジトリ)、取得停止のアラート | ✅ |
 | L3 | B: git worktree での決定的更新、差分検査、PR 作成 | ⬜ |
-| L4 | A1 の非構造ソース: IPA・JPCERT 注意喚起、ベンダー告知、セキュリティニュース、VulnerableMCP。LLM で根拠付き抽出し、一次情報が見つからないものは `unconfirmed` として照合に使わない | ⬜ |
+| L4 | A1 の非構造ソース: IPA・JPCERT 注意喚起、ベンダー告知、セキュリティニュース、VulnerableMCP。LLM で根拠付き抽出し、一次情報が見つからないものは `unconfirmed` として照合に使わない | 🚧 フィードの取得まで (PR1) |
 
 ## アーキテクチャ
 
@@ -22,12 +22,12 @@ flowchart LR
     OSV["OSV.dev<br/>GHSA・PYSEC・Debian ほか全エコシステム"]
     KEV["CISA KEV"]
     EPSS["FIRST EPSS"]
-    NEWS["注意喚起・ベンダー告知・ニュース<br/>(L4)"]
+    NEWS["注意喚起・公式の告知・調査会社<br/>(L4: RSS / Atom)"]
   end
 
   subgraph HOST["ローカル (docker compose)"]
     subgraph INTEL["intel サービス — A1"]
-      COL["Collector<br/>osv / kev / epss"] --> NRM["正規化・CVE で名寄せ"]
+      COL["Collector<br/>osv / kev / epss / reports"] --> NRM["正規化・CVE で名寄せ"]
       NRM --> CHG["変化検知"]
       LLM["LLM 抽出<br/>(L4)"]
     end
@@ -76,6 +76,7 @@ flowchart LR
   COL --> OSVDB
   CHG --> IDB
   IDB --> EVJ
+  NEWS --> COL
   NEWS -.-> LLM
   LLM -.-> NRM
 
@@ -150,6 +151,7 @@ make duck-ui                      # ホストで DuckDB UI を開く (http://loc
 make vuln-migrate        # data/{intel,detection,remediation}.db を作成
 make intel-bootstrap     # 初回全量 (中断しても続きから再開)
 make intel-osv           # OSV 差分 / intel-osv-full / intel-kev / intel-epss
+make intel-reports       # L4: config/feeds.yaml のフィードの記事を取り込む (常駐の intel も 1 時間ごとに実行)
 make intel-health        # 情報源ごとの最終成功時刻 (古いものがあれば exit 1。DB には書かない)
 make detection-scan      # lockfile・本番イメージを照合して findings を更新 (常駐の detection も 1 時間ごとに実行)
 make detection-findings  # 未対応の Finding を優先度・期限順に表示
@@ -210,8 +212,8 @@ Docker Desktop の VM をまたいで同じ WAL ファイルを共有するこ�
 
 | 層 | 場所 | 書き込み元 | 役割 |
 |---|---|---|---|
-| 生データ | `data/raw/<source>/dt=YYYY-MM-DD/` | intel | 取得したものを改変せず保存 (書き込み後は読み取り専用)。OSV 全量は新しい 2 世代を保持 |
-| 運用 DB | `data/intel.db` | intel のみ | Advisory・KEV・EPSS・変化履歴・取得記録・イベント |
+| 生データ | `data/raw/<source>/dt=YYYY-MM-DD/` | intel | 取得したものを改変せず保存 (書き込み後は読み取り専用)。OSV 全量は新しい 2 世代を保持。フィードは `reports/` |
+| 運用 DB | `data/intel.db` | intel のみ | Advisory・KEV・EPSS・変化履歴・取得記録・イベント・フィードの記事 (`reports`・`feeds`) |
 | | `data/detection.db` | detection のみ | Finding・SBOM・例外・照合の実行記録・イベント |
 | | `data/notify.db` | notify のみ | イベントのカーソル・送った通知・監視項目の状態・Issue の対応 |
 | | `data/remediation.db` | (L3) | スキーマのみ作成済み |
@@ -235,6 +237,7 @@ intel のブートストラップが終わるまでは dbt snapshot (とその�
 | | `osv_full` | 7 日 | 全エコシステムの `all.zip` を再取得 (取りこぼしの回収と osv-scanner DB の更新) |
 | CISA KEV | `kev` | 1 時間 | 全件 JSON |
 | FIRST EPSS | `epss` | 1 日 | 全件 CSV.gz |
+| 注意喚起・公式の告知・調査会社 (L4) | `reports` | 1 時間 | `config/feeds.yaml` の RSS / Atom を条件付き GET。下記 |
 
 ブートストラップ (初回) はエコシステム単位で進捗を記録するので、中断しても続きから再開する。
 差分カーソルの起点は最初に開始した時点の値に固定するので、再開までの間の更新も取りこぼさない。
@@ -246,6 +249,20 @@ KEV のスナップショットが既存件数の半分未満なら壊れてい�
 完了時に `advisory.bootstrap_completed` を 1 件だけ発行する。全エコシステムの全量は
 数 GB のダウンロードと、マシンによって数十分〜1 時間程度の処理になる見込み
 (PyPI 単体で約 2.7 万件 / 40 秒を確認)。
+
+### フィードの記事 (L4)
+
+`config/feeds.yaml` のフィード (公的機関・公式の告知・サプライチェーン調査会社) を 1 時間ごとに取得し、
+記事を intel.db の `reports` に入れる。この段階では照合にも通知にも使わない
+(LLM での抽出・一次情報での確認・照合は L4 の後続 PR)。
+
+- フィードは外部の信頼できない入力として扱う。XML は defusedxml で読み (DTD・外部実体を拒否)、1 フィード 5 MB で打ち切る。
+  本文の HTML はタグを落としたテキストとリンク先の一覧 (`links_json`、一次情報の確認に使う) にする。スクリプトは捨てる
+- ETag / Last-Modified で条件付き GET し、内容が変わったときだけ原文を `data/raw/reports/` に保存する
+- 記事は `report_id` (フィードと guid から決まる) で 1 件にし、本文が変われば更新する。
+  フィードを初めて取れたときに既にあった記事は `initial = 1` (古い記事で通知しないため)
+- 1 つのフィードが失敗しても他は続ける (失敗は `feeds` に記録)。全部失敗したときだけジョブを失敗にする
+- フィードの追加・削除は `config/feeds.yaml` を直して `make up` (イメージに焼き込む)。消したフィードは `enabled = 0` になり監視をやめる
 
 ### 名寄せ (Advisory)
 
@@ -389,7 +406,8 @@ detection.db・intel.db は読み取り専用で開き、自分の notify.db に
 
 | 監視項目 | 止まっているとみなす条件 |
 |---|---|
-| `intel:<source>` | 最終成功が取得間隔の 3 倍より古い (osv・kev 3 時間、epss 3 日、osv_full 21 日) |
+| `intel:<source>` | 最終成功が取得間隔の 3 倍より古い (osv・kev・reports 3 時間、epss 3 日、osv_full 21 日) |
+| `feed:<feed_id>` | そのフィードの最終成功が 24 時間より古い。一度も取れていなければ 3 回続けて失敗したとき |
 | `detection:scan` | 照合の最終成功が照合間隔の 3 倍より古い (3 時間) |
 | `sbom:<service>` | 本番イメージの SBOM が `IMAGE_SBOM_MAX_AGE_DAYS` (7 日) より古い |
 | `host:<host_id>` | 開発 PC のツール一覧が `HOST_INVENTORY_MAX_AGE_HOURS` (48 時間) より古い (launchd が止まっている・PC を使っていない) |
@@ -446,7 +464,7 @@ DuckDB の `sqlite` 拡張を使う。初回に extensions.duckdb.org から自�
 - detection はモノレポの作業ツリーをそのまま読む。作業ツリーで別のブランチに切り替えている間に照合が走ると、
   そのブランチの lockfile で照合され、Finding が一時的に解消・再発することがある (P1 なら通知が飛ぶ)。
   作業は別の git worktree で行う
-- NVD・JVN・ランタイムのリリース情報・OneCRL・非構造ソース (注意喚起・ニュース) は未対応
+- NVD・JVN・ランタイムのリリース情報・OneCRL は未対応。注意喚起・公式の告知・調査会社のフィードは取り込むだけで、まだ照合・通知に使わない (L4 の後続)
 - 既存の `src/collector/` / `src/analyzer/` / `src/notifier/` (data/security.db) は当面そのまま残す。
   A1・A2・notify と役割が重なるので、使っていないことを確かめてから整理する
 - A2 のイメージ照合は Debian の OS パッケージと Python・Node.js の本体まで。Ubuntu・Alpine・Go などのバイナリに組み込まれたものは照合しない
