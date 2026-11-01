@@ -4,6 +4,8 @@ logs/
 config/.env
 config/.env.*
 config/vuln.env
+config/notify.env
+config/llm.env
 .venv/
 **/__pycache__/
 **/*.pyc

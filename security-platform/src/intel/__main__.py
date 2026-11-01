@@ -4,6 +4,7 @@
     python -m src.intel osv           # OSV 差分
     python -m src.intel osv-full      # OSV 全量の再取得
     python -m src.intel kev / epss
+    python -m src.intel reports       # L4: config/feeds.yaml のフィードの記事
     python -m src.intel health        # 情報源ごとの最終成功時刻 (読み取りのみ)
     python -m src.intel serve         # docker compose 用の常駐 (ブートストラップ → 定期実行)
 
@@ -30,6 +31,7 @@ from ..common.timeutil import utc_now
 from ..config import settings
 from .pipeline import IntelPipeline
 from .schedule import STALE_FACTOR, schedule
+from .sources.feeds import fetch_feed, load_feeds
 from .sources.osv import OsvClient
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,8 @@ def build_pipeline(*, read_only: bool = False) -> IntelPipeline:
         ecosystems=ecosystems,
         raw_retention=timedelta(days=settings.raw_retention_days),
         min_free_bytes=int(settings.min_free_disk_gb * 1e9),
+        feeds=load_feeds(settings.feeds_path),
+        fetch_feed=lambda url, etag, lm: fetch_feed(client, url, etag, lm),
     )
 
 
@@ -116,6 +120,13 @@ def epss() -> None:
 
 
 @app.command()
+def reports() -> None:
+    r = locked(build_pipeline().run_reports)()
+    typer.echo(f"new={r.new} updated={r.updated} unchanged_feeds={r.unchanged_feeds} "
+               f"failed={','.join(r.failed) or '-'}")
+
+
+@app.command()
 def health() -> None:
     """間隔の 3 倍以上成功していない情報源があれば終了コード 1。DB には書かない。"""
     try:
@@ -153,6 +164,7 @@ def serve() -> None:
         "kev": pipeline.run_kev,
         "epss": pipeline.run_epss,
         "osv_full": pipeline.run_osv_full,
+        "reports": pipeline.run_reports,
     }
     jobs = [Job(name, interval, locked(runners[name])) for name, interval in schedule().items()]
     Scheduler(jobs, pipeline.last_success, on_result=pinger).run_forever()

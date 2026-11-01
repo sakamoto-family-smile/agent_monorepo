@@ -28,6 +28,7 @@ dependencies = [
     "dbt-duckdb>=1.11.0",
     # 2026.10.23 で emSign ECC Root CA - G3 (eMudhra の中間 CA 鍵漏洩) が除かれた。これより古い版に戻さない
     "certifi>=2026.10.23",
+    "defusedxml>=0.7.1",  # L4: 外部のフィード (RSS / Atom) を XXE・entity 展開なしで読む
 ]
 
 [project.scripts]

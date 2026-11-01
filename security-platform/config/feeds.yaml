@@ -1,0 +1,73 @@
+# L4: 注意喚起・公式の告知・サプライチェーン調査会社のフィード (RSS / Atom)。
+#
+#   id     : 英小文字・数字・ハイフン (監視項目は feed:<id>)
+#   url    : https のみ
+#   trust  : official (公的機関・公式の告知。一次情報として扱える)
+#            research (調査会社のブログ。ID 付きの報告は一次情報に準じる)
+#            news     (報道。確認が取れるまで unconfirmed)
+#   lang   : ja / en
+#
+# 取得は 1 時間ごと (intel の reports ジョブ)。追加・削除はこのファイルを直して make up
+# (イメージに焼き込むため)。ここに書いたフィードは本文を LLM に渡す候補になる (L4 PR2 以降)。
+feeds:
+  # ── 公的機関 ──
+  - id: jpcert-alerts
+    url: https://www.jpcert.or.jp/rss/jpcert.rdf
+    trust: official
+    lang: ja
+  - id: ipa-alerts
+    url: https://www.ipa.go.jp/security/alert-rss.rdf
+    trust: official
+    lang: ja
+
+  # ── 公式の告知 ──
+  - id: github-changelog
+    url: https://github.blog/changelog/feed/
+    trust: official
+    lang: en
+  - id: github-security-blog
+    url: https://github.blog/security/feed/
+    trust: official
+    lang: en
+  - id: pypi-blog
+    url: https://blog.pypi.org/feed_rss_created.xml
+    trust: official
+    lang: en
+  - id: nodejs-vulnerability
+    url: https://nodejs.org/en/feed/vulnerability.xml
+    trust: official
+    lang: en
+  - id: python-insider
+    url: https://blog.python.org/rss.xml
+    trust: official
+    lang: en
+  - id: gcp-security-bulletins
+    url: https://cloud.google.com/feeds/google-cloud-security-bulletins.xml
+    trust: official
+    lang: en
+  - id: eclipse-news  # Open VSX の告知
+    url: https://newsroom.eclipse.org/rss.xml
+    trust: official
+    lang: en
+
+  # ── サプライチェーン調査会社 ──
+  - id: socket-blog
+    url: https://socket.dev/api/blog/feed.atom
+    trust: research
+    lang: en
+  - id: stepsecurity-blog
+    url: https://www.stepsecurity.io/blog/rss.xml
+    trust: research
+    lang: en
+  - id: aikido-blog
+    url: https://www.aikido.dev/blog/rss.xml
+    trust: research
+    lang: en
+  - id: snyk-blog
+    url: https://snyk.io/blog/feed/
+    trust: research
+    lang: en
+  - id: wiz-blog
+    url: https://www.wiz.io/feed/rss.xml
+    trust: research
+    lang: en
