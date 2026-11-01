@@ -29,7 +29,7 @@ from ..common.events import Consumer, Event
 from ..common.timeutil import parse_iso, to_iso, utc_now
 from . import issues, messages
 from .channels import GitHubIssues, LineChannel
-from .health import Check, detection_checks, feed_checks, host_checks, intel_checks
+from .health import Check, detection_checks, extractor_checks, feed_checks, host_checks, intel_checks
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +62,14 @@ class NotifyPipeline:
     def __init__(
         self, engine: Engine, detection: Callable[[], Engine | None], intel: Callable[[], Engine | None],
         sbom_dir: Path, line: LineChannel, github: GitHubIssues, cfg: NotifySettings,
-        hosts_dir: Path | None = None,
+        hosts_dir: Path | None = None, llm_state_dir: Path | None = None,
     ) -> None:
         self.engine = engine
         self._detection = detection  # 読み取り専用。まだ無ければ None (起動順に依存しない)
         self._intel = intel
         self.sbom_dir = sbom_dir
         self.hosts_dir = hosts_dir
+        self.llm_state_dir = llm_state_dir
         self.line = line
         self.github = github
         self.cfg = cfg
@@ -167,7 +168,8 @@ class NotifyPipeline:
     def checks(self, now: datetime) -> list[Check]:
         hosts = host_checks(self.hosts_dir, self.cfg.host_max_age, now) if self.hosts_dir else []
         intel = self._intel()
-        return intel_checks(intel, self.cfg.intel_schedule, now) + feed_checks(intel, now) + detection_checks(
+        return intel_checks(intel, self.cfg.intel_schedule, now) + feed_checks(intel, now) + extractor_checks(
+            intel, self.llm_state_dir, now) + detection_checks(
             self._detection(), self.cfg.scan_interval, self.sbom_dir, self.cfg.sbom_max_age, now) + hosts
 
     def run_health(self) -> None:

@@ -18,4 +18,5 @@ def schedule() -> dict[str, timedelta]:
         "epss": timedelta(days=1),
         "osv_full": timedelta(days=settings.osv_full_refresh_days),
         "reports": timedelta(hours=1),
+        "extract": timedelta(hours=1),  # L4: extractor (夜だけ動く) との受け渡し
     }

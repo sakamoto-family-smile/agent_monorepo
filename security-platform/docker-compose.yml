@@ -16,6 +16,7 @@ x-app: &app
   build:
     context: .
     dockerfile: infra/Dockerfile
+    target: app
   image: security-platform-vuln:local
   # ./data の所有者と揃える (make up が HOST_UID/HOST_GID を渡す。未指定なら 1000)
   user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
@@ -92,6 +93,43 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+  # L4: 記事から危ないパッケージを抜き出す (Claude Code を Max プランの長期トークンで動かす)。
+  # 記事は外部の信頼できない入力なので、DB には触らせない: intel が data/llm/in/ に置いた記事を
+  # 読み取り専用で読み、結果を data/llm/out/ に書くだけ (intel が原文と突き合わせてから取り込む)。
+  # 認証情報は config/llm.env だけを渡す (config/vuln.env・notify.env は渡さない)
+  extractor:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+      target: extractor
+    image: security-platform-extractor:local
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    command: ["python", "-m", "src.llm", "serve"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 4m  # 処理中の 1 件 (最大 3 分) を終えてから止まる
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/app  # Claude Code が設定を書く。トークン以外は毎回まっさら
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ./data/llm/in:/app/data/llm/in:ro
+      - ./data/llm/out:/app/data/llm/out
+      - ./data/llm/state:/app/data/llm/state
+    env_file:
+      - path: config/llm.env
+        required: false
+    environment:
+      DATA_DIR: /app/data
+      TZ: UTC
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
 
   # L3 で追加:
   # remediation: python -m src.remediation serve  (remediation.db の唯一の書き込み元)

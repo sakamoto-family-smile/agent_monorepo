@@ -29,7 +29,7 @@ class FakePipeline:
 
 
 def test_health_reports_stale_sources(monkeypatch):
-    monkeypatch.setattr(cli, "build_pipeline", lambda **_: FakePipeline({"osv", "kev", "epss", "osv_full", "reports"}))
+    monkeypatch.setattr(cli, "build_pipeline", lambda **_: FakePipeline({"osv", "kev", "epss", "osv_full", "reports", "extract"}))
     result = CliRunner().invoke(cli.app, ["health"])
     assert result.exit_code == 0 and "STALE" not in result.output
 

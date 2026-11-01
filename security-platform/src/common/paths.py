@@ -41,6 +41,11 @@ class DataPaths:
         return self.root / "sbom" / "hosts"
 
     @property
+    def llm_dir(self) -> Path:
+        """L4 の記事の抽出 (intel が in/ に書き、extractor が out/ に書く。state/ は extractor の状態)。"""
+        return self.root / "llm"
+
+    @property
     def duckdb_path(self) -> Path:
         return self.root / "security.duckdb"
 
@@ -51,7 +56,7 @@ class DataPaths:
 
     def ensure(self) -> None:
         for d in (self.root, self.raw_dir, self.events_dir, self.osv_db_dir, self.sbom_images_dir,
-                  self.sbom_hosts_dir):
+                  self.sbom_hosts_dir, self.llm_dir / "in", self.llm_dir / "out", self.llm_dir / "state"):
             d.mkdir(parents=True, exist_ok=True)
 
 
