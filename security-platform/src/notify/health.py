@@ -2,6 +2,7 @@
 
 - intel:<source>: 情報源ごとの最終成功が取得間隔の STALE_FACTOR 倍より古い
 - feed:<feed_id>: L4 のフィードの最終成功が FEED_STALE より古い (一度も取れていなければ FEED_FIRST_FAILURES 回失敗で)
+- llm:extractor: L4 の記事の抽出待ちが EXTRACT_QUEUE_MAX_AGE より古い (extractor が止まっている・トークン切れ)
 - detection:scan: 照合の最終成功が照合間隔の STALE_FACTOR 倍より古い
 - sbom:<service>: 本番イメージの SBOM (make detection-images) が IMAGE_SBOM_MAX_AGE_DAYS より古い
 - host:<host_id>: 開発 PC のツール一覧 (launchd の make detection-host) が HOST_INVENTORY_MAX_AGE_HOURS より古い
@@ -85,6 +86,37 @@ def feed_checks(engine: Engine | None, now: datetime, max_age: timedelta = FEED_
         detail = _age(now, last) + (f" / 直近の失敗: {last_error[:200]}" if failures and last_error else "")
         out.append(Check(f"feed:{feed_id}", ok, detail))
     return out
+
+
+EXTRACT_QUEUE_MAX_AGE = timedelta(hours=48)  # extractor は夜に 1 回動く。1 晩の取りこぼしは許す
+
+
+def extractor_checks(engine: Engine | None, state_dir: Path | None, now: datetime,
+                     max_age: timedelta = EXTRACT_QUEUE_MAX_AGE) -> list[Check]:
+    """抽出待ちの最も古い記事の待ち時間。extractor が止まった理由 (data/llm/state/usage.json) も添える。"""
+    if engine is None:
+        return []
+    try:
+        with engine.connect() as conn:
+            n, oldest = conn.execute(text(
+                "SELECT COUNT(*), MIN(queued_at) FROM report_extractions WHERE status = 'queued'"
+            )).one()
+    except OperationalError:
+        return []
+    stopped = ""
+    if state_dir is not None:
+        try:
+            state = json.loads((state_dir / "usage.json").read_text())
+            if isinstance(state, dict) and state.get("last_stopped"):
+                stopped = f" / 直近の停止: {str(state['last_stopped'])[:200]}"
+        except (OSError, ValueError):
+            pass
+    if not n:
+        return [Check("llm:extractor", True, "抽出待ちなし" + stopped)]
+    waited = now - parse_iso(oldest)
+    hours = waited.total_seconds() / 3600
+    return [Check("llm:extractor", waited <= max_age,
+                  f"抽出待ち {n} 件 (最も古いもので {hours:.0f} 時間前から){stopped}")]
 
 
 def detection_checks(

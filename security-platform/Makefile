@@ -2,7 +2,8 @@
         dashboard proxy collector analyzer digest \
         scan-mcp scan-skills redteam cron \
         test clean logs \
-        vuln-migrate intel-bootstrap intel-osv intel-osv-full intel-kev intel-epss intel-reports \
+        vuln-migrate intel-bootstrap intel-osv intel-osv-full intel-kev intel-epss intel-reports intel-extract \
+        llm-check llm-run llm-eval \
         intel-health detection-scan detection-findings detection-images detection-host host-inventory-install host-inventory-uninstall detection-exceptions notify-test notify-digest notify-health analytics duck-ui up down ps logs-vuln
 
 # ── defaults ────────────────────────────────────────────────────────────────
@@ -45,6 +46,10 @@ help:
 	@echo "    intel-osv      OSV 差分取得       intel-osv-full  OSV 全量の再取得"
 	@echo "    intel-kev      CISA KEV           intel-epss      FIRST EPSS"
 	@echo "    intel-reports  注意喚起・公式の告知・調査会社のフィード (config/feeds.yaml)"
+	@echo "    intel-extract  記事の抽出の受け渡し (extractor の結果を取り込み、新しい記事を依頼する)"
+	@echo "    llm-check      config/llm.env のトークンで LLM を呼べるか確かめる (架空の記事 1 件)"
+	@echo "    llm-run        抽出待ちの記事を今すぐ処理する (LIMIT=件数。1 日の上限は守る。常駐は夜だけ動く)"
+	@echo "    llm-eval       評価用の記事で抜き出しの精度を見る (プロバイダ・モデル・指示を変えたとき)"
 	@echo "    intel-health   情報源ごとの最終成功時刻 (古ければ exit 1)"
 	@echo "    detection-scan lockfile・本番イメージを照合して findings を更新  detection-findings  未対応の Finding 一覧"
 	@echo "    detection-images 本番イメージの SBOM を作る (ホストで gcloud・docker を使う。デプロイのたびに実行)"
@@ -119,7 +124,7 @@ COMPOSE   = HOST_UID=$$(id -u) HOST_GID=$$(id -g) docker compose
 INTEL_RUN = $(COMPOSE) run --rm --no-deps intel python -m src.intel
 
 up:
-	mkdir -p data
+	mkdir -p data/llm/in data/llm/out data/llm/state
 	$(COMPOSE) up -d --build
 
 down:
@@ -152,8 +157,23 @@ intel-epss:
 intel-reports:
 	$(INTEL_RUN) reports
 
+intel-extract:
+	$(INTEL_RUN) extract
+
 intel-health:
 	$(INTEL_RUN) health
+
+# L4: extractor コンテナで動かす (config/llm.env のトークンを使う。DB には触らない)
+LLM_RUN = $(COMPOSE) run --rm --no-deps extractor python -m src.llm
+
+llm-check:
+	$(LLM_RUN) check
+
+llm-run:
+	$(LLM_RUN) run $(if $(LIMIT),--limit $(LIMIT))
+
+llm-eval:
+	$(LLM_RUN) eval
 
 detection-scan:
 	$(COMPOSE) run --rm --no-deps detection python -m src.detection scan

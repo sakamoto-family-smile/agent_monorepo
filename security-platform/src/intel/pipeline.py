@@ -23,7 +23,7 @@ from ..common.events import Outbox
 from ..common.paths import DataPaths
 from ..common.raw_store import RawStore
 from ..common.timeutil import parse_iso, to_iso, utc_now_iso
-from . import changes, reports
+from . import changes, extraction, reports
 from .changes import RunContext
 from .osv_record import OsvRecord, parse_record
 from .records import existing_hashes, upsert_osv_record
@@ -259,6 +259,17 @@ class IntelPipeline:
             logger.info("reports: %d new, %d updated, %d unchanged feeds, failed: %s",
                         r.new, r.updated, r.unchanged_feeds, ", ".join(r.failed) or "-")
             self.raw.prune_older_than(reports.RAW_SOURCE, self.raw_retention)
+        return r
+
+    def run_extract(self, *, emit: bool = True) -> extraction.ExtractResult:
+        """L4: extractor の結果を取り込み、新しい記事の抽出を依頼する。fetched は取り込んだ記事の数。"""
+        llm = self.paths.llm_dir
+        with self._run("extract", "incremental", emit=emit) as ctx:
+            r = extraction.run(self.engine, llm / "in", llm / "out", utc_now_iso())
+            ctx.fetched, ctx.changed, ctx.skipped = r.ingested, r.grounded, r.failed
+            logger.info("extract: %d ingested (%d claims, %d grounded), %d retried, %d failed; "
+                        "%d queued, %d skipped by prefilter", r.ingested, r.claims, r.grounded, r.retried,
+                        r.failed, r.queued, r.skipped)
         return r
 
     # ── OSV 全量 ──────────────────────────────────────────────────────────

@@ -61,6 +61,7 @@ def build_pipeline() -> NotifyPipeline:
             timedelta(hours=settings.host_inventory_max_age_hours),
         ),
         paths.sbom_hosts_dir,
+        paths.llm_dir / "state",
     )
 
 
