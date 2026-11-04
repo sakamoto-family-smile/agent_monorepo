@@ -270,6 +270,10 @@ class IntelPipeline:
             logger.info("extract: %d ingested (%d claims, %d grounded), %d retried, %d failed; "
                         "%d queued, %d skipped by prefilter", r.ingested, r.claims, r.grounded, r.retried,
                         r.failed, r.queued, r.skipped)
+            if r.assessed:
+                a = r.assessed
+                logger.info("claims: %d confirmed, %d unconfirmed, %d superseded by OSV; %d advisories (%d withdrawn)",
+                            a.confirmed, a.unconfirmed, a.superseded, a.advisories, a.withdrawn)
         return r
 
     # ── OSV 全量 ──────────────────────────────────────────────────────────

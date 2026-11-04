@@ -92,10 +92,10 @@ def test_ingest_grounds_claims(env):
         ("done", 2, 1, 1)]
     assert not exchange.list_ids(dirs.in_dir) and not exchange.list_ids(dirs.out_dir)  # 受け渡しのファイルは消す
 
-    # 記事が更新されたら抽出し直し、主張は入れ替える
+    # 記事が更新されたら抽出し直し、主張は入れ替える (結果が届くまでは前の主張を残す)
     add_report(p, 1, MALWARE + " Version 1.0.4 is also affected.", h="b")
     p.run_extract()
-    assert rows(p, "SELECT COUNT(*) FROM report_claims") == [(0,)]
+    assert rows(p, "SELECT COUNT(*) FROM report_claims") == [(2,)]
     extract(dirs, lambda _i: {"about_specific_packages": True, "claims": [{**CLAIM, "versions": ["1.0.4"]}]})
     p.run_extract()
     assert rows(p, f"SELECT versions_json FROM report_claims WHERE report_id = '{rid}'") == [('["1.0.4"]',)]

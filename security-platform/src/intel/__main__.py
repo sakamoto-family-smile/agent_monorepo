@@ -5,7 +5,8 @@
     python -m src.intel osv-full      # OSV 全量の再取得
     python -m src.intel kev / epss
     python -m src.intel reports       # L4: config/feeds.yaml のフィードの記事
-    python -m src.intel extract       # L4: 記事の抽出の受け渡し (結果の取り込みと依頼)
+    python -m src.intel extract       # L4: 記事の抽出の受け渡し (結果の取り込み・確度の判定・依頼)
+    python -m src.intel claims        # L4: 記事から抜き出した主張と確度 (読み取りのみ)
     python -m src.intel health        # 情報源ごとの最終成功時刻 (読み取りのみ)
     python -m src.intel serve         # docker compose 用の常駐 (ブートストラップ → 定期実行)
 
@@ -14,12 +15,14 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Callable
 from datetime import timedelta
 
 import typer
+from sqlalchemy import text
 
 from ..common.db import make_engine
 from ..common.healthcheck import make_pinger
@@ -132,6 +135,35 @@ def extract() -> None:
     r = locked(build_pipeline().run_extract)()
     typer.echo(f"ingested={r.ingested} claims={r.claims} grounded={r.grounded} retried={r.retried} "
                f"failed={r.failed} queued={r.queued} skipped={r.skipped}")
+    if r.assessed:
+        a = r.assessed
+        typer.echo(f"confirmed={a.confirmed} unconfirmed={a.unconfirmed} superseded={a.superseded} "
+                   f"advisories={a.advisories} withdrawn={a.withdrawn}")
+
+
+@app.command("claims")
+def list_claims(
+    all_: bool = typer.Option(False, "--all", help="根拠のない主張 (ungrounded) も出す"),
+    limit: int = typer.Option(50, help="新しい記事から何件"),
+) -> None:
+    """記事から抜き出した主張と確度。DB には書かない。"""
+    try:
+        engine = build_pipeline(read_only=True).engine
+    except FileNotFoundError:
+        typer.echo("intel.db がありません (bootstrap 前)")
+        raise typer.Exit(1) from None
+    where = "" if all_ else "WHERE c.status != 'ungrounded'"
+    with engine.connect() as conn:
+        rows = conn.execute(text(f"""
+            SELECT c.status, c.ecosystem, c.package, c.versions_json, c.kind, COALESCE(c.advisory_id, ''),
+              COALESCE(c.status_reason, ''), c.linked_json, r.feed_id, r.title, r.first_seen_at
+            FROM report_claims c JOIN reports r ON r.report_id = c.report_id {where}
+            ORDER BY r.first_seen_at DESC, c.idx LIMIT :n
+        """), {"n": limit}).all()  # nosec B608  where は固定の条件
+    for st, eco, pkg, versions, kind, adv, reason, linked, feed, title, seen in rows:
+        typer.echo(f"{st:11} {eco}:{pkg} {','.join(json.loads(versions)) or '*'} [{kind}] {adv}")
+        typer.echo(f"            {reason}{' ' + ','.join(json.loads(linked)) if linked != '[]' else ''}")
+        typer.echo(f"            {seen[:10]} {feed}: {title[:100]}")
 
 
 @app.command()

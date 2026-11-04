@@ -2,7 +2,7 @@
 
 | ジョブ | 間隔 | 内容 |
 |---|---|---|
-| notify_events | 5 分 | detection.db の events から P1 (新規・再発・P1 への引き上げ) を LINE ですぐ送る |
+| notify_events | 5 分 | detection.db の events から P1 (新規・再発・P1 への引き上げ) と L4 の早期警告 (未確認情報) を LINE ですぐ送る |
 | notify_health | 30 分 | 取得停止など (health.py) の状態が変わったら LINE で送る (停止・復旧) |
 | notify_digest | 15 分 | 1 日 1 回、DIGEST_HOUR 時を過ぎたら日次まとめを LINE で送る |
 | notify_issues | 30 分 | 未対応の Finding を GitHub Issues (private リポジトリ) に写す |
@@ -38,6 +38,7 @@ JOB_HEALTH = "notify_health"
 JOB_DIGEST = "notify_digest"
 JOB_ISSUES = "notify_issues"
 FINDING_EVENTS = ("finding.opened", "finding.reopened", "finding.updated")
+WARNING_EVENT = "warning.opened"
 
 
 @dataclass(frozen=True)
@@ -142,8 +143,8 @@ class NotifyPipeline:
                 consumer.ack(head)
                 detail["baseline"] = head
                 return
-            sent = 0
-            while batch := consumer.fetch(FINDING_EVENTS):
+            sent = warned = 0
+            while batch := consumer.fetch((*FINDING_EVENTS, WARNING_EVENT)):
                 alerts = [e for e in batch if is_p1_alert(e)]
                 ids = [e.payload["finding_id"] for e in alerts]
                 rows = {f.finding_id: f for f in messages.load_findings(
@@ -151,13 +152,21 @@ class NotifyPipeline:
                     {f"f{i}": v for i, v in enumerate(ids)},
                 )} if ids else {}
                 findings = [rows[i] for i in dict.fromkeys(ids) if i in rows]
+                # 早期警告は今も当たっているものだけ (確認が取れて Finding に移ったものは送らない)
+                warn_ids = [e.payload["warning_id"] for e in batch if e.type == WARNING_EVENT]
+                warnings = messages.load_warnings(detection, list(dict.fromkeys(warn_ids)))
                 key = f"p1:{batch[-1].event_id}"
+                warn_key = f"warning:{batch[-1].event_id}"
                 with self.engine.begin() as conn:
                     if findings and not self._already_sent(key):
                         self._send("finding", messages.p1_alert(findings, self.cfg.timezone), key, conn)
                         sent += len(findings)
+                    if warnings and not self._already_sent(warn_key):
+                        self._send("warning", messages.early_warning(warnings), warn_key, conn)
+                        warned += len(warnings)
                     consumer.ack(batch[-1].seq, conn)
             detail["p1"] = sent
+            detail["early_warnings"] = warned
 
     def _needs_baseline(self, consumer: Consumer) -> bool:
         with self.engine.connect() as conn:
@@ -211,7 +220,7 @@ class NotifyPipeline:
             with self.engine.connect() as conn:
                 last = conn.execute(text("SELECT MAX(sent_at) FROM notifications WHERE kind = 'digest'")).scalar()
             since = parse_iso(last) if last else now - timedelta(days=1)
-            body = messages.digest(detection, since, now, self.checks(now), self.cfg.timezone)
+            body = messages.digest(detection, since, now, self.checks(now), self.cfg.timezone, self._intel())
             detail["status"] = self._send("digest", body, key)
 
     # ── GitHub Issues ─────────────────────────────────────────────────────
