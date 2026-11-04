@@ -341,3 +341,35 @@ def test_exception_validation():
         with pytest.raises(ValueError):
             validate(kind, reason, expires, now)
     validate("risk_accepted", "x", now + timedelta(days=180), now)
+
+
+# ── L4: 記事の主張 ──────────────────────────────────────────────────────
+def test_report_claims_become_findings_or_early_warnings(setup):
+    from src.intel import claims
+    from tests.intel.test_claims import add_claim
+
+    make, _, _, intel = setup
+    add_claim(intel, 1, "leftish", versions=("2.0.0",))  # 調査会社・ID なし → 未確認
+    add_claim(intel, 2, "ExampleLib", eco="PyPI", kind="compromised")  # 版なし → 照合できず早期警告だけ
+    claims.assess(intel.engine, utc_now_iso())
+    p = make()
+    r = p.run_scan()
+    assert r.early_warnings == 2 and r.opened == 2  # Finding は今までどおりの 2 件だけ
+    warned = {e["package"]: e for t, e in events(p) if t == "warning.opened"}
+    assert set(warned) == {"leftish", "examplelib"}
+    assert warned["leftish"]["version_matched"] is True and warned["leftish"]["status"] == "unconfirmed"
+    assert warned["examplelib"]["service_id"] == "api" and warned["examplelib"]["claim_versions"] == []
+
+    assert p.run_scan().early_warnings == 0  # 同じものは知らせ直さない
+
+    # 公式の告知で確認が取れた → 照合 (P1 の Finding) に移り、早期警告は閉じる
+    with intel.engine.begin() as conn:
+        conn.execute(text("UPDATE reports SET trust = 'official' WHERE report_id = :r"), {"r": f"rep_{1:024x}"})
+    claims.assess(intel.engine, utc_now_iso())
+    r = p.run_scan()
+    assert r.opened == 1 and r.early_warnings == 0
+    [(adv, prio, ev)] = q(p, "SELECT advisory_id, priority, evidence_json FROM findings WHERE purl = "
+                             "'pkg:npm/leftish@2.0.0'")
+    assert adv.startswith("SPI-") and prio == "P1" and json.loads(ev)["kind"] == "malicious"
+    assert sorted(q(p, "SELECT purl, state FROM early_warnings")) == [
+        ("pkg:npm/leftish@2.0.0", "closed"), ("pkg:pypi/examplelib@2.4.0", "open")]

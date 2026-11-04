@@ -6,7 +6,8 @@
    - 初回の取得で既にあった記事 (initial = 1) は対象にしない (古い記事に Max プランの枠を使わない)
    - 脆弱性・悪性パッケージの語を含まない記事は skipped にする
    - extractor 待ちは MAX_PENDING 件まで
-3. 揃える: in/ のファイルを queued の記事と一致させる (古い依頼に LLM の枠を使わない)
+3. 確度: 主張を判定し直し、confirmed を照合に使う Advisory にする (src/intel/claims.py)
+4. 揃える: in/ のファイルを queued の記事と一致させる (古い依頼に LLM の枠を使わない)
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from sqlalchemy import Connection, Engine, bindparam, text
 from ..llm.exchange import JobResult, job_id, list_ids, read_result, write_job
 from ..llm.grounding import ground
 from ..llm.schema import ExtractInput, validate_output
+from .claims import AssessResult, assess
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ class ExtractResult:
     retried: int = 0
     claims: int = 0
     grounded: int = 0
+    assessed: AssessResult | None = None
 
 
 def source_text(title: str, summary: str) -> str:
@@ -164,7 +167,8 @@ def queue(engine: Engine, in_dir: Path, now: str, result: ExtractResult, max_pen
                 result.queued += 1
             else:
                 result.skipped += 1
-            conn.execute(text("DELETE FROM report_claims WHERE report_id = :r"), {"r": row["report_id"]})
+            if not matched:  # 抽出し直す記事の主張は、結果が届くまで残す (照合の Finding を揺らさない)
+                conn.execute(text("DELETE FROM report_claims WHERE report_id = :r"), {"r": row["report_id"]})
             conn.execute(text("""
                 INSERT INTO report_extractions (report_id, content_hash, job_id, status, reason, attempts,
                   queued_at, updated_at)
@@ -197,6 +201,7 @@ def sync_jobs(engine: Engine, in_dir: Path) -> None:
 
 def run(engine: Engine, in_dir: Path, out_dir: Path, now: str) -> ExtractResult:
     result = ingest(engine, in_dir, out_dir, now)
+    result.assessed = assess(engine, now)
     queue(engine, in_dir, now, result)
     sync_jobs(engine, in_dir)
     return result

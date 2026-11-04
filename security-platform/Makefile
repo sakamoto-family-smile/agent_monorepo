@@ -2,7 +2,7 @@
         dashboard proxy collector analyzer digest \
         scan-mcp scan-skills redteam cron \
         test clean logs \
-        vuln-migrate intel-bootstrap intel-osv intel-osv-full intel-kev intel-epss intel-reports intel-extract \
+        vuln-migrate intel-bootstrap intel-osv intel-osv-full intel-kev intel-epss intel-reports intel-extract intel-claims \
         llm-check llm-run llm-eval \
         intel-health detection-scan detection-findings detection-images detection-host host-inventory-install host-inventory-uninstall detection-exceptions notify-test notify-digest notify-health analytics duck-ui up down ps logs-vuln
 
@@ -46,7 +46,8 @@ help:
 	@echo "    intel-osv      OSV 差分取得       intel-osv-full  OSV 全量の再取得"
 	@echo "    intel-kev      CISA KEV           intel-epss      FIRST EPSS"
 	@echo "    intel-reports  注意喚起・公式の告知・調査会社のフィード (config/feeds.yaml)"
-	@echo "    intel-extract  記事の抽出の受け渡し (extractor の結果を取り込み、新しい記事を依頼する)"
+	@echo "    intel-extract  記事の抽出の受け渡し (extractor の結果を取り込み、確度を判定し、新しい記事を依頼する)"
+	@echo "    intel-claims   記事から抜き出した主張と確度の一覧 (ARGS=\"--all --limit 100\")"
 	@echo "    llm-check      config/llm.env のトークンで LLM を呼べるか確かめる (架空の記事 1 件)"
 	@echo "    llm-run        抽出待ちの記事を今すぐ処理する (LIMIT=件数。1 日の上限は守る。常駐は夜だけ動く)"
 	@echo "    llm-eval       評価用の記事で抜き出しの精度を見る (プロバイダ・モデル・指示を変えたとき)"
@@ -159,6 +160,9 @@ intel-reports:
 
 intel-extract:
 	$(INTEL_RUN) extract
+
+intel-claims:
+	$(INTEL_RUN) claims $(ARGS)
 
 intel-health:
 	$(INTEL_RUN) health

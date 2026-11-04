@@ -209,3 +209,32 @@ def test_versions_sorted_by_ecosystem_rules():
     assert sorted_versions("PyPI", {"10.0", "9.0", "9.10"}) == ["9.0", "9.10", "10.0"]
     assert sorted_versions("Debian:12", {"1:0.1", "2.0-1"}) == ["2.0-1", "1:0.1"]
     assert sorted_versions("PyPI", {"1.0", "not a version"}) == ["1.0", "not a version"]
+
+
+def test_early_warning_and_digest_sections(notify, intel_env):  # noqa: F811
+    from src.intel import claims
+    from tests.intel.test_claims import add_claim
+
+    make, make_detection, *_, apis = notify
+    intel = intel_env[0]
+    detection = make_detection()
+    detection.run_scan()
+    p = make()
+    p.run_events()  # 導入時点のイベントは送らない
+    add_claim(intel, 1, "leftish", versions=("2.0.0",))  # 未確認
+    add_claim(intel, 2, "other-pkg", trust="official")  # 確認済み (使っていない)
+    claims.assess(intel.engine, "2026-10-28T00:00:00.000000Z")
+    detection.run_scan()
+    p.run_events()
+    p.run_events()
+    [body] = apis.texts()
+    assert body.startswith("【未確認情報】使っているパッケージと同じ名前の注意喚起 1 件")
+    assert "front: npm leftish 2.0.0 (lockfile)" in body and "悪性・未確認 / 記事の版 2.0.0 と一致" in body
+    assert "research-feed: Report 1" in body and "https://ex.test/a" in body
+    assert q(p, "SELECT kind, status FROM notifications") == [("warning", "sent")]
+
+    p.run_digest(datetime(2026, 10, 28, 10, 0, tzinfo=TZ).astimezone(UTC))
+    digest = apis.texts()[-1]
+    assert "■ 未確認情報 (使っているパッケージと同じ名前) 1 件" in digest
+    assert "■ 記事からの情報 (前回から): 確認済み 1 / 未確認 1 / OSV 登録済み 0" in digest
+    assert "・確認済み npm other-pkg (悪性) — official-feed: Report 2" in digest

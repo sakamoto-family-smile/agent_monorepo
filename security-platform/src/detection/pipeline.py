@@ -31,6 +31,7 @@ from ..common.events import Outbox
 from ..common.paths import DataPaths
 from ..common.services import Service
 from ..common.timeutil import parse_iso, to_iso, utc_now, utc_now_iso
+from . import early_warning
 from .exceptions import ExceptionStore, FindingException, find_exception
 from .host_inventory import (
     InvalidInventory,
@@ -71,6 +72,7 @@ class ScanResult:
     updated: int = 0
     resolved: int = 0
     suppressed: int = 0
+    early_warnings: int = 0  # 今回新しく当たった早期警告 (L4)
     warnings: list[str] = field(default_factory=list)
     # lockfile・イメージの SBOM を読めなかったサービス。照合結果が欠けているので、その Finding は閉じない
     incomplete: set[str] = field(default_factory=set)
@@ -122,6 +124,7 @@ class DetectionPipeline:
         self.services = services
         self.image_sbom_max_age = image_sbom_max_age
         self.host_history = host_history
+        self.intel_engine = intel_engine
         self.matcher = Matcher(intel_engine)
 
     # ── 実行記録 ──────────────────────────────────────────────────────────
@@ -164,6 +167,7 @@ class DetectionPipeline:
         with self._run(JOB_SCAN) as result:
             now = utc_now()
             desired: dict[tuple[str, str, str], Desired] = {}
+            in_use: list[tuple[str, Component, str]] = []
             exceptions = ExceptionStore(self.engine).active(now)
             with self.engine.begin() as conn:
                 services = self.services + self._host_services(result)
@@ -177,6 +181,7 @@ class DetectionPipeline:
                     result.components += len(comps)
                     matches, _ = self.matcher.match([c for c, _ in comps])
                     where = {c.purl: lf for c, lf in comps}
+                    in_use += [(svc.id, c, lf.kind) for c, lf in comps]
                     for m in matches:
                         if where[m.component.purl].kind == KIND_HOST_HISTORY and m.advisory.kind != "malicious":
                             continue  # 消えた版の脆弱性はもう関係ない。悪性なら入れた時点で被害が出ている
@@ -188,14 +193,16 @@ class DetectionPipeline:
             try:
                 with self.engine.begin() as conn:
                     self._reconcile(conn, outbox, desired, now, result)
+                    found = early_warning.find(early_warning.load_claims(self.intel_engine), in_use)
+                    result.early_warnings, _ = early_warning.reconcile(conn, outbox, found, result.incomplete, now)
             except Exception:
                 outbox.discard()
                 raise
             outbox.flush()
             logger.info(
-                "scan: %d services, %d components, %d open (+%d / ~%d / -%d / suppressed %d)", result.services,
-                result.components, result.open_findings, result.opened, result.updated, result.resolved,
-                result.suppressed,
+                "scan: %d services, %d components, %d open (+%d / ~%d / -%d / suppressed %d), early warnings +%d",
+                result.services, result.components, result.open_findings, result.opened, result.updated,
+                result.resolved, result.suppressed, result.early_warnings,
             )
             return result
 

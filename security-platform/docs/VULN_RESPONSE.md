@@ -10,7 +10,7 @@ PR まで自動で進める (B) ためのフレームワーク。まずはロー
 | L1 | A1: OSV 全エコシステム (全量 + 差分)、CISA KEV、FIRST EPSS、名寄せ、変化検知、ブートストラップ。分析: 鮮度・リードタイム・エコシステム別・KEV カバレッジ | ✅ |
 | L2 | A2: lockfile・本番イメージ (OS パッケージ・ランタイム本体・同梱ライブラリ) の照合と優先度、例外 (誤検知・リスク受容)。通知: P1 の即時通知・日次まとめ (LINE)、GitHub Issues (private リポジトリ)、取得停止のアラート | ✅ |
 | L3 | B: git worktree での決定的更新、差分検査、PR 作成 | ⬜ |
-| L4 | A1 の非構造ソース: IPA・JPCERT 注意喚起、ベンダー告知、セキュリティニュース、VulnerableMCP。LLM で根拠付き抽出し、一次情報が見つからないものは `unconfirmed` として照合に使わない | 🚧 フィードの取得・LLM での抽出まで (PR1・PR2) |
+| L4 | A1 の非構造ソース: IPA・JPCERT 注意喚起、ベンダー告知、セキュリティニュース、VulnerableMCP。LLM で根拠付き抽出し、一次情報が見つからないものは `unconfirmed` として照合に使わない | 🚧 フィードの取得・LLM での抽出・確度の判定と照合・早期警告まで (PR1〜PR3) |
 
 ## アーキテクチャ
 
@@ -81,11 +81,9 @@ flowchart LR
   CHG --> IDB
   IDB --> EVJ
   NEWS --> COL
-  NEWS -.-> LLM
-  LLM -.-> NRM
 
   REPO --> SBOM
-  IDB -. "v_advisories (読み取り専用)" .-> MAT
+  IDB -- "v_advisories・v_report_claims (読み取り専用)" --> MAT
   IDB -. "advisory.changed" .-> MAT
   TRI --> DDB
   IMGSBOM --> SBOM
@@ -107,7 +105,7 @@ flowchart LR
   DUCK --> UI
 
   classDef planned stroke-dasharray: 5 5
-  class NEWS,LLM,WK,GUARD,RDB,PR planned
+  class WK,GUARD,RDB,PR planned
   style REM stroke-dasharray: 5 5
 ```
 
@@ -156,7 +154,8 @@ make vuln-migrate        # data/{intel,detection,remediation}.db を作成
 make intel-bootstrap     # 初回全量 (中断しても続きから再開)
 make intel-osv           # OSV 差分 / intel-osv-full / intel-kev / intel-epss
 make intel-reports       # L4: config/feeds.yaml のフィードの記事を取り込む (常駐の intel も 1 時間ごとに実行)
-make intel-extract       # L4: extractor の結果を取り込み、新しい記事の抽出を依頼する (常駐の intel も 1 時間ごと)
+make intel-extract       # L4: extractor の結果を取り込み、確度を判定し、新しい記事の抽出を依頼する (常駐の intel も 1 時間ごと)
+make intel-claims        # L4: 記事から抜き出した主張と確度の一覧 (ARGS="--all" で根拠のないものも)
 make llm-check           # L4: config/llm.env のトークンで LLM を呼べるか確かめる
 make llm-run LIMIT=3     # L4: 抽出待ちの記事を今すぐ処理する (常駐の extractor は夜 3 時から 3 時間だけ動く)
 make llm-eval            # L4: 評価用の記事で抜き出しの精度を見る
@@ -221,9 +220,9 @@ Docker Desktop の VM をまたいで同じ WAL ファイルを共有するこ�
 | 層 | 場所 | 書き込み元 | 役割 |
 |---|---|---|---|
 | 生データ | `data/raw/<source>/dt=YYYY-MM-DD/` | intel | 取得したものを改変せず保存 (書き込み後は読み取り専用)。OSV 全量は新しい 2 世代を保持。フィードは `reports/` |
-| 運用 DB | `data/intel.db` | intel のみ | Advisory・KEV・EPSS・変化履歴・取得記録・イベント・フィードの記事 (`reports`・`feeds`)・抽出 (`report_extractions`・`report_claims`) |
+| 運用 DB | `data/intel.db` | intel のみ | Advisory・KEV・EPSS・変化履歴・取得記録・イベント・フィードの記事 (`reports`・`feeds`)・抽出 (`report_extractions`・`report_claims`)・記事から作った Advisory (`claim_advisories`) |
 | 抽出の受け渡し | `data/llm/in/` `data/llm/out/` `data/llm/state/` | in は intel、out・state は extractor | 記事 1 件ごとの依頼と結果 (JSON)。intel が取り込んだら消す。state はその日の回数・止まった理由 |
-| | `data/detection.db` | detection のみ | Finding・SBOM・例外・照合の実行記録・イベント |
+| | `data/detection.db` | detection のみ | Finding・SBOM・例外・早期警告 (`early_warnings`)・照合の実行記録・イベント |
 | | `data/notify.db` | notify のみ | イベントのカーソル・送った通知・監視項目の状態・Issue の対応 |
 | | `data/remediation.db` | (L3) | スキーマのみ作成済み |
 | SBOM | `data/sbom/images/<service_id>.json` + `blobs/sha256-<digest>.cdx.json` | `make detection-images` (ホスト) | 本番イメージの SBOM (CycloneDX)。ダイジェストごとに 1 つ、参照されなくなったら消す |
@@ -263,7 +262,7 @@ KEV のスナップショットが既存件数の半分未満なら壊れてい�
 
 `config/feeds.yaml` のフィード (公的機関・公式の告知・サプライチェーン調査会社) を 1 時間ごとに取得し、
 記事を intel.db の `reports` に入れる。この段階では照合にも通知にも使わない
-(LLM での抽出・一次情報での確認・照合は L4 の後続 PR)。
+(LLM での抽出・確度の判定・照合は下記)。
 
 - フィードは外部の信頼できない入力として扱う。XML は defusedxml で読み (DTD・外部実体を拒否)、1 フィード 5 MB で打ち切る。
   本文の HTML はタグを落としたテキストとリンク先の一覧 (`links_json`、一次情報の確認に使う) にする。スクリプトは捨てる
@@ -276,8 +275,7 @@ KEV のスナップショットが既存件数の半分未満なら壊れてい�
 ### 記事からの抽出 (L4)
 
 記事から「どのエコシステムのどのパッケージ (版) が悪性・侵害・脆弱か」を LLM で抜き出し、
-原文と突き合わせてから intel.db の `report_claims` に入れる。まだ照合にも通知にも使わない
-(一次情報での確認・照合・早期警告は L4 PR3)。
+原文と突き合わせてから intel.db の `report_claims` に入れる。確度の判定と照合・早期警告は次の節。
 
 ```mermaid
 flowchart LR
@@ -317,6 +315,38 @@ flowchart LR
 | `LLM_PROVIDER` / `LLM_MODEL` | `claude-code` / `haiku` | 抽出に使う LLM |
 | `LLM_DAILY_LIMIT` | 50 | 1 日に LLM を呼ぶ回数の上限 |
 | `LLM_RUN_HOUR` / `LLM_WINDOW_HOURS` / `LLM_TIMEZONE` | 3 / 3 / `Asia/Tokyo` | 常駐の extractor が動く時間帯 |
+
+### 確度と照合 (L4)
+
+LLM は抜き出すだけで、確からしさは決まったルールで決める (`src/intel/claims.py`。extract ジョブで抽出のたびに判定し直す)。
+
+| status | 条件 | 使い道 |
+|---|---|---|
+| `ungrounded` | 根拠の 1 文・パッケージ名が記事にない | 評価のために残すだけ |
+| `superseded` | 記事の ID (CVE・GHSA・MAL) が intel.db にある。悪性・侵害なら、同じパッケージの悪性パッケージの登録 (侵害は記事の版を含むもの) が OSV にある | 照合は OSV に任せる (判定し直さない) |
+| `confirmed` | 公式の告知 (`trust: official`) で根拠の 1 文にパッケージ名があるもの (記事の中の別のパッケージとの取り違えを避ける)、または ID 付きの調査会社の報告 | 照合する (下記) |
+| `unconfirmed` | それ以外 | 照合しない。使っているパッケージと同じ名前なら早期警告 |
+
+- **照合に使う Advisory。** `confirmed` の主張は (エコシステム, パッケージ, 悪性か脆弱か) ごとに 1 件の Advisory
+  (`SPI-` + 16 桁) にまとめて `claim_advisories` に入れ、契約ビュー (`v_advisories`・`v_advisory_affected`) に載せる。
+  A2 の照合と優先度はそのまま使う (悪性・侵害は `kind = malicious` なので P1)。
+  悪性 (`malicious`) はパッケージの全版、侵害 (`compromised`)・脆弱 (`vulnerable`) は記事にある版だけを照合する。
+  版の無い侵害・脆弱、照合できないエコシステム (`Docker`・`other`) は Advisory にしない (早期警告だけ)。
+  Open VSX の拡張は OSV の表記 `VSCode:https://open-vsx.org` に直す
+- **OSV に載ったら。** 後から OSV に載る (`superseded`) か、記事の主張が無くなったら Advisory を取り下げる (`withdrawn`)。
+  Finding は次の照合で閉じ、OSV の Advisory の方で開き直す (P1 の通知がもう一度届く)
+- **記事が更新されたら。** 抽出し直している間は前の本文から抜き出した主張を使い続ける (Finding を揺らさない)
+- **一次情報のリンク先での確認 (R9 の c) は未対応。** 調査会社の ID の無い報告は、OSV に載るまで `unconfirmed` のまま
+
+#### 早期警告 (未確認情報)
+
+detection が照合のたびに、Advisory にしていない主張 (`unconfirmed`、版の無い `confirmed` など) と、
+使っている部品 (lockfile・本番イメージ・開発 PC、開発 PC の過去 90 日の版) をエコシステムと名前の完全一致で突き合わせる
+(`src/detection/early_warning.py`。版は見ず、通知に「記事の版と一致するか」を添える)。
+
+- 新しく当たったら detection.db の `early_warnings` に入れて `warning.opened` を出し、notify が「【未確認情報】」として LINE で送る
+- Finding ではないので、優先度・期限・Issue の対象にしない。確認が取れて Advisory になる・OSV に載る・部品を外すと閉じる (知らせない)
+- 名前は PyPI は PEP 503 で、拡張の ID と GitHub Actions は大文字小文字を区別せずに比べる。npm は区別する
 
 Max プランのトークンは本人の脆弱性監視のためだけに使う (Anthropic の規約では、他の人のリクエストを
 自分のプランの認証情報で処理することは認められていない)。
@@ -457,8 +487,9 @@ detection.db・intel.db は読み取り専用で開き、自分の notify.db に
 | 種類 | タイミング | 送り先 | 内容 |
 |---|---|---|---|
 | P1 の即時通知 | 5 分ごとに `finding.*` を読む | LINE | P1 の新規・再発・P1 への引き上げ。導入時 (と detection.db の作り直し) より前のイベントは送らない |
+| 早期警告 (L4) | 5 分ごとに `warning.opened` を読む | LINE | 未確認の記事の主張と、使っているパッケージの名前が一致したもの (「未確認情報」と明記)。送る時点で閉じていれば送らない |
 | 取得停止のアラート | 30 分ごと | LINE | 状態が変わったときだけ (停止・復旧)。対象は下表 |
-| 日次まとめ | 毎日 `NOTIFY_DIGEST_HOUR` 時 (既定 9 時) 以降の最初の確認 | LINE | 優先度別の件数、前回からの新規・解消・期限切れ、7 日以内に切れる例外、止まっているもの |
+| 日次まとめ | 毎日 `NOTIFY_DIGEST_HOUR` 時 (既定 9 時) 以降の最初の確認 | LINE | 優先度別の件数、前回からの新規・解消・期限切れ、未確認情報 (早期警告) の一覧、記事からの情報 (前回から抜き出した主張の確度別の件数と、確認済み・未確認の一覧)、7 日以内に切れる例外、止まっているもの |
 | Issues | 30 分ごと | GitHub Issues | `NOTIFY_ISSUE_MIN_PRIORITY` (既定 P3) までの未対応を、パッケージごとに 1 Issue。内容が変われば更新、なくなればクローズ、再発で再オープン |
 
 | 監視項目 | 止まっているとみなす条件 |
@@ -488,9 +519,10 @@ detection.db・intel.db は読み取り専用で開き、自分の notify.db に
 
 | ビュー | 内容 |
 |---|---|
-| `v_advisories` | Advisory + `kev` / `kev_date_added` / `epss` / `epss_percentile` |
+| `v_advisories` | Advisory + `kev` / `kev_date_added` / `epss` / `epss_percentile`。L4 の記事から作った Advisory (`SPI-...`) も載る |
 | `v_advisory_affected` | 影響パッケージ (ecosystem / name / purl / ranges / fixed / versions)。`versions_json` は範囲 (ECOSYSTEM / SEMVER) で判定できない項目 (悪性パッケージなど) だけが持ち、他は NULL |
 | `v_advisory_aliases` | 別名 (GHSA・PYSEC・DSA など) |
+| `v_report_claims` | L4 の記事の主張と確度 (`status`)、照合に使う Advisory の ID (`advisory_id`)、記事の出典。早期警告に使う |
 
 ## 分析 DB の中身
 
@@ -522,7 +554,9 @@ DuckDB の `sqlite` 拡張を使う。初回に extensions.duckdb.org から自�
 - detection はモノレポの作業ツリーをそのまま読む。作業ツリーで別のブランチに切り替えている間に照合が走ると、
   そのブランチの lockfile で照合され、Finding が一時的に解消・再発することがある (P1 なら通知が飛ぶ)。
   作業は別の git worktree で行う
-- NVD・JVN・ランタイムのリリース情報・OneCRL は未対応。注意喚起・公式の告知・調査会社のフィードは取り込みと LLM での抽出までで、まだ照合・通知に使わない (L4 PR3)
+- NVD・JVN・ランタイムのリリース情報・OneCRL は未対応
+- L4 の確度の判定は、記事のリンク先 (一次情報) を取りに行って確かめることはしない。公式の告知と ID 付きの調査報告だけを `confirmed` にする。
+  公式の告知から LLM が誤って読んだ主張も、根拠の 1 文が記事にあれば照合に使われる (P1 になり得る)。誤りなら例外 (`false_positive`) で閉じる
 - 既存の `src/collector/` / `src/analyzer/` / `src/notifier/` (data/security.db) は当面そのまま残す。
   A1・A2・notify と役割が重なるので、使っていないことを確かめてから整理する
 - A2 のイメージ照合は Debian の OS パッケージと Python・Node.js の本体まで。Ubuntu・Alpine・Go などのバイナリに組み込まれたものは照合しない
