@@ -373,3 +373,22 @@ def test_report_claims_become_findings_or_early_warnings(setup):
     assert adv.startswith("SPI-") and prio == "P1" and json.loads(ev)["kind"] == "malicious"
     assert sorted(q(p, "SELECT purl, state FROM early_warnings")) == [
         ("pkg:npm/leftish@2.0.0", "closed"), ("pkg:pypi/examplelib@2.4.0", "open")]
+
+
+def test_claim_version_ranges_and_unknown_ecosystem(setup):
+    """記事の範囲の書き方は照合に使い、エコシステムが分からない主張は名前だけで早期警告にする。"""
+    from src.intel import claims
+    from tests.intel.test_claims import add_claim
+
+    make, _, _, intel = setup
+    add_claim(intel, 1, "ExampleLib", eco="PyPI", kind="vulnerable", versions=("earlier than 2.5.0",),
+              trust="official", quote="ExampleLib earlier than 2.5.0 is affected.")
+    add_claim(intel, 2, "Leftish", eco="other", kind="compromised")
+    claims.assess(intel.engine, utc_now_iso())
+    p = make()
+    r = p.run_scan()
+    [(fixed, fix_type)] = q(p, "SELECT fixed_version, fix_type FROM findings WHERE advisory_id LIKE 'SPI-%'")
+    assert (fixed, fix_type) == ("2.5.0", "upgrade")
+    assert r.early_warnings == 1
+    [ev] = [e for t, e in events(p) if t == "warning.opened"]
+    assert (ev["package"], ev["ecosystem"], ev["ecosystem_unknown"]) == ("leftish", "npm", True)

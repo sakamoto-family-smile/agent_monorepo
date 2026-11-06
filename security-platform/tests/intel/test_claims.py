@@ -166,3 +166,19 @@ def test_claims_cli(intel, monkeypatch):
     assert "confirmed   npm:fresh-evil * [malicious] SPI-" in out and "公式の告知 (official-feed)" in out
     assert "ghost" not in out
     assert "ungrounded" in CliRunner().invoke(cli.app, ["claims", "--all"]).output
+
+
+def test_version_ranges_become_advisory(intel):
+    """記事の範囲の書き方 ("earlier than 1.84.1") を range と修正版にする。"""
+    p, _ = intel
+    add_claim(p, 1, "examplegrpc", kind="vulnerable", eco="PyPI", versions=("earlier than 1.84.1",),
+              trust="official", quote="examplegrpc earlier than 1.84.1 (gRPC transports); bundled root store.")
+    add_claim(p, 2, "google-api-services-*", kind="vulnerable", eco="Maven", trust="official",
+              versions=("version suffix earlier than -2.9.2",), quote="google-api-services-* suffix earlier.")
+    r = claims.assess(p.engine, NOW)
+    assert r.advisories == 1  # 解釈できない書き方の版しかないものは Advisory にしない
+    [(name, ranges, versions, fixed)] = rows(p, "SELECT name, ranges_json, versions_json, fixed_json "
+                                                "FROM claim_advisories")
+    assert name == "examplegrpc" and versions == "[]" and fixed == '["1.84.1"]'
+    assert json.loads(ranges) == [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "1.84.1"}]}]
+    assert rows(p, "SELECT fixed_json FROM v_advisory_affected WHERE name = 'examplegrpc'") == [('["1.84.1"]',)]

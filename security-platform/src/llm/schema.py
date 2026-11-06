@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-PROMPT_VERSION = "2026-11-01.1"
+PROMPT_VERSION = "2026-11-07.1"
 MAX_INPUT_CHARS = 12_000  # 記事の本文はこの長さで切る (長い記事は冒頭に要点がある)
 MAX_CLAIMS = 20
 MAX_QUOTE = 500
@@ -56,10 +56,13 @@ Report a claim only when the article itself names a specific package (or editor 
 GitHub Action, container image) and says it is malicious, was compromised, or has a vulnerability.
 For each claim give:
 - ecosystem: one of {", ".join(ECOSYSTEMS)} (VS Code Marketplace extensions are VSCode,
-  Open VSX extensions are OpenVSX; use "other" when unsure)
+  Open VSX extensions are OpenVSX). When the article does not name the registry, give the registry
+  the package is published on if the article makes it clear (an install command, a file such as
+  package.json or requirements.txt, or a language named for it); otherwise use "other"
 - package: the exact name as written in the article (npm scopes like @scope/name included;
   extensions as publisher.name)
-- versions: affected versions exactly as written (empty if the article does not say)
+- versions: affected versions exactly as written, one item per version or range; copy ranges as
+  written, e.g. "earlier than 1.84.1", "< 2.0.3", "1.2.0 - 1.2.5" (empty if the article does not say)
 - kind: malicious (published as malware), compromised (a legitimate package with malicious
   releases), or vulnerable (a security bug)
 - identifiers: CVE / GHSA / other advisory ids written in the article

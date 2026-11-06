@@ -3,6 +3,8 @@
 intel.db の v_report_claims (読み取り契約) から、Advisory にしていない主張 (status が unconfirmed、または
 confirmed でも版が無いなどで照合できないもの) を読み、今回の照合の部品とエコシステム・名前で突き合わせる。
 版は見ない (記事の版の書き方はまちまちで、名前の一致だけで知らせる価値がある)。通知に版の一致の有無を添える。
+エコシステムが分からない主張 (other) は、どのエコシステムの部品とも名前 (大文字小文字・区切り文字を無視) で
+突き合わせる (axios・LiteLLM のように記事にエコシステムが書かれないことが多いため)。
 
 Finding にはしない (優先度・期限・Issue の対象外)。新しく当たったら warning.opened を出し、notify が
 「未確認情報」として LINE で送る。当たらなくなったら closed にする (知らせない)。
@@ -11,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,19 +24,27 @@ from sqlalchemy.exc import OperationalError
 
 from ..common.events import Outbox
 from ..common.timeutil import to_iso
+from ..intel.claim_versions import affects
 from ..intel.claims import name_key, osv_ecosystem
 from .lockfiles import Component
 
 EVENT_WARNING_OPENED = "warning.opened"
 STATUSES = ("unconfirmed", "confirmed")
 KIND_HOST_HISTORY = "host_history"
+ANY_ECOSYSTEM = "other"  # 抽出でエコシステムが分からなかった主張
+_SEPARATORS = re.compile(r"[-_.\s]+")
+
+
+def loose_key(name: str) -> str:
+    """エコシステムが分からない主張の名前の突き合わせ用 ("LiteLLM" と PyPI の "litellm" を同じにする)。"""
+    return _SEPARATORS.sub("-", name.strip().lower())
 
 
 @dataclass(frozen=True)
 class Claim:
     claim_id: str
     report_id: str
-    ecosystem: str  # OSV の表記
+    ecosystem: str  # OSV の表記。分からなければ ANY_ECOSYSTEM
     package: str
     versions: tuple[str, ...]
     kind: str
@@ -63,7 +74,9 @@ class EarlyWarning:
         return {
             "ecosystem": comp.ecosystem, "package": comp.name, "version": comp.version,
             "source_kind": self.source_kind, "kind": c.kind, "status": c.status,
-            "claim_versions": list(c.versions), "version_matched": comp.version in c.versions,
+            "claim_versions": list(c.versions),
+            "version_matched": affects(comp.ecosystem, comp.version, c.versions),
+            "ecosystem_unknown": c.ecosystem == ANY_ECOSYSTEM,
             "quote": c.quote, "feed_id": c.feed_id, "trust": c.trust, "title": c.title, "url": c.url,
         }
 
@@ -81,7 +94,7 @@ def load_claims(intel: Engine) -> list[Claim]:
         return []
     out = []
     for r in rows:
-        eco = osv_ecosystem(r[2])
+        eco = ANY_ECOSYSTEM if r[2] == ANY_ECOSYSTEM else osv_ecosystem(r[2])
         if eco is not None:
             out.append(Claim(r[0], r[1], eco, r[3], tuple(json.loads(r[4])), r[5], r[6], r[7], r[8], r[9],
                              r[10], r[11]))
@@ -91,11 +104,15 @@ def load_claims(intel: Engine) -> list[Claim]:
 def find(claims: list[Claim], components: list[tuple[str, Component, str]]) -> dict[str, EarlyWarning]:
     """components: (service_id, 部品, 見つかった元の種類)。過去に入っていた版は悪性・侵害の主張とだけ突き合わせる。"""
     by_name: dict[tuple[str, str], list[tuple[str, Component, str]]] = defaultdict(list)
+    by_loose: dict[str, list[tuple[str, Component, str]]] = defaultdict(list)
     for svc, comp, kind in components:
         by_name[(comp.ecosystem, name_key(comp.ecosystem, comp.name))].append((svc, comp, kind))
+        by_loose[loose_key(comp.name)].append((svc, comp, kind))
     out: dict[str, EarlyWarning] = {}
     for c in claims:
-        for svc, comp, kind in by_name.get((c.ecosystem, name_key(c.ecosystem, c.package)), []):
+        hits = by_loose.get(loose_key(c.package), []) if c.ecosystem == ANY_ECOSYSTEM \
+            else by_name.get((c.ecosystem, name_key(c.ecosystem, c.package)), [])
+        for svc, comp, kind in hits:
             if kind == KIND_HOST_HISTORY and c.kind == "vulnerable":
                 continue
             w = EarlyWarning(svc, comp, kind, c)
