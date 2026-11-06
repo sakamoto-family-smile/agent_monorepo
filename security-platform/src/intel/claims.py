@@ -11,7 +11,8 @@ LLM は記事から抜き出すだけで、確からしさはここで決める 
 
 confirmed の主張は (エコシステム, パッケージ, 悪性か脆弱か) ごとに 1 件の Advisory (``SPI-...``) にまとめ、
 v_advisories・v_advisory_affected に載せる。悪性 (malicious) は全版、侵害 (compromised)・脆弱 (vulnerable) は
-記事にある版だけを照合する (版の無い侵害・脆弱は照合できないので Advisory にしない)。
+記事にある版だけを照合する。版は記事の書き方 ("earlier than 1.84.1" など) を claim_versions.py で個別の版と
+range に直す (版の無い・解釈できない侵害・脆弱は照合できないので Advisory にしない)。
 後から OSV に載ったり記事の主張が無くなったりしたら Advisory を取り下げ (withdrawn)、Finding は次の照合で閉じる。
 superseded と ungrounded は判定し直さない (OSV に載ったものは OSV が正)。
 """
@@ -27,6 +28,7 @@ from sqlalchemy import Connection, Engine, bindparam, text
 from ..detection.lockfiles import canonical_pypi_name
 from ..detection.versions import is_affected
 from ..llm.grounding import normalize
+from .claim_versions import parse as parse_versions
 
 CONFIRMED = "confirmed"
 UNCONFIRMED = "unconfirmed"
@@ -123,12 +125,13 @@ def _by_package(conn: Connection, c: _Claim, eco: str) -> set[str]:
         WHERE a.kind = 'malicious' AND f.ecosystem = :e AND LOWER(f.name) = LOWER(:n)
     """), {"e": eco, "n": c.package}).all()
     key = name_key(eco, c.package)
+    exact = parse_versions(eco, c.versions).exact
     out = set()
     for adv, name, ranges, versions in rows:
         if name_key(eco, name) != key:
             continue
-        if c.kind == "compromised" and c.versions and not any(
-            is_affected(eco, v, json.loads(ranges), json.loads(versions or "[]")) for v in c.versions
+        if c.kind == "compromised" and exact and not any(
+            is_affected(eco, v, json.loads(ranges), json.loads(versions or "[]")) for v in exact
         ):
             continue  # 別の版の侵害の登録
         out.add(adv)
@@ -162,6 +165,7 @@ class _Advisory:
     ecosystem: str
     name: str
     versions: set[str] = field(default_factory=set)
+    ranges: list[dict[str, object]] = field(default_factory=list)
     claims: list[_Claim] = field(default_factory=list)
     all_versions: bool = False  # 悪性 (malicious) の主張があればパッケージごと
 
@@ -171,7 +175,9 @@ class _Advisory:
         summary = f"記事から ({label}): {self.name} — {first.title}"[:SUMMARY_MAX]
         return {
             "id": self.advisory_id, "kind": self.kind, "eco": self.ecosystem, "name": self.name,
-            "ranges": json.dumps(ALL_VERSIONS if self.all_versions else []),
+            "ranges": json.dumps(ALL_VERSIONS if self.all_versions else self.ranges),
+            "fixed": json.dumps([] if self.all_versions else sorted(
+                {v for r in self.ranges for ev in r["events"] for k, v in ev.items() if k == "fixed"})),
             "versions": None if self.all_versions else json.dumps(sorted(self.versions)),
             "summary": summary, "claims": json.dumps(sorted(c.claim_id for c in self.claims)),
             "first": min(c.first_seen_at for c in self.claims), "now": now,
@@ -186,38 +192,52 @@ def _materialize(claims: list[_Claim]) -> dict[str, _Advisory]:
     out: dict[str, _Advisory] = {}
     for c in claims:
         eco = osv_ecosystem(c.ecosystem)
-        if eco is None or (c.kind != "malicious" and not c.versions):
+        if eco is None:
+            continue
+        parsed = parse_versions(eco, c.versions)
+        if c.kind != "malicious" and not parsed.matchable:
             continue
         kind = advisory_kind(c.kind)
         adv_id = _advisory_id(eco, name_key(eco, c.package), kind)
         adv = out.setdefault(adv_id, _Advisory(adv_id, kind, eco, c.package))
-        adv.versions.update(c.versions)
+        adv.versions.update(parsed.exact)
+        adv.ranges.extend(r for r in parsed.ranges if r not in adv.ranges)
         adv.all_versions = adv.all_versions or c.kind == "malicious"
         adv.claims.append(c)
     return out
 
 
+def _withdrawn_reason(conn: Connection, claim_ids: str, superseded: int) -> str:
+    if superseded:
+        return "OSV に登録された"
+    left = conn.execute(text(
+        "SELECT COUNT(*) FROM report_claims WHERE status = :c AND claim_id IN (SELECT value FROM json_each(:ids))"
+    ), {"c": CONFIRMED, "ids": claim_ids}).scalar_one()
+    return "照合できる版がない" if left else "記事の主張がなくなった"
+
+
 def _sync_advisories(conn: Connection, desired: dict[str, _Advisory], now: str, result: AssessResult) -> None:
-    existing = {r[0]: (r[1], r[2], r[3], r[4], bool(r[5])) for r in conn.execute(text(
-        "SELECT advisory_id, ranges_json, versions_json, summary, claim_ids_json, withdrawn FROM claim_advisories"
+    existing = {r[0]: (r[1], r[2], r[3], r[4], r[5], bool(r[6])) for r in conn.execute(text(
+        "SELECT advisory_id, ranges_json, versions_json, summary, claim_ids_json, fixed_json, withdrawn "
+        "FROM claim_advisories"
     )).all()}
     for adv_id, adv in desired.items():
         row = adv.row(now)
         prev = existing.get(adv_id)
-        if prev is not None and prev[:4] == (row["ranges"], row["versions"], row["summary"], row["claims"]) \
-                and not prev[4]:
+        if prev is not None and not prev[5] and prev[:5] == (
+                row["ranges"], row["versions"], row["summary"], row["claims"], row["fixed"]):
             continue
         conn.execute(text("""
-            INSERT INTO claim_advisories (advisory_id, kind, ecosystem, name, ranges_json, versions_json, summary,
-              claim_ids_json, withdrawn, withdrawn_reason, first_seen_at, updated_at)
-            VALUES (:id, :kind, :eco, :name, :ranges, :versions, :summary, :claims, 0, NULL, :first, :now)
+            INSERT INTO claim_advisories (advisory_id, kind, ecosystem, name, ranges_json, versions_json, fixed_json,
+              summary, claim_ids_json, withdrawn, withdrawn_reason, first_seen_at, updated_at)
+            VALUES (:id, :kind, :eco, :name, :ranges, :versions, :fixed, :summary, :claims, 0, NULL, :first, :now)
             ON CONFLICT(advisory_id) DO UPDATE SET ranges_json = excluded.ranges_json,
-              versions_json = excluded.versions_json, summary = excluded.summary,
+              versions_json = excluded.versions_json, fixed_json = excluded.fixed_json, summary = excluded.summary,
               claim_ids_json = excluded.claim_ids_json, withdrawn = 0, withdrawn_reason = NULL,
               updated_at = excluded.updated_at
         """), row)
     for adv_id, prev in existing.items():
-        if adv_id in desired or prev[4]:
+        if adv_id in desired or prev[5]:
             continue
         superseded = conn.execute(text(
             "SELECT COUNT(*) FROM report_claims WHERE status = :s AND claim_id IN (SELECT value FROM json_each(:ids))"
@@ -225,7 +245,7 @@ def _sync_advisories(conn: Connection, desired: dict[str, _Advisory], now: str, 
         conn.execute(text(
             "UPDATE claim_advisories SET withdrawn = 1, withdrawn_reason = :r, updated_at = :now "
             "WHERE advisory_id = :id"
-        ), {"r": "OSV に登録された" if superseded else "記事の主張がなくなった", "now": now, "id": adv_id})
+        ), {"r": _withdrawn_reason(conn, prev[3], superseded), "now": now, "id": adv_id})
         result.withdrawn += 1
     result.advisories = conn.execute(
         text("SELECT COUNT(*) FROM claim_advisories WHERE withdrawn = 0")).scalar_one()

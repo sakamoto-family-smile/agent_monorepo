@@ -102,7 +102,8 @@ def warning_line(ev: dict[str, Any]) -> str:
     return (f"・{ev.get('service_id')}: {ev.get('ecosystem')} {ev.get('package')} {ev.get('version')} "
             f"({source_label(str(ev.get('source_kind') or 'source'))})\n"
             f"  {KIND_LABELS.get(str(ev.get('kind')), ev.get('kind'))}・"
-            f"{STATUS_LABELS.get(str(ev.get('status')), ev.get('status'))} / {_claim_versions(ev)}\n"
+            f"{STATUS_LABELS.get(str(ev.get('status')), ev.get('status'))} / {_claim_versions(ev)}"
+            + ("・記事にエコシステムの記載なし (名前だけ一致)" if ev.get("ecosystem_unknown") else "") + "\n"
             f"  {ev.get('feed_id')}: {str(ev.get('title') or '')[:120]}"
             + (f"\n  {ev['url']}" if ev.get("url") else ""))
 

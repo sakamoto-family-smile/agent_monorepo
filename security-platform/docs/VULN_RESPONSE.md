@@ -331,7 +331,10 @@ LLM は抜き出すだけで、確からしさは決まったルールで決め�
   (`SPI-` + 16 桁) にまとめて `claim_advisories` に入れ、契約ビュー (`v_advisories`・`v_advisory_affected`) に載せる。
   A2 の照合と優先度はそのまま使う (悪性・侵害は `kind = malicious` なので P1)。
   悪性 (`malicious`) はパッケージの全版、侵害 (`compromised`)・脆弱 (`vulnerable`) は記事にある版だけを照合する。
-  版の無い侵害・脆弱、照合できないエコシステム (`Docker`・`other`) は Advisory にしない (早期警告だけ)。
+  版は記事の書き方のまま抜き出し、`src/intel/claim_versions.py` が個別の版と OSV の range に直す
+  (`earlier than X`・`< X`・`before X` は X で修正、`<= X`・`X and earlier` は X まで、`A - B` は A から B まで、
+  `>= A, < B` など)。range の修正版は `fixed_json` に入れ、Finding の修正版になる。
+  版の無い・解釈できない侵害・脆弱、照合できないエコシステム (`Docker`・`other`) は Advisory にしない (早期警告だけ)。
   Open VSX の拡張は OSV の表記 `VSCode:https://open-vsx.org` に直す
 - **OSV に載ったら。** 後から OSV に載る (`superseded`) か、記事の主張が無くなったら Advisory を取り下げる (`withdrawn`)。
   Finding は次の照合で閉じ、OSV の Advisory の方で開き直す (P1 の通知がもう一度届く)
@@ -347,6 +350,8 @@ detection が照合のたびに、Advisory にしていない主張 (`unconfirme
 - 新しく当たったら detection.db の `early_warnings` に入れて `warning.opened` を出し、notify が「【未確認情報】」として LINE で送る
 - Finding ではないので、優先度・期限・Issue の対象にしない。確認が取れて Advisory になる・OSV に載る・部品を外すと閉じる (知らせない)
 - 名前は PyPI は PEP 503 で、拡張の ID と GitHub Actions は大文字小文字を区別せずに比べる。npm は区別する
+- 記事にエコシステムが書かれず `other` になった主張 (axios・LiteLLM など) は、どのエコシステムの部品とも
+  名前 (大文字小文字と `-` `_` `.` 空白の違いを無視) で突き合わせ、通知に「エコシステムの記載なし (名前だけ一致)」と添える
 
 Max プランのトークンは本人の脆弱性監視のためだけに使う (Anthropic の規約では、他の人のリクエストを
 自分のプランの認証情報で処理することは認められていない)。
