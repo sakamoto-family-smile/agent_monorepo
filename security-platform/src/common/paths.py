@@ -67,7 +67,7 @@ class DataPaths:
     def ensure(self) -> None:
         for d in (self.root, self.raw_dir, self.events_dir, self.osv_db_dir, self.sbom_images_dir,
                   self.sbom_hosts_dir, self.llm_dir / "in", self.llm_dir / "out", self.llm_dir / "state",
-                  self.remediation_dir):
+                  self.remediation_dir / "jobs" / "in", self.remediation_dir / "jobs" / "out"):
             d.mkdir(parents=True, exist_ok=True)
 
 

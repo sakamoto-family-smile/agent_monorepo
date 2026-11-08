@@ -9,12 +9,12 @@ PR まで自動で進める (B) ためのフレームワーク。まずはロー
 | L0 | `data/` レイアウト、SQLite 3 ファイル + Alembic、イベント (outbox + JSONL)、dbt 雛形、`services.yaml`、docker compose | ✅ |
 | L1 | A1: OSV 全エコシステム (全量 + 差分)、CISA KEV、FIRST EPSS、名寄せ、変化検知、ブートストラップ。分析: 鮮度・リードタイム・エコシステム別・KEV カバレッジ | ✅ |
 | L2 | A2: lockfile・本番イメージ (OS パッケージ・ランタイム本体・同梱ライブラリ) の照合と優先度、例外 (誤検知・リスク受容)。通知: P1 の即時通知・日次まとめ (LINE)、GitHub Issues (private リポジトリ)、取得停止のアラート | ✅ |
-| L3 | B: 依存の決定的更新、差分検査、PR 作成・自動マージ | 🚧 origin/main の写し (detection の照合の対象) まで |
+| L3 | B: 依存の決定的更新、差分検査、PR 作成・自動マージ・マージ後の追跡 | 🚧 PyPI (uv.lock) まで。npm・P1 の悪性パッケージの除去・LLM による修正案は次の段階 |
 | L4 | A1 の非構造ソース: IPA・JPCERT 注意喚起、ベンダー告知、セキュリティニュース、VulnerableMCP。LLM で根拠付き抽出し、一次情報が見つからないものは `unconfirmed` として照合に使わない | 🚧 フィードの取得・LLM での抽出・確度の判定と照合・早期警告まで (PR1〜PR3) |
 
 ## アーキテクチャ
 
-実線が実装済み (L0 / L1)、点線が今後の段階。
+実線が実装済み、点線が今後の段階。
 
 ```mermaid
 flowchart LR
@@ -48,12 +48,17 @@ flowchart LR
 
     subgraph REM["remediation サービス — B (L3)"]
       MIR["origin/main の写し<br/>10 分ごと"]
-      WK["決定的更新"] --> GUARD["差分検査"]
+      WK["計画<br/>上げるパッケージと版"]
+      GUARD["差分検査"] --> PRC["PR・自動マージ<br/>マージ後の追跡"]
     end
+    subgraph UPD["remediation-updater (隔離。トークン・DB なし)"]
+      UVL["uv lock --upgrade-package"]
+    end
+    EGR["remediation-egress<br/>PyPI だけ中継"]
     RDB[("data/remediation.db")]
     MAIN[("data/remediation/main<br/>origin/main の写し")]
 
-    subgraph NTF["notify サービス (外部と通信するのはここだけ)"]
+    subgraph NTF["notify サービス (LINE・Issues に送るのはここだけ)"]
       NEV["P1 の即時通知"]
       NHL["取得停止の監視"]
       NDG["日次まとめ"]
@@ -72,7 +77,7 @@ flowchart LR
   IMGSBOM[("data/sbom/images/<br/>本番イメージの SBOM<br/>make detection-images (ホスト)")]
   HOSTINV[("data/sbom/hosts/<br/>開発 PC のツール一覧<br/>launchd で 1 日 1 回 (ホスト)")]
   NOTIFY["LINE (専用 Bot)<br/>GitHub Issues (private)"]
-  PR["GitHub PR<br/>(マージは人)"]
+  PR["GitHub PR<br/>(CI が通れば自動マージ。P1 は人)"]
   UI["DuckDB UI<br/>make duck-ui"]
 
   OSV --> COL
@@ -100,10 +105,15 @@ flowchart LR
   DDB --> NIS
   NEV & NHL & NDG & NIS --> NOTIFY
   NEV & NHL & NDG & NIS --> NDB
-  DDB -. "finding.remediate" .-> WK
-  GUARD -.-> PR
-  WK -.-> RDB
-  MAIN -.-> WK
+  DDB -- "findings (読み取り専用)" --> WK
+  MAIN --> WK
+  WK -- "jobs/in" --> UVL
+  UVL -- "jobs/out" --> GUARD
+  UVL --> EGR
+  IDB -- "v_advisory_affected" --> GUARD
+  PRC --> PR
+  PRC --> RDB
+  RDB -- "remediation.* (読み取り専用)" --> NEV
 
   IDB -- "ATTACH (読み取り専用)" --> DBT
   DDB -.-> DBT
@@ -111,8 +121,6 @@ flowchart LR
   DBT --> DUCK
   DUCK --> UI
 
-  classDef planned stroke-dasharray: 5 5
-  class WK,GUARD,PR planned
 ```
 
 境界の決まりは 3 つ。
@@ -174,6 +182,8 @@ make detection-exceptions ARGS="list"   # 例外の一覧 (add / revoke は下�
 make notify-test         # LINE にテスト送信
 make notify-digest       # 日次まとめを今すぐ送る (その日にまだ送っていなければ)
 make notify-health       # 取得停止の監視項目の今の状態
+make remediation-status  # B: origin/main の写しと自動改修の状態 (改修ごとの PR・状態・止まった理由)
+make remediation-retry ARGS="--service <id>"  # B: 失敗した版の記録を消して、次の計画でやり直させる
 make analytics           # dbt build → data/security.duckdb を差し替え
 ```
 
@@ -230,7 +240,8 @@ Docker Desktop の VM をまたいで同じ WAL ファイルを共有するこ�
 | 抽出の受け渡し | `data/llm/in/` `data/llm/out/` `data/llm/state/` | in は intel、out・state は extractor | 記事 1 件ごとの依頼と結果 (JSON)。intel が取り込んだら消す。state はその日の回数・止まった理由 |
 | | `data/detection.db` | detection のみ | Finding・SBOM・例外・早期警告 (`early_warnings`)・照合の実行記録・イベント |
 | | `data/notify.db` | notify のみ | イベントのカーソル・送った通知・監視項目の状態・Issue の対応 |
-| | `data/remediation.db` | remediation のみ | ジョブの実行記録 (写しの更新)。改修の記録 (`runs`・`run_steps`) は L3 の後半から |
+| | `data/remediation.db` | remediation のみ | ジョブの実行記録・改修 (`runs`・`run_steps`)・失敗した版 (`attempts`)・まとめ方 (`service_modes`)・イベント |
+| 改修の受け渡し | `data/remediation/jobs/in/` `jobs/out/` | in は remediation、out は remediation-updater | 改修 1 回ごとの依頼 (対象のディレクトリの写しと上げる版) と結果 (更新後の uv.lock)。remediation が回収したら消す |
 | main の写し | `data/remediation/main` → `snapshots/<sha>/` | remediation | origin/main のコミットの中身 (GitHub の tarball)。detection はこれを照合する。1 つ前の世代まで残す |
 | SBOM | `data/sbom/images/<service_id>.json` + `blobs/sha256-<digest>.cdx.json` | `make detection-images` (ホスト) | 本番イメージの SBOM (CycloneDX)。ダイジェストごとに 1 つ、参照されなくなったら消す |
 | ツール一覧 | `data/sbom/hosts/<host_id>.json` | `make detection-host` (ホスト、launchd) | 開発 PC のツール一覧 (独自の JSON)。本人だけが読める権限 (0600) で書く。過去の版は detection.db の `host_components` |
@@ -496,7 +507,7 @@ make detection-exceptions ARGS='revoke exc_...'  # 取り消し (行は残る)
 
 ## 通知 (notify)
 
-外部と通信するのは notify サービスだけ。送り先の認証情報 (`config/notify.env`) もこのコンテナにだけ渡す。
+通知 (LINE・Issues) を送るのは notify サービスだけ。送り先の認証情報 (`config/notify.env`) もこのコンテナにだけ渡す。
 detection.db・intel.db は読み取り専用で開き、自分の notify.db にだけ書く。
 
 | 種類 | タイミング | 送り先 | 内容 |
@@ -505,6 +516,7 @@ detection.db・intel.db は読み取り専用で開き、自分の notify.db に
 | 早期警告 (L4) | 5 分ごとに `warning.opened` を読む | LINE | 未確認の記事の主張と、使っているパッケージの名前が一致したもの (「未確認情報」と明記)。送る時点で閉じていれば送らない |
 | 取得停止のアラート | 30 分ごと | LINE | 状態が変わったときだけ (停止・復旧)。対象は下表 |
 | 日次まとめ | 毎日 `NOTIFY_DIGEST_HOUR` 時 (既定 9 時) 以降の最初の確認 | LINE | 優先度別の件数、前回からの新規・解消・期限切れ、未確認情報 (早期警告) の一覧、記事からの情報 (前回から抜き出した主張の確度別の件数と、確認済み・未確認の一覧)、7 日以内に切れる例外、止まっているもの |
+| 自動改修 (B) | 5 分ごとに `remediation.*` を読む | LINE | 止まった・P1 の修正 PR・マージ後も閉じない・デプロイの失敗・トークンの期限 (下の「B 自動改修」)。その他は日次まとめ |
 | Issues | 30 分ごと | GitHub Issues | `NOTIFY_ISSUE_MIN_PRIORITY` (既定 P3) までの未対応を、パッケージごとに 1 Issue。内容が変われば更新、なくなればクローズ、再発で再オープン |
 
 | 監視項目 | 止まっているとみなす条件 |
@@ -515,6 +527,7 @@ detection.db・intel.db は読み取り専用で開き、自分の notify.db に
 | `detection:scan` | 照合の最終成功が照合間隔の 3 倍より古い (3 時間) |
 | `sbom:<service>` | 本番イメージの SBOM が `IMAGE_SBOM_MAX_AGE_DAYS` (7 日) より古い |
 | `host:<host_id>` | 開発 PC のツール一覧が `HOST_INVENTORY_MAX_AGE_HOURS` (48 時間) より古い (launchd が止まっている・PC を使っていない) |
+| `remediation:mirror` | origin/main の写し (照合の対象) の最終更新が更新間隔の 3 倍より古い (30 分) |
 
 送った通知は `notifications.dedupe_key` で記録し、LINE には `X-Line-Retry-Key` を付けるので、途中で落ちても二重に送らない。
 送り先が未設定なら送らずに `skipped` として記録し、処理は進める。Issues は 1 回の同期で最大 40 件まで変更する (残りは次回)。
@@ -527,6 +540,72 @@ detection.db・intel.db は読み取り専用で開き、自分の notify.db に
    fine-grained personal access token をそのリポジトリだけ・Issues の Read and write で発行する。
    モノレポ (public) には立てない (未対応の脆弱性の一覧になるため)
 3. `cp config/notify.env.example config/notify.env` に書き、`make up` → `make notify-test`
+
+## B 自動改修 (依存の更新 PR)
+
+`remediation` サービスが、修正版のある Finding から依存の更新 PR を作り、CI が通れば自動でマージさせる
+(`src/remediation/`)。今は PyPI (`uv.lock`) だけ。
+
+| ジョブ | 間隔 | 内容 |
+|---|---|---|
+| mirror | 10 分 | origin/main の写しを最新にする (detection が照合する対象) |
+| plan | 60 分 | サービスごとに上げるパッケージを決め、updater に依頼する |
+| collect | 5 分 | updater の結果を差分検査にかけ、通れば PR を作って自動マージを予約する |
+| track | 10 分 | PR の CI・マージ・写しへの反映・照合での解消・自動デプロイの結果を追う。トークンの期限も見る |
+
+**対象と上げる版**
+
+- `services.yaml` で `auto_remediation: true` かつ lockfile に `uv.lock` があるサービス。自動改修から外すには false にする
+- `open`・修正版あり・優先度が `REMEDIATION_MIN_PRIORITY` (既定 P3) まで・見つかった元がそのサービスの `uv.lock` の Finding
+  (本番イメージだけにあるものは lockfile を直しても消えないので対象外)
+- パッケージごとに、全 Advisory の修正版のうち最大の版まで上げる。その版を intel で照合し直し、修正版のある
+  Advisory がまだ当たれば、当たらなくなる版まで引き上げる (範囲が複数ある Advisory のため)
+- メジャーバージョンが上がるもの (0.x は 2 つ目の数字) は見送る (破壊的な変更を含みうるので、LLM による修正案か人に回す)
+- 照合が写しより古く、写しの lockfile ではもう上がっているものは依頼しない (下げてしまわないように)
+
+**1 サービス 1 本**: 同時に進める改修はサービスごとに 1 本 (同じ uv.lock を書き換える PR が並ぶと、
+1 本マージした時点で残りがぶつかる)。まとめた PR の CI が落ちたら、そのサービスは次から 1 パッケージずつにする。
+1 つだけでも落ちる・上げられない・差分検査で止まった (パッケージ, 版) は `attempts` に残し、同じ版では二度と試さない
+(修正版が変われば試す。やり直させるときは `make remediation-retry`)。
+
+**隔離** (uv lock はパッケージのビルドでそのパッケージのコードを動かしうるため):
+
+| コンテナ | 持つもの | 通信 | すること |
+|---|---|---|---|
+| remediation | GitHub のトークン (`config/remediation.env`)、DB (detection・intel は読み取り専用) | GitHub | 計画・差分検査・PR の作成・追跡。パッケージのコードは動かさない |
+| remediation-updater | 依頼 (`jobs/in`、読み取り専用) と結果 (`jobs/out`) だけ。トークン・DB・作業コピーは無い | remediation-egress 経由で PyPI だけ | `uv lock --upgrade-package <名前>==<版>`。全部まとめて上げられなければ 1 つずつ試し、上げられたものだけで作り直す |
+| remediation-egress | 何も持たない | 外 | `CONNECT pypi.org:443` / `files.pythonhosted.org:443` だけを中継する (平文の HTTP・別のホストは 403) |
+
+updater は外に出られない内部ネットワーク (`updater`) にだけつなぎ、ルートファイルシステムは読み取り専用、作業は tmpfs、
+権限 (capabilities) は無し。依頼に入れるのは写しから取り出した対象のサービスと path 依存のディレクトリだけ。
+
+**差分検査** (updater が返した uv.lock は信頼しない。1 つでも外れたら PR にしない):
+
+1. lockfile の設定 (requires-python・resolution-markers など) が変わっていない (形式の版 `revision` が上がるのは許す)
+2. 名前と版が同じパッケージは、中身 (取得元・ハッシュ・依存) も前と完全に同じ
+3. 上げたパッケージは指定した版になっている
+4. それ以外に変わったパッケージは 5 個まで、メジャーバージョンは上がらない
+5. 新しい版の取得元は前と同じ PyPI のインデックス、ファイルは files.pythonhosted.org、sha256 のハッシュ付き
+6. 新しい版を intel の Advisory で照合して、新しく当たるもの・悪性・修正版があるのに残るものが無い
+
+**PR**: タイトルは `chore(<service>): 依存の更新`、本文は「依存の更新」だけ (どの脆弱性かは LINE と DB にだけ残す)。
+コミットは GitHub の API で作り、変わるファイルが lockfile 1 つだけであることを確かめてから PR にする。
+P1 (悪性・KEV) を含むものは自動マージせず、LINE で知らせて人がマージする。
+
+**マージの後**: 写しがマージを含んだら (`landed`) 次の照合を待ち、対象の Finding が lockfile の側で閉じたら `verified`。
+閉じなければ `not_resolved` として知らせる。本番イメージにも同じ版が入っているサービスは、
+デプロイ (main へのマージで `.github/workflows/deploy.yml`) して `make detection-images` で SBOM を作り直すまで、
+Finding は本番イメージの側で開いたまま残る (日次まとめに「SBOM の更新待ち」として出る)。
+
+| 通知 | いつ |
+|---|---|
+| すぐ (LINE) | 更新・差分検査・CI・PR の作成で止まった / P1 の修正 PR を作った (人がマージする) / マージ後も Finding が閉じない / 自動デプロイが失敗した / トークンの期限まで 30・14・7・3・1 日を切った |
+| 日次まとめ | 前回からの PR・マージ・デプロイ・止まった件数、進行中の改修、SBOM の更新待ち |
+
+**有効にする**: `config/remediation.env` に `REMEDIATION_GITHUB_TOKEN` (fine-grained PAT: 対象リポジトリだけ、
+Contents・Pull requests の Read and write、Actions・Commit statuses の Read。Workflows は付けない) を書く。
+`REMEDIATION_OPEN_PRS=true` にするまでは差分検査まで行って PR は作らない (`dry_run`。`make remediation-status` で中身を見られる)。
+リポジトリ側は自動マージを許可し、main のブランチ保護で `CI result` などを必須のチェックにしておく。
 
 ## A2・B への読み取り契約
 

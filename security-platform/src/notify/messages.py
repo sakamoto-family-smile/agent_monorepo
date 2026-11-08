@@ -17,6 +17,7 @@ from sqlalchemy.exc import OperationalError
 
 from ..common.timeutil import parse_iso, to_iso
 from ..detection.versions import version_key
+from . import remediation as remediation_msg
 from .health import Check
 
 DIGEST_LIST_LIMIT = 10
@@ -201,7 +202,7 @@ def _group_line(name: str, fs: list[FindingRow]) -> str:
 
 def digest(
     engine: Engine, since: datetime, now: datetime, checks: list[Check], tz: ZoneInfo,
-    intel: Engine | None = None,
+    intel: Engine | None = None, remediation: Engine | None = None,
 ) -> str:
     open_rows = load_findings(engine, "state = 'open'")
     counts = {p: sum(1 for f in open_rows if f.priority == p) for p in ("P1", "P2", "P3", "P4")}
@@ -237,6 +238,7 @@ def digest(
         if len(warnings) > DIGEST_LIST_LIMIT:
             lines.append(f"  ほか {len(warnings) - DIGEST_LIST_LIMIT} 件")
     lines += _claims_section(intel, since)
+    lines += remediation_msg.digest_section(remediation, since)
     if expiring:
         lines.append("■ 7 日以内に切れる例外")
         lines += [f"・{a} ({s}) {_date(parse_iso(e), tz)}" for a, s, e in expiring]
