@@ -9,7 +9,7 @@ PR まで自動で進める (B) ためのフレームワーク。まずはロー
 | L0 | `data/` レイアウト、SQLite 3 ファイル + Alembic、イベント (outbox + JSONL)、dbt 雛形、`services.yaml`、docker compose | ✅ |
 | L1 | A1: OSV 全エコシステム (全量 + 差分)、CISA KEV、FIRST EPSS、名寄せ、変化検知、ブートストラップ。分析: 鮮度・リードタイム・エコシステム別・KEV カバレッジ | ✅ |
 | L2 | A2: lockfile・本番イメージ (OS パッケージ・ランタイム本体・同梱ライブラリ) の照合と優先度、例外 (誤検知・リスク受容)。通知: P1 の即時通知・日次まとめ (LINE)、GitHub Issues (private リポジトリ)、取得停止のアラート | ✅ |
-| L3 | B: git worktree での決定的更新、差分検査、PR 作成 | ⬜ |
+| L3 | B: 依存の決定的更新、差分検査、PR 作成・自動マージ | 🚧 origin/main の写し (detection の照合の対象) まで |
 | L4 | A1 の非構造ソース: IPA・JPCERT 注意喚起、ベンダー告知、セキュリティニュース、VulnerableMCP。LLM で根拠付き抽出し、一次情報が見つからないものは `unconfirmed` として照合に使わない | 🚧 フィードの取得・LLM での抽出・確度の判定と照合・早期警告まで (PR1〜PR3) |
 
 ## アーキテクチャ
@@ -47,9 +47,11 @@ flowchart LR
     DDB[("data/detection.db<br/>Finding・events")]
 
     subgraph REM["remediation サービス — B (L3)"]
-      WK["決定的更新<br/>git worktree"] --> GUARD["差分検査"]
+      MIR["origin/main の写し<br/>10 分ごと"]
+      WK["決定的更新"] --> GUARD["差分検査"]
     end
     RDB[("data/remediation.db")]
+    MAIN[("data/remediation/main<br/>origin/main の写し")]
 
     subgraph NTF["notify サービス (外部と通信するのはここだけ)"]
       NEV["P1 の即時通知"]
@@ -66,7 +68,7 @@ flowchart LR
     EVJ[("data/events/*.jsonl<br/>イベントの保管")]
   end
 
-  REPO["モノレポの lockfile<br/>config/services.yaml"]
+  REPO["GitHub の main<br/>lockfile・config/services.yaml"]
   IMGSBOM[("data/sbom/images/<br/>本番イメージの SBOM<br/>make detection-images (ホスト)")]
   HOSTINV[("data/sbom/hosts/<br/>開発 PC のツール一覧<br/>launchd で 1 日 1 回 (ホスト)")]
   NOTIFY["LINE (専用 Bot)<br/>GitHub Issues (private)"]
@@ -82,7 +84,11 @@ flowchart LR
   IDB --> EVJ
   NEWS --> COL
 
-  REPO --> SBOM
+  REPO -- "tarball" --> MIR
+  MIR --> MAIN
+  MIR -- "job_runs" --> RDB
+  MAIN --> SBOM
+  RDB -- "写しの更新" --> NHL
   IDB -- "v_advisories・v_report_claims (読み取り専用)" --> MAT
   IDB -. "advisory.changed" .-> MAT
   TRI --> DDB
@@ -97,6 +103,7 @@ flowchart LR
   DDB -. "finding.remediate" .-> WK
   GUARD -.-> PR
   WK -.-> RDB
+  MAIN -.-> WK
 
   IDB -- "ATTACH (読み取り専用)" --> DBT
   DDB -.-> DBT
@@ -105,8 +112,7 @@ flowchart LR
   DUCK --> UI
 
   classDef planned stroke-dasharray: 5 5
-  class WK,GUARD,RDB,PR planned
-  style REM stroke-dasharray: 5 5
+  class WK,GUARD,PR planned
 ```
 
 境界の決まりは 3 つ。
@@ -224,7 +230,8 @@ Docker Desktop の VM をまたいで同じ WAL ファイルを共有するこ�
 | 抽出の受け渡し | `data/llm/in/` `data/llm/out/` `data/llm/state/` | in は intel、out・state は extractor | 記事 1 件ごとの依頼と結果 (JSON)。intel が取り込んだら消す。state はその日の回数・止まった理由 |
 | | `data/detection.db` | detection のみ | Finding・SBOM・例外・早期警告 (`early_warnings`)・照合の実行記録・イベント |
 | | `data/notify.db` | notify のみ | イベントのカーソル・送った通知・監視項目の状態・Issue の対応 |
-| | `data/remediation.db` | (L3) | スキーマのみ作成済み |
+| | `data/remediation.db` | remediation のみ | ジョブの実行記録 (写しの更新)。改修の記録 (`runs`・`run_steps`) は L3 の後半から |
+| main の写し | `data/remediation/main` → `snapshots/<sha>/` | remediation | origin/main のコミットの中身 (GitHub の tarball)。detection はこれを照合する。1 つ前の世代まで残す |
 | SBOM | `data/sbom/images/<service_id>.json` + `blobs/sha256-<digest>.cdx.json` | `make detection-images` (ホスト) | 本番イメージの SBOM (CycloneDX)。ダイジェストごとに 1 つ、参照されなくなったら消す |
 | ツール一覧 | `data/sbom/hosts/<host_id>.json` | `make detection-host` (ホスト、launchd) | 開発 PC のツール一覧 (独自の JSON)。本人だけが読める権限 (0600) で書く。過去の版は detection.db の `host_components` |
 | イベント | 各 DB の `events` + `data/events/type=*/dt=*/<producer>.jsonl` | 発行側 | 受信側は発行側 DB を読み取り専用で開き、自分の `event_cursors` で位置を持つ |
@@ -382,7 +389,10 @@ KEV にだけ載っている CVE (主に製品の脆弱性) は、パッケー�
 ## A2 の照合 (lockfile・本番イメージ・開発 PC)
 
 `detection` サービスが 1 時間ごとに `config/services.yaml` の全サービスを照合する (`src/detection/`)。
-モノレポは `/repo` に読み取り専用でマウントし、コンテナは外部と通信しない (`network_mode: none`)。
+照合するモノレポは手元の作業コピーではなく、remediation が 10 分ごとに更新する origin/main の写し
+(`data/remediation/main`) にする。手元がブランチや古い main のままでも照合が main (= 本番) とずれず、
+自動改修の PR がマージされれば次の照合で Finding が閉じる。コンテナは外部と通信しない (`network_mode: none`)。
+手元の変更を試しに照合したいときは `REPO_DIR` / `SERVICES_PATH` を上書きして `make detection-scan` する。
 
 1. lockfile (`uv.lock` / `package-lock.json` v2 以降) と本番イメージの SBOM からコンポーネントを作る。
    lockfile では本番で読み込まれるもの (`runtime`) と、開発用の依存からしか届かないもの (`dev`) を分ける。
@@ -556,9 +566,8 @@ DuckDB の `sqlite` 拡張を使う。初回に extensions.duckdb.org から自�
 
 - 取得停止のアラートは notify が LINE に送るが、Mac のスリープや Docker Desktop の停止では notify 自体も止まる。
   そちらは引き続き `HEALTHCHECK_PING_BASE` の外部監視 (ping の途絶) で受ける (notify のジョブも `sec-notify_*` に ping する)
-- detection はモノレポの作業ツリーをそのまま読む。作業ツリーで別のブランチに切り替えている間に照合が走ると、
-  そのブランチの lockfile で照合され、Finding が一時的に解消・再発することがある (P1 なら通知が飛ぶ)。
-  作業は別の git worktree で行う
+- detection が照合するのは origin/main の写し。main にマージするまで、ブランチでの依存の更新は Finding に反映されない。
+  写しの更新 (remediation) が止まると古い main を照合し続けるので、notify が `remediation:mirror` として知らせる
 - NVD・JVN・ランタイムのリリース情報・OneCRL は未対応
 - L4 の確度の判定は、記事のリンク先 (一次情報) を取りに行って確かめることはしない。公式の告知と ID 付きの調査報告だけを `confirmed` にする。
   公式の告知から LLM が誤って読んだ主張も、根拠の 1 文が記事にあれば照合に使われる (P1 になり得る)。誤りなら例外 (`false_positive`) で閉じる

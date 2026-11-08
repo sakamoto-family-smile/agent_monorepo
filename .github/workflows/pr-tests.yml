@@ -161,6 +161,7 @@ jobs:
               "security-platform/src/common/":    "tests/common/ tests/intel/ tests/analytics/",
               "security-platform/src/intel/":     "tests/intel/",
               "security-platform/src/analytics/": "tests/analytics/",
+              "security-platform/src/remediation/": "tests/remediation/",
               "security-platform/migrations/":    "tests/common/ tests/intel/",
               "security-platform/dbt/":           "tests/analytics/",
               "security-platform/config/services.yaml": "tests/common/",

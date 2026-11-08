@@ -97,6 +97,14 @@ class Settings(BaseSettings):
     notify_digest_hour: int = 9  # 日次まとめを送る時刻 (notify_timezone の時)
     notify_timezone: str = "Asia/Tokyo"
 
+    # B 自動改修 (remediation サービス)。トークンは config/remediation.env から remediation コンテナにだけ渡す
+    remediation_repo: str = "sakamoto-family-smile/agent_monorepo"  # owner/repo
+    remediation_branch: str = "main"
+    remediation_github_token: str = ""  # fine-grained PAT (対象リポジトリだけ)
+    # origin/main の写し (data/remediation/main)。detection はこれを照合する
+    remediation_mirror_interval_minutes: int = 10
+    remediation_mirror_max_mb: int = 200  # tarball の上限 (超えたら取り込まない)
+
     # 分析 DB (DuckDB) の再構築間隔
     analytics_interval_minutes: int = 60
 

@@ -29,7 +29,15 @@ from ..common.events import Consumer, Event
 from ..common.timeutil import parse_iso, to_iso, utc_now
 from . import issues, messages
 from .channels import GitHubIssues, LineChannel
-from .health import Check, detection_checks, extractor_checks, feed_checks, host_checks, intel_checks
+from .health import (
+    Check,
+    detection_checks,
+    extractor_checks,
+    feed_checks,
+    host_checks,
+    intel_checks,
+    remediation_checks,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +58,7 @@ class NotifySettings:
     sbom_max_age: timedelta
     intel_schedule: dict[str, timedelta]
     host_max_age: timedelta = timedelta(hours=48)
+    mirror_interval: timedelta = timedelta(minutes=10)
 
 
 def is_p1_alert(event: Event) -> bool:
@@ -64,6 +73,7 @@ class NotifyPipeline:
         self, engine: Engine, detection: Callable[[], Engine | None], intel: Callable[[], Engine | None],
         sbom_dir: Path, line: LineChannel, github: GitHubIssues, cfg: NotifySettings,
         hosts_dir: Path | None = None, llm_state_dir: Path | None = None,
+        remediation: Callable[[], Engine | None] | None = None,
     ) -> None:
         self.engine = engine
         self._detection = detection  # 読み取り専用。まだ無ければ None (起動順に依存しない)
@@ -71,6 +81,7 @@ class NotifyPipeline:
         self.sbom_dir = sbom_dir
         self.hosts_dir = hosts_dir
         self.llm_state_dir = llm_state_dir
+        self._remediation = remediation
         self.line = line
         self.github = github
         self.cfg = cfg
@@ -179,7 +190,8 @@ class NotifyPipeline:
         intel = self._intel()
         return intel_checks(intel, self.cfg.intel_schedule, now) + feed_checks(intel, now) + extractor_checks(
             intel, self.llm_state_dir, now) + detection_checks(
-            self._detection(), self.cfg.scan_interval, self.sbom_dir, self.cfg.sbom_max_age, now) + hosts
+            self._detection(), self.cfg.scan_interval, self.sbom_dir, self.cfg.sbom_max_age, now) + hosts \
+            + (remediation_checks(self._remediation(), self.cfg.mirror_interval, now) if self._remediation else [])
 
     def run_health(self) -> None:
         with self._run(JOB_HEALTH) as detail:
