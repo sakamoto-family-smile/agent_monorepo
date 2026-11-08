@@ -327,8 +327,8 @@ Cloud Run の image を差し替えます。WIF の Pool がここにあるの�
 
 セットアップ:
 
-1. `make tf-apply`（`enable_wif = true` のまま。Provider に `attribute.job_workflow_ref` が足され、`sa-deployer` ができる）
-2. `terraform output -json wif_setup_summary` の `DEPLOY_SA` を GitHub の Variables に `DEPLOY_SA` として登録
+1. `make tf-apply-deployer`（デプロイ SA と WIF Provider の属性だけを apply。全体の `make tf-apply` は tfvars と本番の差分まで変えてしまうので使わない）
+2. `make tf-output-wif` で出る `DEPLOY_SA` を GitHub の Variables に `DEPLOY_SA` として登録
 3. GitHub の `Settings > Environments` に `production` を作り、Deployment branches を `main` だけにする
 
 `DEPLOY_SA` が未設定のあいだはデプロイのワークフローはスキップされる。
