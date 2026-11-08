@@ -1,5 +1,5 @@
 # Cloud Run service: line-bot-service。
-# image push 後に `terraform apply -var line_bot_image=...` で deploy。
+# 初回は image push 後に `terraform apply -var line_bot_image=...` で作る。以降の image 更新は deploy.yml。
 # `line_bot_image=""` の初回 apply ではこの service を作らない（chicken-and-egg 回避）。
 
 locals {
@@ -190,6 +190,14 @@ resource "google_cloud_run_v2_service" "line_bot" {
   traffic {
     type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
     percent = 100
+  }
+
+  lifecycle {
+    # image は main へのマージで deploy.yml が `gcloud run ... update --image` で差し替える。
+    # terraform は image の差分を無視する (apply で古い image に戻さないため)。
+    ignore_changes = [
+      template[0].containers[0].image,
+    ]
   }
 
   depends_on = [
