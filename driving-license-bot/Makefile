@@ -20,6 +20,7 @@ CLOUDSQL_CONNECTION ?= $(GOOGLE_CLOUD_PROJECT):$(REGION):$(CLOUDSQL_INSTANCE)
 
 .PHONY: help install lint format test check run docker-build docker-run \
 	tf-init tf-plan tf-apply tf-destroy tf-fmt tf-validate tf-output-wif \
+	tf-plan-deployer tf-apply-deployer _tf-init-deployer \
 	bootstrap teardown teardown-app image-build secrets-push \
 	cloudsql-proxy cloudsql-init cloudsql-verify \
 	vertex-verify batch-trigger workflow-trigger \
@@ -95,8 +96,37 @@ tf-apply:  ## terraform apply
 tf-destroy:  ## terraform destroy（確認あり）
 	cd $(TF_DIR) && terraform destroy
 
+# 自動デプロイ用 SA (terraform/deploy.tf) と WIF Provider の属性だけを apply する。
+# 全体の apply は tfvars と本番の差分 (min instances・削除保護など) まで巻き込むので使わない。
+DEPLOYER_TARGETS := \
+	-target=google_iam_workload_identity_pool_provider.github \
+	-target=google_service_account.deployer \
+	-target=google_service_account_iam_member.deployer_wif \
+	-target=google_artifact_registry_repository_iam_member.deployer_push \
+	-target=google_cloud_run_v2_service_iam_member.deployer_service \
+	-target=google_cloud_run_v2_job_iam_member.deployer_job \
+	-target=google_project_iam_member.deployer_run_viewer \
+	-target=google_service_account_iam_member.deployer_act_as
+DEPLOYER_VARS = -var project_id=$(GOOGLE_CLOUD_PROJECT) -var enable_wif=true
+TFSTATE_BUCKET ?= $(GOOGLE_CLOUD_PROJECT)-driving-license-bot-tfstate
+
+_tf-init-deployer: _require_project
+	@cd $(TF_DIR) && if [ ! -f backend.tf ]; then \
+		printf 'terraform {\n  backend "gcs" {\n    bucket = "%s"\n    prefix = "terraform/state"\n  }\n}\n' "$(TFSTATE_BUCKET)" > backend.tf; \
+		echo "[deployer] backend.tf を作成 (bucket=$(TFSTATE_BUCKET))"; \
+	fi
+	cd $(TF_DIR) && GOOGLE_OAUTH_ACCESS_TOKEN=$$(gcloud auth print-access-token) terraform init -input=false
+
+tf-plan-deployer: _tf-init-deployer  ## 自動デプロイ用 SA だけの plan
+	cd $(TF_DIR) && GOOGLE_OAUTH_ACCESS_TOKEN=$$(gcloud auth print-access-token) \
+		terraform plan -input=false $(DEPLOYER_TARGETS) $(DEPLOYER_VARS)
+
+tf-apply-deployer: _tf-init-deployer  ## 自動デプロイ用 SA だけを apply（確認あり）
+	cd $(TF_DIR) && GOOGLE_OAUTH_ACCESS_TOKEN=$$(gcloud auth print-access-token) \
+		terraform apply -input=false $(DEPLOYER_TARGETS) $(DEPLOYER_VARS)
+
 tf-output-wif:  ## WIF setup 用に GitHub repo Variables にコピペする値を表示
-	@cd $(TF_DIR) && terraform output -json wif_setup_summary 2>/dev/null \
+	@cd $(TF_DIR) && GOOGLE_OAUTH_ACCESS_TOKEN=$$(gcloud auth print-access-token) terraform output -json wif_setup_summary 2>/dev/null \
 		| jq -r 'to_entries[] | "\(.key)=\(.value)"' \
 		|| echo "wif outputs not available. enable_wif=true で apply してください。"
 
