@@ -18,6 +18,8 @@ config/vuln.env
 config/notify.env
 # L4: 記事の抽出に使う LLM のトークン (CLAUDE_CODE_OAUTH_TOKEN など)
 config/llm.env
+# L5: 自動改修が GitHub に PR を作る PAT
+config/remediation.env
 
 # 脆弱性対応のデータ。生データ・osv-scanner DB は再取得できるが、次は再構築できない:
 # 運用 DB の履歴 (advisory_history / events / source_runs)、分析 DB のスナップショット (history.snp_*)、
