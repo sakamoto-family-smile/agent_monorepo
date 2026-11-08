@@ -46,6 +46,16 @@ class DataPaths:
         return self.root / "llm"
 
     @property
+    def remediation_dir(self) -> Path:
+        """B 自動改修 (remediation が書く)。main は origin/main の写し (snapshots/<sha> へのリンク)。"""
+        return self.root / "remediation"
+
+    @property
+    def main_mirror_dir(self) -> Path:
+        """origin/main の写し。detection はこのモノレポを照合する (手元の作業コピーではなく)。"""
+        return self.remediation_dir / "main"
+
+    @property
     def duckdb_path(self) -> Path:
         return self.root / "security.duckdb"
 
@@ -56,7 +66,8 @@ class DataPaths:
 
     def ensure(self) -> None:
         for d in (self.root, self.raw_dir, self.events_dir, self.osv_db_dir, self.sbom_images_dir,
-                  self.sbom_hosts_dir, self.llm_dir / "in", self.llm_dir / "out", self.llm_dir / "state"):
+                  self.sbom_hosts_dir, self.llm_dir / "in", self.llm_dir / "out", self.llm_dir / "state",
+                  self.remediation_dir):
             d.mkdir(parents=True, exist_ok=True)
 
 

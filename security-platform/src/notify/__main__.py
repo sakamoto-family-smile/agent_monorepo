@@ -59,9 +59,11 @@ def build_pipeline() -> NotifyPipeline:
             timedelta(minutes=settings.detection_scan_interval_minutes),
             timedelta(days=settings.image_sbom_max_age_days), schedule(),
             timedelta(hours=settings.host_inventory_max_age_hours),
+            timedelta(minutes=settings.remediation_mirror_interval_minutes),
         ),
         paths.sbom_hosts_dir,
         paths.llm_dir / "state",
+        readonly("remediation"),  # type: ignore[arg-type]
     )
 
 

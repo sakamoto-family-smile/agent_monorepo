@@ -6,6 +6,7 @@
 - detection:scan: 照合の最終成功が照合間隔の STALE_FACTOR 倍より古い
 - sbom:<service>: 本番イメージの SBOM (make detection-images) が IMAGE_SBOM_MAX_AGE_DAYS より古い
 - host:<host_id>: 開発 PC のツール一覧 (launchd の make detection-host) が HOST_INVENTORY_MAX_AGE_HOURS より古い
+- remediation:mirror: origin/main の写し (detection が照合する) の最終更新が更新間隔の STALE_FACTOR 倍より古い
 
 どれも各サービスの DB・ファイルを読み取り専用で見るだけ。状態が変わったときの通知は pipeline が行う。
 """
@@ -161,3 +162,17 @@ def host_checks(hosts_dir: Path, max_age: timedelta, now: datetime) -> list[Chec
         out.append(Check(key, now - generated <= max_age,
                          f"ツール一覧の作成 {hours:.0f} 時間前 (launchd の make detection-host)"))
     return out
+
+
+def remediation_checks(engine: Engine | None, mirror_interval: timedelta, now: datetime) -> list[Check]:
+    """origin/main の写しの新しさ。止まると detection は古い main を照合し続ける (自動改修の結果も反映されない)。"""
+    key = "remediation:mirror"
+    if engine is None:
+        return [Check(key, False, "remediation.db がありません (remediation サービス)")]
+    try:
+        last = _last(engine, "SELECT MAX(finished_at) FROM job_runs WHERE job = :j AND status = 'success'",
+                     {"j": "mirror"})
+    except OperationalError as e:
+        return [Check(key, False, f"remediation.db を読めません ({e.orig})")]
+    ok = last is not None and now - last < mirror_interval * STALE_FACTOR
+    return [Check(key, ok, f"main の写し (照合の対象): {_age(now, last)}")]
