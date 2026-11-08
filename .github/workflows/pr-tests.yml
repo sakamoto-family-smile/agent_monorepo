@@ -946,3 +946,37 @@ jobs:
         # NOTE: WIF 認証込みの `terraform plan` ジョブは別 PR で対応。
         #       fujisawa-platform と同じ事情。
 
+
+  # ── 全体の結果 (ブランチ保護の必須チェックはこの 1 つにする) ────────────────
+  # 変更の無いモジュールのジョブは skipped になる。失敗・取り消しが 1 つでもあれば落とす。
+  # ジョブを足したら needs にも足す (足し忘れると、そのジョブが落ちても自動マージされる)。
+  ci-result:
+    name: CI result
+    if: always()
+    needs:
+      - detect-changes
+      - test-security-platform
+      - test-kanie-lab-agent
+      - test-stock-analysis-agent
+      - test-lifeplanner-agent
+      - test-hotcook-agent
+      - test-piyolog-analytics
+      - test-tech-news-agent
+      - test-llm-client
+      - test-edinet-client
+      - test-analytics-platform
+      - test-driving-license-bot
+      - terraform-driving-license-bot
+      - terraform-plan-driving-license-bot
+      - test-fujisawa-platform
+      - terraform-fujisawa-platform
+      - test-fujisawa-info-bot
+      - terraform-fujisawa-info-bot
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any job failed or was cancelled
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          if echo "$RESULTS" | grep -qE '"(failure|cancelled)"'; then exit 1; fi
