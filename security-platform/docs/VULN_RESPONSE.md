@@ -653,7 +653,9 @@ DuckDB の `sqlite` 拡張を使う。初回に extensions.duckdb.org から自�
 - 既存の `src/collector/` / `src/analyzer/` / `src/notifier/` (data/security.db) は当面そのまま残す。
   A1・A2・notify と役割が重なるので、使っていないことを確かめてから整理する
 - A2 のイメージ照合は Debian の OS パッケージと Python・Node.js の本体まで。Ubuntu・Alpine・Go などのバイナリに組み込まれたものは照合しない
-- 本番イメージの SBOM はホストの `make detection-images` で作る (自動では更新しない)。デプロイ後に実行し忘れると、7 日後から照合時に警告が出る
+- 本番イメージの SBOM はホストの `make detection-images` で作る (自動では更新しない)。デプロイ後に実行し忘れると、7 日後から照合時に警告が出る。
+  piyolog-analytics・driving-license-bot・fujisawa-info-bot は main へのマージで自動デプロイされる (`.github/workflows/deploy.yml`) ので、
+  マージ後の SBOM の更新を忘れやすい
 - 開発 PC で照合できるのは OSV にあるもの (npm・PyPI・VS Code / Open VSX の拡張) だけ。Claude Code のプラグイン・スキル、
   ブラウザ拡張、JetBrains のプラグイン、Homebrew は照合しない。OSV への登録より早い告知 (ベンダー・ニュース) は L4 で扱う
 - 開発 PC で 48 時間以上ツール一覧を作っていない (旅行などで PC を使っていない) と、取得停止として通知が来る

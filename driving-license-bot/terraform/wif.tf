@@ -41,6 +41,8 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "google.subject"       = "assertion.sub"
     "attribute.repository" = "assertion.repository"
     "attribute.ref"        = "assertion.ref"
+    # deploy.tf: デプロイ SA は main 上の deploy.yml からだけ借りられるようにする
+    "attribute.job_workflow_ref" = "assertion.job_workflow_ref"
   }
 
   # 重要: repository でフィルタする（他リポジトリからの不正な OIDC を弾く）
