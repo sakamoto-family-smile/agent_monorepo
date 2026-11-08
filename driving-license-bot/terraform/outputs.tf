@@ -142,5 +142,6 @@ output "wif_setup_summary" {
     TF_PLAN_SA     = google_service_account.tf_plan[0].email
     TFSTATE_BUCKET = var.tfstate_bucket
     GCP_PROJECT_ID = var.project_id
+    DEPLOY_SA      = google_service_account.deployer[0].email
   } : null
 }

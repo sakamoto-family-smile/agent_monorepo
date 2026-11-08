@@ -153,6 +153,14 @@ resource "google_cloud_run_v2_job" "batch" {
     }
   }
 
+  lifecycle {
+    # image は main へのマージで deploy.yml が `gcloud run ... update --image` で差し替える。
+    # terraform は image の差分を無視する (apply で古い image に戻さないため)。
+    ignore_changes = [
+      template[0].template[0].containers[0].image,
+    ]
+  }
+
   depends_on = [
     google_project_service.run,
     google_project_service.aiplatform,

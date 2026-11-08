@@ -1,0 +1,193 @@
+name: Deploy
+
+# main へのマージで、変更のあったサービスを本番 (Cloud Run) へデプロイする。
+#
+# するのは「image を build → smoke → Artifact Registry へ push → Cloud Run の image を差し替える」だけ。
+# env・secret・実行 SA などの設定は各サービスの terraform / デプロイスクリプトの管轄で、ここでは触らない。
+# Cloud Run は新しいリビジョンが起動しないと切り替えないので、起動に失敗したら前の版のまま残る。
+#
+# GCP 側の準備: driving-license-bot/terraform/deploy.tf (WIF とデプロイ SA)。
+# 必須 GitHub repo Variables:
+#   WIF_PROVIDER    既存 (terraform plan と共用)
+#   DEPLOY_SA       デプロイ SA の email (`terraform output wif_setup_summary` の DEPLOY_SA)
+#   GCP_PROJECT_ID  既存
+# DEPLOY_SA が未設定ならデプロイはスキップする。
+#
+# 対象を増やすときは SERVICES と deploy.tf の local.deploy_targets を両方直す。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 手動でデプロイするサービス
+        type: choice
+        options: [piyolog-analytics, driving-license-bot, fujisawa-info-bot]
+
+permissions:
+  contents: read
+
+env:
+  REGION: asia-northeast1
+  # id: { paths: 変わったらデプロイするディレクトリ (image に COPY されるもの),
+  #       repository/image: Artifact Registry, services/jobs: 差し替える Cloud Run }
+  SERVICES: |
+    {
+      "piyolog-analytics": {
+        "paths": ["piyolog-analytics/", "analytics-platform/"],
+        "dockerfile": "piyolog-analytics/Dockerfile",
+        "repository": "piyolog-analytics", "image": "piyolog-analytics",
+        "smoke": "cd /app && DATABASE_URL=sqlite+aiosqlite:////tmp/smoke.db alembic upgrade head",
+        "services": ["piyolog-analytics"], "jobs": []
+      },
+      "driving-license-bot": {
+        "paths": ["driving-license-bot/", "analytics-platform/", "llm-client/"],
+        "dockerfile": "driving-license-bot/Dockerfile",
+        "repository": "driving-license-bot", "image": "line-bot",
+        "smoke": "cd /app && python -c 'import app.main, scripts.run_batch, review_admin_ui.main'",
+        "services": ["driving-license-bot-line-bot", "driving-license-bot-admin-ui"],
+        "jobs": ["driving-license-bot-batch"]
+      },
+      "fujisawa-info-bot": {
+        "paths": ["fujisawa-info-bot/", "fujisawa-platform/", "llm-client/"],
+        "dockerfile": "fujisawa-info-bot/Dockerfile",
+        "repository": "fujisawa-info-bot", "image": "fujisawa-info-bot",
+        "smoke": "cd /app/fujisawa-info-bot && python -c 'import app.main'",
+        "services": ["fujisawa-info-bot"], "jobs": []
+      }
+    }
+
+jobs:
+  plan:
+    name: Select services to deploy
+    runs-on: ubuntu-latest
+    if: vars.DEPLOY_SA != ''
+    outputs:
+      targets: ${{ steps.select.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select services
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          MANUAL: ${{ inputs.service }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, re, subprocess
+
+          services = json.loads(os.environ["SERVICES"])
+          if os.environ["EVENT"] == "workflow_dispatch":
+              targets = [os.environ["MANUAL"]]
+          else:
+              before = os.environ["BEFORE"]
+              if not before or set(before) == {"0"}:
+                  before = "HEAD^"
+              changed = subprocess.run(
+                  ["git", "diff", "--name-only", before, "HEAD"],
+                  check=True, capture_output=True, text=True,
+              ).stdout.split()
+              # image の中身に関係しないもの (テスト・文書・IaC) だけの変更ではデプロイしない
+              ignore = re.compile(r"(^|/)(tests?|docs|terraform)/|\.md$|\.env\.example$")
+              changed = [f for f in changed if not ignore.search(f)]
+              print("runtime files changed:", *changed, sep="\n  ")
+              targets = [
+                  sid for sid, s in services.items()
+                  if any(f.startswith(p) for f in changed for p in s["paths"])
+              ]
+          print("targets:", targets)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"targets={json.dumps(targets)}\n")
+          EOF
+
+  deploy:
+    name: Deploy / ${{ matrix.service }}
+    needs: plan
+    if: needs.plan.outputs.targets != '[]'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write   # WIF で OIDC token 発行
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.plan.outputs.targets) }}
+    # 同じサービスのデプロイは順番に (古い commit が後から上書きしないよう、待っている古い run は取り消す)
+    concurrency:
+      group: deploy-${{ matrix.service }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve target
+        id: target
+        env:
+          SERVICE: ${{ matrix.service }}
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          s = json.loads(os.environ["SERVICES"])[os.environ["SERVICE"]]
+          sha = os.environ["GITHUB_SHA"][:7]
+          image = (f"{os.environ['REGION']}-docker.pkg.dev/{os.environ['PROJECT']}"
+                   f"/{s['repository']}/{s['image']}:{sha}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"image={image}\n")
+              out.write(f"dockerfile={s['dockerfile']}\n")
+              out.write(f"smoke={s['smoke']}\n")
+              out.write(f"services={' '.join(s['services'])}\n")
+              out.write(f"jobs={' '.join(s['jobs'])}\n")
+          EOF
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      - name: Build
+        env:
+          DOCKER_BUILDKIT: "1"
+          IMAGE: ${{ steps.target.outputs.image }}
+          DOCKERFILE: ${{ steps.target.outputs.dockerfile }}
+        run: docker build --file "$DOCKERFILE" --tag "$IMAGE" .
+
+      - name: Smoke
+        env:
+          IMAGE: ${{ steps.target.outputs.image }}
+          SMOKE: ${{ steps.target.outputs.smoke }}
+        run: docker run --rm --entrypoint sh "$IMAGE" -c "$SMOKE"
+
+      - name: Push
+        env:
+          IMAGE: ${{ steps.target.outputs.image }}
+        run: |
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker push "$IMAGE"
+
+      - name: Update Cloud Run
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          IMAGE: ${{ steps.target.outputs.image }}
+          RUN_SERVICES: ${{ steps.target.outputs.services }}
+          RUN_JOBS: ${{ steps.target.outputs.jobs }}
+        run: |
+          set -euo pipefail
+          for name in $RUN_SERVICES; do
+            echo "::group::service $name"
+            # 新しいリビジョンが起動するまで待つ。起動しなければ失敗し、トラフィックは前の版に残る
+            gcloud run services update "$name" --project="$PROJECT" --region="$REGION" \
+              --image="$IMAGE" --quiet
+            echo "::endgroup::"
+          done
+          for name in $RUN_JOBS; do
+            echo "::group::job $name"
+            gcloud run jobs update "$name" --project="$PROJECT" --region="$REGION" \
+              --image="$IMAGE" --quiet
+            echo "::endgroup::"
+          done

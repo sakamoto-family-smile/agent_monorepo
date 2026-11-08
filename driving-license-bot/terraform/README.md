@@ -313,6 +313,27 @@ vars が未設定 / 空ならジョブごとスキップ（PR は通る）。
 - write 権限は持たないため、悪意ある PR でも resource 作成・削除は不可能
 - `terraform apply` は引き続き手元の `make tf-apply` でのみ実行する運用
 
+### main へのマージで自動デプロイ（`deploy.tf`）
+
+`.github/workflows/deploy.yml` が main へのマージのたびに、変更のあったサービス
+（piyolog-analytics / driving-license-bot / fujisawa-info-bot）の image を build して
+Cloud Run の image を差し替えます。WIF の Pool がここにあるので、他サービスの分の
+デプロイ SA (`sa-deployer`) もこの terraform で持ちます。
+
+- 借りられるのは **main 上の `deploy.yml` だけ**（`attribute.job_workflow_ref` で縛る。PR ブランチ・他のワークフローからは不可）
+- 権限は対象の Artifact Registry への push、対象の Cloud Run service / job の更新、対象の実行 SA の actAs のみ
+- env・secret などの設定は変えない（各 terraform / デプロイスクリプトの管轄のまま）。
+  Cloud Run の image は terraform では `ignore_changes` にしてあり、apply で古い image に戻らない
+
+セットアップ:
+
+1. `make tf-apply-deployer`（デプロイ SA と WIF Provider の属性だけを apply。全体の `make tf-apply` は tfvars と本番の差分まで変えてしまうので使わない）
+2. `make tf-output-wif` で出る `DEPLOY_SA` を GitHub の Variables に `DEPLOY_SA` として登録
+3. GitHub の `Settings > Environments` に `production` を作り、Deployment branches を `main` だけにする
+
+`DEPLOY_SA` が未設定のあいだはデプロイのワークフローはスキップされる。
+対象を増やすときは `deploy.tf` の `local.deploy_targets` と `deploy.yml` の `SERVICES` を両方直す。
+
 ### 撤去
 
 ```bash
