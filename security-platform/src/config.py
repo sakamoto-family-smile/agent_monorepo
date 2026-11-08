@@ -104,6 +104,13 @@ class Settings(BaseSettings):
     # origin/main の写し (data/remediation/main)。detection はこれを照合する
     remediation_mirror_interval_minutes: int = 10
     remediation_mirror_max_mb: int = 200  # tarball の上限 (超えたら取り込まない)
+    # 依存の更新 PR。false のあいだは差分検査まで行い、PR は作らない (dry_run)
+    remediation_open_prs: bool = False
+    remediation_min_priority: str = "P3"  # この優先度までの Finding を直す (P1 は自動マージせず人がマージする)
+    remediation_plan_interval_minutes: int = 60
+    remediation_token_warn_days: int = 30  # トークンの期限がこれを切ったら知らせる
+    # updater (隔離した更新役) の外への通信は egress プロキシ経由でここだけ
+    remediation_egress_allow: str = "pypi.org,files.pythonhosted.org"
 
     # 分析 DB (DuckDB) の再構築間隔
     analytics_interval_minutes: int = 60

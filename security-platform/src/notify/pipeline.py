@@ -24,10 +24,12 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import Connection, Engine, text
+from sqlalchemy.exc import OperationalError
 
 from ..common.events import Consumer, Event
 from ..common.timeutil import parse_iso, to_iso, utc_now
 from . import issues, messages
+from . import remediation as remediation_msg
 from .channels import GitHubIssues, LineChannel
 from .health import (
     Check,
@@ -141,47 +143,77 @@ class NotifyPipeline:
     # ── P1 の即時通知 ──────────────────────────────────────────────────────
     def run_events(self) -> None:
         with self._run(JOB_EVENTS) as detail:
-            detection = self._detection()
-            if detection is None:
-                detail["skipped"] = "detection.db がありません"
-                return
-            consumer = Consumer(detection, self.engine, "detection")
-            if self._needs_baseline(consumer):
-                # 初回 (と detection.db を作り直したとき) は今までのイベントを通知しない
-                # (導入時や作り直しで、過去の P1 をまとめて送らない)
-                with detection.connect() as conn:
-                    head = conn.execute(text("SELECT COALESCE(MAX(seq), 0) FROM events")).scalar_one()
-                consumer.ack(head)
-                detail["baseline"] = head
-                return
-            sent = warned = 0
-            while batch := consumer.fetch((*FINDING_EVENTS, WARNING_EVENT)):
-                alerts = [e for e in batch if is_p1_alert(e)]
-                ids = [e.payload["finding_id"] for e in alerts]
-                rows = {f.finding_id: f for f in messages.load_findings(
-                    detection, "finding_id IN (" + ", ".join(f":f{i}" for i in range(len(ids))) + ") AND state = 'open'",
-                    {f"f{i}": v for i, v in enumerate(ids)},
-                )} if ids else {}
-                findings = [rows[i] for i in dict.fromkeys(ids) if i in rows]
-                # 早期警告は今も当たっているものだけ (確認が取れて Finding に移ったものは送らない)
-                warn_ids = [e.payload["warning_id"] for e in batch if e.type == WARNING_EVENT]
-                warnings = messages.load_warnings(detection, list(dict.fromkeys(warn_ids)))
-                key = f"p1:{batch[-1].event_id}"
-                warn_key = f"warning:{batch[-1].event_id}"
-                with self.engine.begin() as conn:
-                    if findings and not self._already_sent(key):
-                        self._send("finding", messages.p1_alert(findings, self.cfg.timezone), key, conn)
-                        sent += len(findings)
-                    if warnings and not self._already_sent(warn_key):
-                        self._send("warning", messages.early_warning(warnings), warn_key, conn)
-                        warned += len(warnings)
-                    consumer.ack(batch[-1].seq, conn)
-            detail["p1"] = sent
-            detail["early_warnings"] = warned
+            self._detection_events(detail)
+            detail["remediation"] = self._remediation_events()
 
-    def _needs_baseline(self, consumer: Consumer) -> bool:
+    def _detection_events(self, detail: dict[str, object]) -> None:
+        """detection.db の P1 と早期警告。"""
+        detection = self._detection()
+        if detection is None:
+            detail["skipped"] = "detection.db がありません"
+            return
+        consumer = Consumer(detection, self.engine, "detection")
+        if self._needs_baseline(consumer):
+            # 初回 (と detection.db を作り直したとき) は今までのイベントを通知しない
+            # (導入時や作り直しで、過去の P1 をまとめて送らない)
+            with detection.connect() as conn:
+                head = conn.execute(text("SELECT COALESCE(MAX(seq), 0) FROM events")).scalar_one()
+            consumer.ack(head)
+            detail["baseline"] = head
+            return
+        sent = warned = 0
+        while batch := consumer.fetch((*FINDING_EVENTS, WARNING_EVENT)):
+            alerts = [e for e in batch if is_p1_alert(e)]
+            ids = [e.payload["finding_id"] for e in alerts]
+            rows = {f.finding_id: f for f in messages.load_findings(
+                detection, "finding_id IN (" + ", ".join(f":f{i}" for i in range(len(ids))) + ") AND state = 'open'",
+                {f"f{i}": v for i, v in enumerate(ids)},
+            )} if ids else {}
+            findings = [rows[i] for i in dict.fromkeys(ids) if i in rows]
+            # 早期警告は今も当たっているものだけ (確認が取れて Finding に移ったものは送らない)
+            warn_ids = [e.payload["warning_id"] for e in batch if e.type == WARNING_EVENT]
+            warnings = messages.load_warnings(detection, list(dict.fromkeys(warn_ids)))
+            key = f"p1:{batch[-1].event_id}"
+            warn_key = f"warning:{batch[-1].event_id}"
+            with self.engine.begin() as conn:
+                if findings and not self._already_sent(key):
+                    self._send("finding", messages.p1_alert(findings, self.cfg.timezone), key, conn)
+                    sent += len(findings)
+                if warnings and not self._already_sent(warn_key):
+                    self._send("warning", messages.early_warning(warnings), warn_key, conn)
+                    warned += len(warnings)
+                consumer.ack(batch[-1].seq, conn)
+        detail["p1"] = sent
+        detail["early_warnings"] = warned
+
+    def _remediation_events(self) -> int | str:
+        """自動改修 (remediation.db の events) のうち、すぐ知らせるものを送る。"""
+        engine = self._remediation() if self._remediation else None
+        if engine is None:
+            return "remediation.db がありません"
+        consumer = Consumer(engine, self.engine, "remediation")
+        try:
+            if self._needs_baseline(consumer, "remediation"):
+                with engine.connect() as conn:  # 初回 (と作り直したとき) は今までのイベントを送らない
+                    consumer.ack(conn.execute(text("SELECT COALESCE(MAX(seq), 0) FROM events")).scalar_one())
+                return "baseline"
+        except OperationalError:  # まだ remediation が一度も起動していない (db_info が無い)
+            return "remediation.db がまだ空です"
+        sent = 0
+        while batch := consumer.fetch(remediation_msg.IMMEDIATE):
+            with self.engine.begin() as conn:
+                for event in batch:
+                    body = remediation_msg.alert(event)
+                    key = f"remediation:{event.event_id}"
+                    if body and not self._already_sent(key):
+                        self._send("remediation", body, key, conn)
+                        sent += 1
+                consumer.ack(batch[-1].seq, conn)
+        return sent
+
+    def _needs_baseline(self, consumer: Consumer, source: str = "detection") -> bool:
         with self.engine.connect() as conn:
-            epoch = conn.execute(text("SELECT epoch FROM event_cursors WHERE source = 'detection'")).scalar()
+            epoch = conn.execute(text("SELECT epoch FROM event_cursors WHERE source = :s"), {"s": source}).scalar()
         return epoch is None or epoch != consumer.source_epoch()
 
     # ── 取得停止の監視 ────────────────────────────────────────────────────
@@ -232,7 +264,8 @@ class NotifyPipeline:
             with self.engine.connect() as conn:
                 last = conn.execute(text("SELECT MAX(sent_at) FROM notifications WHERE kind = 'digest'")).scalar()
             since = parse_iso(last) if last else now - timedelta(days=1)
-            body = messages.digest(detection, since, now, self.checks(now), self.cfg.timezone, self._intel())
+            body = messages.digest(detection, since, now, self.checks(now), self.cfg.timezone, self._intel(),
+                                   self._remediation() if self._remediation else None)
             detail["status"] = self._send("digest", body, key)
 
     # ── GitHub Issues ─────────────────────────────────────────────────────

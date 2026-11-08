@@ -78,7 +78,7 @@ services:
         condition: service_completed_successfully
 
   # 通知: P1 の即時通知・取得停止の監視・日次まとめ (LINE)、GitHub Issues (private リポジトリ)。
-  # 外部と通信するのはこのサービスだけで、送り先の認証情報 (config/notify.env) もここにだけ渡す。
+  # 通知を送るのはこのサービスだけで、送り先の認証情報 (config/notify.env) もここにだけ渡す。
   # notify.db にだけ書き、detection.db・intel.db は読み取り専用で開く
   notify:
     <<: *app
@@ -130,8 +130,10 @@ services:
         max-size: 10m
         max-file: "5"
 
-  # B 自動改修 (remediation.db の唯一の書き込み元)。今は origin/main の写し (data/remediation/main) を保つだけ。
-  # GitHub のトークンは config/remediation.env からこのコンテナにだけ渡す (他のサービスには渡さない)
+  # B 自動改修 (remediation.db の唯一の書き込み元)。origin/main の写し (data/remediation/main) を保ち、
+  # 修正版のある Finding から依存の更新 PR を作って自動マージを予約し、マージ・デプロイ・照合まで追う。
+  # GitHub のトークンは config/remediation.env からこのコンテナにだけ渡す (他のサービスには渡さない)。
+  # パッケージのコードを動かしうる uv lock はここでは動かさず、remediation-updater に任せる
   remediation:
     <<: *app
     command: ["python", "-m", "src.remediation", "serve"]
@@ -144,3 +146,61 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+  # L5: 隔離した更新役。uv lock はパッケージのビルドでそのパッケージのコードを動かしうるので、
+  # トークン・DB・モノレポの作業コピーを持たせない。読めるのは依頼 (jobs/in、読み取り専用) だけ、
+  # 書けるのは結果 (jobs/out) だけ。外へは remediation-egress を通して PyPI にだけ出られる
+  remediation-updater:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+      target: updater
+    image: security-platform-updater:local
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    command: ["python", "-m", "src.remediation", "updater"]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=4g
+      - /home/app
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [updater]
+    volumes:
+      - ./data/remediation/jobs/in:/app/data/remediation/jobs/in:ro
+      - ./data/remediation/jobs/out:/app/data/remediation/jobs/out
+    environment:
+      DATA_DIR: /app/data
+      TZ: UTC
+      HTTPS_PROXY: http://remediation-egress:3128
+      HTTP_PROXY: http://remediation-egress:3128
+      UV_CACHE_DIR: /tmp/uv-cache
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  # L5: updater の通信を PyPI (CONNECT pypi.org / files.pythonhosted.org の 443) だけに絞るプロキシ。
+  # updater と同じ内部ネットワーク (外に出られない) と、外に出られるネットワークの両方につなぐ
+  remediation-egress:
+    <<: *app
+    command: ["python", "-m", "src.remediation", "egress"]
+    restart: unless-stopped
+    volumes: []  # data/ は見せない
+    env_file: []
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [updater, default]
+    environment:
+      TZ: UTC
+      DATA_DIR: /tmp
+
+networks:
+  default: {}
+  # 外に出られない (remediation-updater は remediation-egress 経由でだけ PyPI に出る)
+  updater:
+    internal: true

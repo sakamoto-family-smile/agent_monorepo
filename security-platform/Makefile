@@ -4,7 +4,7 @@
         test clean logs \
         vuln-migrate intel-bootstrap intel-osv intel-osv-full intel-kev intel-epss intel-reports intel-extract intel-claims \
         llm-check llm-run llm-eval \
-        intel-health remediation-mirror remediation-status detection-scan detection-findings detection-images detection-host host-inventory-install host-inventory-uninstall detection-exceptions notify-test notify-digest notify-health analytics duck-ui up down ps logs-vuln
+        intel-health remediation-mirror remediation-status remediation-retry detection-scan detection-findings detection-images detection-host host-inventory-install host-inventory-uninstall detection-exceptions notify-test notify-digest notify-health analytics duck-ui up down ps logs-vuln
 
 # ── defaults ────────────────────────────────────────────────────────────────
 DASHBOARD_PORT ?= 8000
@@ -52,7 +52,8 @@ help:
 	@echo "    llm-run        抽出待ちの記事を今すぐ処理する (LIMIT=件数。1 日の上限は守る。常駐は夜だけ動く)"
 	@echo "    llm-eval       評価用の記事で抜き出しの精度を見る (プロバイダ・モデル・指示を変えたとき)"
 	@echo "    intel-health   情報源ごとの最終成功時刻 (古ければ exit 1)"
-	@echo "    remediation-mirror origin/main の写し (detection が照合するモノレポ) を今すぐ最新に  remediation-status  写しの状態"
+	@echo "    remediation-mirror origin/main の写し (detection が照合するモノレポ) を今すぐ最新に"
+	@echo "    remediation-status 写しと自動改修の状態   remediation-retry ARGS='--service <id>'  失敗した版の記録を消してやり直させる"
 	@echo "    detection-scan lockfile・本番イメージを照合して findings を更新  detection-findings  未対応の Finding 一覧"
 	@echo "    detection-images 本番イメージの SBOM を作る (ホストで gcloud・docker を使う。デプロイのたびに実行)"
 	@echo "    detection-host   開発 PC のツール一覧を作る (ホストで実行)。定期実行は host-inventory-install (launchd、1 日 1 回)"
@@ -126,7 +127,7 @@ COMPOSE   = HOST_UID=$$(id -u) HOST_GID=$$(id -g) docker compose
 INTEL_RUN = $(COMPOSE) run --rm --no-deps intel python -m src.intel
 
 up:
-	mkdir -p data/llm/in data/llm/out data/llm/state
+	mkdir -p data/llm/in data/llm/out data/llm/state data/remediation/jobs/in data/remediation/jobs/out
 	$(COMPOSE) up -d --build
 
 down:
@@ -185,6 +186,9 @@ remediation-mirror:
 
 remediation-status:
 	$(COMPOSE) run --rm --no-deps remediation python -m src.remediation status
+
+remediation-retry:
+	$(COMPOSE) run --rm --no-deps remediation python -m src.remediation retry $(ARGS)
 
 detection-scan:
 	$(COMPOSE) run --rm --no-deps detection python -m src.detection scan
