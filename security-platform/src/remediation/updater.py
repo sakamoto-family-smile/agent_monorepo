@@ -51,8 +51,9 @@ def uv_runner(uv: str = "uv", timeout: int = UV_TIMEOUT_SECONDS) -> Runner:
         for name, version in packages:
             args += ["--upgrade-package", f"{name}=={version}"]
         env = {
-            "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/tmp"),
-            "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR", "/tmp/uv-cache"),
+            # /tmp はコンテナの tmpfs (毎回まっさら)
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/tmp"),  # nosec B108
+            "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR", "/tmp/uv-cache"),  # nosec B108
             "UV_PYTHON_DOWNLOADS": "never",  # Python 本体は取りに行かない (イメージの Python を使う)
             "NO_COLOR": "1",
         }
