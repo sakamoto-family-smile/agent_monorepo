@@ -41,6 +41,7 @@ from app.repositories import (
 from app.services.line_client import (
     InvalidSignatureError,
     LineBotClient,
+    MalformedWebhookBodyError,
     get_line_bot_client,
 )
 
@@ -185,6 +186,10 @@ async def webhook(
     except InvalidSignatureError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid signature"
+        ) from exc
+    except MalformedWebhookBodyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="malformed body"
         ) from exc
 
     deps = _build_deps()

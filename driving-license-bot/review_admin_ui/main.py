@@ -50,7 +50,14 @@ CSRF_FORM_FIELD = "csrf_token"
 _DEV_ONLY_SESSION_SECRET = "dev-only-insecure-secret-do-not-use"
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
-templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+
+
+def _csrf_context(request: Request) -> dict[str, str]:
+    """全テンプレートに CSRF token を渡す (header の logout form 等)。"""
+    return {"csrf_token": get_csrf_token(request)}
+
+
+templates = Jinja2Templates(directory=str(_TEMPLATE_DIR), context_processors=[_csrf_context])
 
 # ReviewService は app.state にぶら下げて DI する（テストで差し替え可能）
 _REVIEW_SERVICE_KEY = "review_service"
@@ -269,8 +276,9 @@ def create_app(review_service: ReviewService | None = None) -> FastAPI:
         logger.info("login ok: %s", email)
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
-    @app.get("/logout")
-    async def logout(request: Request) -> RedirectResponse:
+    @app.post("/logout")
+    async def logout(request: Request, _csrf: None = Depends(verify_csrf)) -> RedirectResponse:
+        # 状態変更なので POST + CSRF (GET だと外部サイトから強制ログアウトできる)
         request.session.clear()
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 

@@ -90,12 +90,13 @@ resource "google_cloud_run_v2_service" "admin_ui" {
 
       # OAuth callback URL (Cloud Run service URL + /auth/callback)
       # OAuth client の Authorized redirect URIs と一致する必要あり。
-      # apply 後に terraform output review_admin_oauth_redirect_url で値を取得し、
-      # Console で OAuth client に追加する (deploy 1 サイクル目は値が確定しない
-      # ので, /auth/callback を空にしておくと request.url_for で動的生成される)
+      # deploy 1 サイクル目は URL が確定しないので空 (request.url_for で動的生成) を
+      # 許容し、apply 後に output review_admin_oauth_redirect_url の値を
+      # var.review_admin_oauth_redirect_url に設定して固定する。固定すると
+      # リクエストヘッダから callback URL が組み立てられなくなる。
       env {
         name  = "ADMIN_OAUTH_REDIRECT_URL"
-        value = "" # 動的生成 (request.url_for) を許容
+        value = var.review_admin_oauth_redirect_url
       }
 
       env {

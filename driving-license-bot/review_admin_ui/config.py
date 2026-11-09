@@ -52,9 +52,10 @@ class AdminSettings(BaseSettings):
     # Cookie に署名する秘密鍵（32+ bytes 推奨）。Secret Manager 管理
     session_secret_key: str = ""
 
-    # session の最大寿命 (秒)。既定 7 日。idle expiry は SessionMiddleware の機能なし
-    # なので、cookie max_age で実質的な強制ログアウトを設定
-    session_max_age_seconds: int = 7 * 24 * 3600
+    # session の最大寿命 (秒)。既定 12 時間。idle expiry は SessionMiddleware の機能なし
+    # なので、cookie max_age で実質的な強制ログアウトを設定。cookie は署名のみで
+    # server 側で失効できないため、漏洩時の有効期間を短く抑える。
+    session_max_age_seconds: int = 12 * 3600
 
     # OAuth callback の絶対 URL。Cloud Run URL + /auth/callback。
     # OAuth client の Authorized redirect URIs と一致する必要がある

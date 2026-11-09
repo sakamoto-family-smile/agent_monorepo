@@ -7,6 +7,8 @@ OAuth callback の token decode 部分は authlib に任せる範囲。
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -121,8 +123,11 @@ def test_logout_clears_session(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client_with_env(monkeypatch, dev_bypass="false", allowed_emails="op@example.com")
     _set_session_email(client, "op@example.com")
 
-    # logout
-    resp = client.get("/logout", follow_redirects=False)
+    # logout は header の form (POST + CSRF token)
+    page = client.get("/")
+    match = re.search(r'action="/logout".*?name="csrf_token" value="([^"]+)"', page.text, re.S)
+    assert match is not None
+    resp = client.post("/logout", data={"csrf_token": match.group(1)}, follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == "/login"
 
@@ -130,3 +135,12 @@ def test_logout_clears_session(monkeypatch: pytest.MonkeyPatch) -> None:
     client.cookies.clear()
     resp2 = client.get("/", follow_redirects=False)
     assert resp2.status_code == 303
+
+
+def test_logout_rejects_get_and_missing_csrf(monkeypatch: pytest.MonkeyPatch) -> None:
+    """外部サイトからの強制ログアウト (GET / token なし POST) は受け付けない。"""
+    client = _client_with_env(monkeypatch, dev_bypass="false", allowed_emails="op@example.com")
+    _set_session_email(client, "op@example.com")
+    assert client.get("/logout", follow_redirects=False).status_code == 405
+    assert client.post("/logout", data={}, follow_redirects=False).status_code == 403
+    assert client.get("/", follow_redirects=False).status_code == 200  # session は残る

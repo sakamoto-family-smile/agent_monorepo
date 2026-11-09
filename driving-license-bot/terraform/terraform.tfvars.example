@@ -54,6 +54,8 @@ review_admin_memory        = "512Mi"
 review_admin_allowed_emails = []
 # 例:
 # review_admin_allowed_emails = ["operator@example.com"]
+# 初回 apply 後に `terraform output review_admin_oauth_redirect_url` の値を設定 (空なら動的生成)
+review_admin_oauth_redirect_url = ""
 
 # ---- Cloud SQL (Phase 2-A) ----
 # db-f1-micro: shared CPU, 0.6GB RAM, 月 ~$10
