@@ -444,6 +444,35 @@ make test
 
 ---
 
+## ローカル本番 (Mac mini 常駐) — PROPOSAL-0013
+
+GCP と同じ Dockerfile のイメージを Mac mini 上の Docker Compose で動かす。DB は SQLite、
+非同期処理は in-process、チャート / 全文はインメモリ配信、LINE Webhook は Tailscale Funnel で
+`/api/line` 配下だけを公開する。GCP との違いはすべて環境変数 (`config/local.env`) で切り替える。
+
+- 設計: [docs/PROPOSALS/0013-stock-local-hosting-reversible.md](../docs/PROPOSALS/0013-stock-local-hosting-reversible.md)
+
+```bash
+cd stock-analysis-agent
+cp config/local.env.example config/local.env && chmod 600 config/local.env    # 秘密情報と PUBLIC_BASE_URL を埋める
+cp config/tailscale.env.example config/tailscale.env && chmod 600 config/tailscale.env  # TS_AUTHKEY (初回のみ使用)
+make local-config        # compose の設定を検証
+make local-up            # backend + Funnel で起動 (Funnel なしは make local-up-private)
+make local-logs
+```
+
+| 項目 | 場所 |
+|---|---|
+| 永続データ (SQLite / EDINET cache / 利用ログ) | ホストの `${STOCK_LOCAL_DATA_DIR:-./data/local}` (コンテナ内 `/app/var`) |
+| Edinetcode.csv | `${STOCK_LOCAL_DATA_DIR}/edinet-code/Edinetcode.csv` に手動で置く |
+| 手元からの確認 | `http://127.0.0.1:${STOCK_LOCAL_PORT:-8001}/health` (localhost のみに公開) |
+| 外部公開 | `https://<TS_HOSTNAME>.<tailnet>.ts.net/api/line/*` のみ ([config/tailscale-serve.json](config/tailscale-serve.json)) |
+
+Tailscale 側の事前準備 (HTTPS 証明書・Funnel の許可・auth key) は `config/tailscale.env.example` を参照。
+backend は `mem_limit: 4g` / `cpus: 4` で動かす (security-platform と同居するため)。
+
+---
+
 ## GCP デプロイ (LINE 経由で利用) — PROPOSAL-0011 P1
 
 LINE から `分析 トヨタ` のように使える本番サービスを Cloud Run に配備する。MVP は

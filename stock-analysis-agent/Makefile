@@ -8,7 +8,8 @@
 #   make install    - 依存パッケージをインストール
 ################################################################################
 
-.PHONY: dev dev-down run install test lint help
+.PHONY: dev dev-down run install test lint help \
+	local-up local-up-private local-down local-logs local-ps local-config
 
 # ---- ローカル開発 -------------------------------------------------------
 
@@ -37,6 +38,32 @@ test:
 test-cov:
 	uv run pytest tests/ -v --cov=app --cov-report=term-missing
 
+# ---- ローカル本番 (Mac mini 常駐, PROPOSAL-0013) -------------------------
+# 設定: config/local.env (+ Funnel を使うなら config/tailscale.env)。雛形は *.env.example
+
+LOCAL_COMPOSE := docker compose -f docker-compose.local.yml
+
+local-up:
+	mkdir -p $${STOCK_LOCAL_DATA_DIR:-data/local}
+	$(LOCAL_COMPOSE) --profile public up -d --build
+
+local-up-private:
+	mkdir -p $${STOCK_LOCAL_DATA_DIR:-data/local}
+	$(LOCAL_COMPOSE) up -d --build backend
+
+local-down:
+	$(LOCAL_COMPOSE) --profile public down
+
+local-logs:
+	$(LOCAL_COMPOSE) --profile public logs -f
+
+local-ps:
+	$(LOCAL_COMPOSE) --profile public ps
+
+# compose の設定を展開して検証する (秘密情報は出さない)
+local-config:
+	$(LOCAL_COMPOSE) --profile public config --quiet && echo "docker-compose.local.yml: OK"
+
 # ---- ヘルプ --------------------------------------------------------------
 
 help:
@@ -45,6 +72,7 @@ help:
 	@echo "  make run     - uvicorn でローカル直接起動 (ポート: 8001)"
 	@echo "  make install - 依存パッケージをインストール"
 	@echo "  make test    - pytest でテストを実行"
+	@echo "  make local-up  - ローカル本番 (Mac mini) を Funnel 付きで起動 (local-up-private で Funnel なし)"
 	@echo ""
 	@echo "環境変数 (.env):"
 	@echo "  CLAUDE_CODE_OAUTH_TOKEN - Claude Code OAuth トークン (必須)"

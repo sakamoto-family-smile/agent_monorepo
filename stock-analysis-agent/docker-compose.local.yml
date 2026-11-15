@@ -1,0 +1,67 @@
+# stock-analysis-agent のローカル本番 (Mac mini 常駐) 用 compose (PROPOSAL-0013)。
+# 開発用の docker-compose.yml とは別物。Docker Compose v2.24 以降が必要 (env_file の required)
+#
+#   make local-up          # backend + Funnel (LINE から届く) で起動
+#   make local-up-private  # backend のみ (Funnel なし。手元からの動作確認用)
+#   make local-down / local-logs / local-ps
+#
+# 事前準備: cp config/local.env.example config/local.env (+ config/tailscale.env)。
+#
+# - イメージは Cloud Run と同じ Dockerfile (GCP に戻すときも同じものを使う)
+# - 永続データはホストの ${STOCK_LOCAL_DATA_DIR:-./data/local} に置き、コンテナでは /app/var に見せる。
+#   イメージ内の /app/data/universe (静的な銘柄リスト) を隠さないよう、/app/data には mount しない
+# - SQLite に書くのは backend の 1 プロセスだけ。ホストの macOS から DB ファイルを直接書かない
+# - 秘密情報はそれを使うサービスにだけ渡す (backend: local.env / tailscale: tailscale.env)
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: stock-analysis-agent/Dockerfile
+    image: stock-analysis-agent:local
+    env_file:
+      - path: config/local.env
+        required: true
+    environment:
+      PORT: "8080"
+    # 手元からの確認用に localhost にだけ出す (LAN には出さない)。外部公開は tailscale が担う
+    ports:
+      - "127.0.0.1:${STOCK_LOCAL_PORT:-8001}:8080"
+    volumes:
+      - ${STOCK_LOCAL_DATA_DIR:-./data/local}:/app/var
+    # 分析 2 件同時で最大 3GB 程度の見積もり (PROPOSAL-0013 §4.8)。security-platform と同居するため上限を置く
+    mem_limit: 4g
+    cpus: 4
+    restart: unless-stopped
+    stop_grace_period: 2m  # 実行中の分析を区切りまで進めてから止まる
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  # LINE Webhook とチャート画像・全文レポートの配信のため、/api/line 配下だけを Tailscale Funnel で公開する。
+  # 公開する経路は config/tailscale-serve.json。profile `public` を付けたときだけ起動する
+  tailscale:
+    image: tailscale/tailscale:v1.90.6
+    profiles: ["public"]
+    hostname: ${TS_HOSTNAME:-stock-analysis}
+    env_file:
+      - path: config/tailscale.env
+        required: true
+    environment:
+      TS_HOSTNAME: ${TS_HOSTNAME:-stock-analysis}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "true"
+      TS_AUTH_ONCE: "true"  # 認証は初回だけ。以降は state の鍵で接続する
+    volumes:
+      - tailscale_state:/var/lib/tailscale
+      - ./config/tailscale-serve.json:/config/serve.json:ro
+    mem_limit: 128m
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+volumes:
+  tailscale_state:
