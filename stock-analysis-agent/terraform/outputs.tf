@@ -68,3 +68,8 @@ output "edinet_job_name" {
   value       = local.deploy_edinet ? google_cloud_run_v2_job.edinet_index[0].name : null
   description = "EDINET index batch の Cloud Run Job 名 (edinet_enabled 時)。"
 }
+
+output "standby" {
+  description = "true ならローカルが active で、GCP は待機モード (webhook 非公開・Scheduler 停止)。"
+  value       = var.standby
+}
