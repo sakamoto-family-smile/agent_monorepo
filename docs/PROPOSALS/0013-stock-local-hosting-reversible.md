@@ -84,9 +84,14 @@ Push 通知はそのまま使い続け、Cloud SQL にあるこれまでの分�
   Tailscale Funnel で `/api/line` 配下だけを公開する (`/health` などは出さない)。
 - ローカルの media は `MEDIA_BACKEND=memory`。再起動すると過去のリンクは 404 になる
   (GCS 版も 24 時間で失効するので実害は小さい)。TTL は 24 時間に揃える。
-- SQLite に書くのは backend コンテナだけにする。EDINET batch も `docker compose exec`
-  で同じコンテナ内から実行し、ホストの macOS から DB ファイルを直接書かない
-  (security-platform と同じ方針。VM をまたいだ WAL 共有を避ける)。
+- SQLite に書くのは backend の 1 プロセスだけにする。日次ジョブ (EDINET index batch・backup・
+  死活監視) は launchd ではなく **backend 内の定期処理** として動かし、ホストの macOS や別コンテナから
+  DB ファイルを書かない (security-platform の各サービスが `serve` で内部スケジュールを持つのと同じ形。
+  VM をまたいだ WAL 共有も避けられる)。
+- 定期処理は GCP では使わない (Cloud Run は複数 instance / min=0 のため)。既定は無効で、
+  ローカルの `config/local.env` でだけ有効にする。GCP では従来どおり Cloud Run Job + Scheduler。
+- GCP の Cloud Tasks が担っていた同時実行の上限 (3) がローカルでは無くなるため、アプリ内に
+  同時分析数の上限 (`ANALYSIS_MAX_CONCURRENCY`) を設ける (§4.8)。
 - Cloud Tasks に残っているタスクは、GCP から切り替える前に空になるのを待つ。
 - 切替中に届いたメッセージを落とさないよう、LINE の「Webhook の再送」を切替中だけ有効にする。
 
@@ -101,6 +106,7 @@ Push 通知はそのまま使い続け、Cloud SQL にあるこれまでの分�
 | Funnel 公開による攻撃面の増加 | Medium | 公開は `/api/line` 配下のみ。署名検証・`FAMILY_USER_IDS`・回数制限は既存実装を維持。`APP_ENV=prod` で Web API / docs を無効化 |
 | GCP 側のコードが古くなり、いざ戻すと動かない | Medium | 同じ Dockerfile を両方で使う。リハーサル (§4.5 Manual) を定期実施し、結果を Implementation History に残す |
 | 秘密情報の二重管理 (local env と Secret Manager) | Medium | `secrets push/pull` スクリプトで同期。値はスクリプトの出力に表示しない |
+| 分析の同時実行で Docker VM のメモリが逼迫し、security-platform も巻き込んで落ちる | Medium | 同時分析数の上限 + コンテナごとの `mem_limit`。Docker Desktop の割当を 16GB に増やす (§4.8) |
 
 ---
 
@@ -118,7 +124,10 @@ LINE ──HTTPS──▶ │ tailscale (sidecar, Funnel /api/line) │
                 │   ├─ data/edinet/ (書類 cache, csv)   │
                 │   └─ data/analytics/ (JSONL)          │
                 └───────────────────────────────────────┘
-                   ▲ launchd: 02:00 EDINET batch / 03:00 backup
+                │   backend 内の定期処理 (env で個別に ON/OFF):
+                │     02:00 EDINET index / 03:00 backup / 数分おき health + ping
+                └──▶ hc-ping.com (Healthchecks.io)
+                   ▲ launchd: backup を外部ディスクへコピー (これだけホスト側)
 
      cutover スクリプト: db_copy (SQLite ⇄ Postgres) / edinet sync (dir ⇄ GCS)
                         / secrets (env ⇄ Secret Manager) / LINE webhook 切替
@@ -139,7 +148,8 @@ LINE ──HTTPS──▶ │ tailscale (sidecar, Funnel /api/line) │
 | Cloud SQL `stock_analysis_db` | `data/stock_analysis.db` | `DATABASE_URL` 未設定 → `DB_PATH` |
 | GCS media | インメモリ配信 | `MEDIA_BACKEND=memory`, `PUBLIC_BASE_URL=https://<host>.ts.net`, TTL 86400 |
 | GCS edinet | `data/edinet/` | `EDINET_CACHE_BACKEND=local`, `EDINET_CODE_CSV_PATH=/app/data/edinet-code/Edinetcode.csv` |
-| Cloud Run Job + Scheduler | launchd → `docker compose exec backend` | — |
+| Cloud Run Job + Scheduler | backend 内の定期処理 | `EDINET_SCHEDULE_ENABLED=true` (ローカルのみ) |
+| Cloud Tasks の同時実行上限 | アプリ内の上限 | `ANALYSIS_MAX_CONCURRENCY=2` |
 | Pub/Sub → GCS → BigQuery | `data/analytics/` の JSONL | `ANALYTICS_STORAGE_BACKEND=local` |
 | Secret Manager | `config/local.env` (600, git 管理外) | `secrets pull/push` |
 | Cloud Run の公開 URL | Tailscale Funnel | LINE Webhook URL を API で切替 |
@@ -167,8 +177,11 @@ LINE ──HTTPS──▶ │ tailscale (sidecar, Funnel /api/line) │
 | `stock-analysis-agent/scripts/migrate/secrets.sh` | `pull`: Secret Manager → `config/local.env` / `push`: 逆向き。値は表示しない |
 | `stock-analysis-agent/scripts/cutover/line_webhook.py` | LINE Messaging API で Webhook URL の取得・設定・疎通テスト (`/v2/bot/channel/webhook/endpoint`, `/v2/bot/channel/webhook/test`) |
 | `stock-analysis-agent/scripts/cutover/to_local.sh` / `to_gcp.sh` | 切替手順を順に実行。各段で確認プロンプト、失敗時はそこで止まる |
-| `stock-analysis-agent/scripts/local/launchd.sh` | EDINET batch (02:00) と backup (03:00) の LaunchAgent を install / uninstall / status (security-platform の `host-inventory-launchd.sh` と同じ形) |
-| `stock-analysis-agent/scripts/local/backup.sh` / `restore.sh` | `sqlite3 .backup` + 世代管理 (既定 14 日)、復元 |
+| `stock-analysis-agent/app/services/scheduler.py` | backend の lifespan で起動する定期処理。ジョブ (`edinet_index` / `backup` / `health`) ごとに env で ON/OFF・時刻を指定。成否を Healthchecks.io に ping |
+| `stock-analysis-agent/app/services/backup.py` | SQLite のオンライン backup API で `data/backups/` に世代保存 (既定 14 日) |
+| `stock-analysis-agent/app/services/analysis_limiter.py` | 同時分析数の上限 (asyncio.Semaphore)。上限を超えた分は待たせ、待ちが発生したら「順番待ちです」と返す |
+| `stock-analysis-agent/scripts/local/offsite_backup_launchd.sh` | `data/backups/` を外部ディスク / iCloud にコピーする LaunchAgent の install / uninstall / status (security-platform の `host-inventory-launchd.sh` と同じ形) |
+| `stock-analysis-agent/scripts/local/restore.sh` | backup からの復元 (backend 停止中のみ実行可) |
 | `stock-analysis-agent/terraform/` | `var.standby` を追加。true で Cloud Scheduler を paused にする (他のリソースは維持) |
 | `stock-analysis-agent/Makefile` | `local-up` / `local-down` / `local-logs` / `cutover-to-local` / `cutover-to-gcp` / `backup` など |
 
@@ -193,7 +206,10 @@ LINE ──HTTPS──▶ │ tailscale (sidecar, Funnel /api/line) │
     `price_cache` の除外、照合不一致の検出 (行を 1 件書き換えて失敗すること)
   - `line_webhook`: LINE API をモックして set / get / test のリクエスト内容とエラー処理
   - 設定: `config/local.env.example` を読み込んだ `Settings` が SQLite・memory media・
-    tasks 無効・local analytics になることを確認
+    tasks 無効・local analytics・定期処理有効になることを確認。既定 (GCP) では定期処理が無効なこと
+  - `scheduler`: ジョブごとの ON/OFF、実行時刻の判定、失敗時に `/fail` を ping し次のジョブは続行すること
+  - `analysis_limiter`: 上限を超えた分析が待たされ、順番待ちの返信が 1 回だけ出ること
+  - `backup`: 世代数を超えた古い backup が消え、backup から開いた DB の件数が元と一致すること
 - **Integration**:
   - `db_copy`: SQLite ⇄ Postgres (docker の postgres を使う。無い環境では skip)。
     往復させて内容が一致し、Postgres 側で新規 INSERT が id 衝突しないこと (sequence 補正)
@@ -201,7 +217,9 @@ LINE ──HTTPS──▶ │ tailscale (sidecar, Funnel /api/line) │
 - **Manual / E2E** (切替のリハーサル。結果を §8 に記録):
   - [ ] Cloud SQL → ローカル: 件数一致、LINE で過去レポート参照・マイリスト表示・`分析` が動く
   - [ ] チャート画像と全文リンクが LINE で開ける (Funnel 経由)
-  - [ ] EDINET batch が launchd から動き、`edinet_documents` が更新される
+  - [ ] EDINET index が backend 内の定期処理で動き、`edinet_documents` が更新される
+  - [ ] `docker stats` で待機時・分析 1 件・分析 2 件同時・EDINET batch 中のメモリ / CPU を実測し、§4.8 の見積もりを更新する
+  - [ ] §4.8 の各コンポーネントを止めても backend が起動し、LINE のコマンドが期待どおり縮退すること
   - [ ] backup から別ディレクトリへ restore して起動できる
   - [ ] ローカル → GCP → ローカルの往復で、各方向の停止時間が 15 分以内
 
@@ -216,8 +234,41 @@ LINE ──HTTPS──▶ │ tailscale (sidecar, Funnel /api/line) │
 
 ### 4.7 Feature Enablement
 
-- ローカル / GCP の違いはすべて環境変数で切り替える (§4.2)。アプリのコード分岐は増やさない。
+- ローカル / GCP の違いはすべて環境変数で切り替える (§4.2)。
 - Terraform は `var.standby` (既定 false = 現状どおり) のみ追加。
+- 個々のコンポーネントは止められるようにする。止めても backend は起動し、該当機能だけ縮退する。
+
+| コンポーネント | 止め方 | 止めたときの動き |
+|---|---|---|
+| backend (LINE 受信・分析) | `make local-down` | Bot が応答しない |
+| Funnel (tailscale sidecar) | compose profile `public` を付けずに起動 | LINE からは届かない。手元からの動作確認はできる |
+| EDINET 連携 | `EDINET_ENABLED=false` (既存) | 分析は yfinance + Brave のみ |
+| EDINET index の定期実行 | `EDINET_SCHEDULE_ENABLED=false` (新規) | 書類一覧が更新されない (分析時に直接取得するので遅くなる) |
+| XBRL 解析 | `EDINET_ENABLE_XBRL=false` (既存) | PDF のみ。メモリが減る |
+| 価格予測 | `FORECAST_ENABLED=false` (既存) | チャートに予測の帯が出ない |
+| ニュース・センチメント | `BRAVE_API_KEY` を空 | センチメントを省く |
+| 利用ログ | `ANALYTICS_ENABLED=false` (既存) | JSONL を書かない |
+| backup | `BACKUP_ENABLED=false` (新規) | 日次 backup を止める |
+| 死活監視の内側チェック | `HEALTH_CHECK_ENABLED=false` (新規) | 管理者への LINE 通知を止める |
+| Healthchecks.io への ping | `HEALTHCHECK_PING_BASE` を空 | ping を送らない |
+
+### 4.8 リソース見積もりと上限
+
+Mac mini (Apple M5 Pro 18 コア / 48GB / SSD 空き 700GB 超) で、security-platform と同居させる。
+
+| 処理 | メモリ (見積もり) | CPU |
+|---|---|---|
+| backend 待機 | 200〜300MB | ほぼ 0 |
+| 分析 1 件 (claude CLI + brave MCP + pandas / matplotlib + 予測) | 最大 1〜1.5GB | 1 コア前後を数十秒〜数分 |
+| EDINET index batch (XBRL 含む) | 300〜500MB | 軽い (API の間隔待ちが中心) |
+| security-platform (参考、2026-11 実測) | intel 全量取得中 約 1.5GB、他は数十 MB | intel 取得中 約 0.5 コア |
+
+見積もりの根拠は Cloud Run の設定 (webhook / worker とも 1 vCPU / 2GiB) で、リハーサル時に実測して更新する。
+
+- **同時分析数**: `ANALYSIS_MAX_CONCURRENCY=2` (既定)。分析 2 件同時で最大 3GB 程度
+- **コンテナの上限**: backend `mem_limit: 4g` / `cpus: 4`、tailscale `mem_limit: 128m`
+- **Docker Desktop**: メモリ割当を現在の約 7.7GB から 16GB に増やす (security-platform の取得・抽出と
+  stock の分析が重なっても 6GB 前後に収まる見込みで、余裕を持たせる)
 
 ---
 
@@ -245,7 +296,7 @@ security-platform の `src/notify/health.py` と同じく、**Mac の内側か�
   - Ping key が URL に入るため、HTTP クライアントのリクエスト URL をログに出さない
   - ping が途絶えたら Healthchecks.io 側から通知される (外向き通信のみで受け口は増えない)
 - `docker compose logs backend`、`data/analytics/` の JSONL を DuckDB で集計。
-- launchd ジョブのログは `data/logs/` に出す。
+- 定期処理のログは backend のログに、外部ディスクへのコピー (launchd) のログは `data/logs/` に出す。
 
 ### 5.2 Troubleshooting
 
@@ -253,7 +304,9 @@ security-platform の `src/notify/health.py` と同じく、**Mac の内側か�
 |---|---|
 | LINE の「検証」が失敗する | Funnel が無効 / tailscale sidecar 停止 / `/api/line` のパス設定違い。`tailscale funnel status` を確認 |
 | チャート画像が表示されない | `PUBLIC_BASE_URL` 未設定または Funnel のホスト名と不一致。backend 再起動で memory store が消えた |
-| `database is locked` | ホストから DB を直接書いていないか確認。batch は `docker compose exec` 経由で実行する |
+| `database is locked` | ホストや別コンテナから DB を直接書いていないか確認。書くのは backend だけ (日次ジョブも backend 内) |
+| backend が OOM で再起動する | `docker stats` で確認。`ANALYSIS_MAX_CONCURRENCY` を 1 に下げる / `EDINET_ENABLE_XBRL=false` / Docker Desktop の割当を増やす |
+| 分析の返信が遅い | 同時分析数の上限で待っている。ログの待ち件数を確認 |
 | GCP へ戻した後に INSERT が `duplicate key` | sequence 補正が漏れている。`db_copy.py --fix-sequences-only` を実行 |
 
 ### 5.3 Dependencies
@@ -266,7 +319,7 @@ security-platform の `src/notify/health.py` と同じく、**Mac の内側か�
 ### 5.4 Non-Functional Requirements
 
 #### 性能
-- 分析 1 件あたりの所要時間は GCP 版と同程度 (数十秒〜数分)。同時分析は 1〜2 件を想定
+- 分析 1 件あたりの所要時間は GCP 版と同程度 (数十秒〜数分)。同時分析は上限 2 件 (§4.8)
 
 #### コスト
 - GCP standby の費用: Cloud Run は min=0 で実質 0、Scheduler は paused、GCS / Secret は数円程度。
@@ -306,3 +359,4 @@ security-platform の `src/notify/health.py` と同じく、**Mac の内側か�
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-11-15 | Draft | 初稿 |
+| 2026-11-15 | Draft | 日次ジョブを backend 内の定期処理に変更、同時分析数・メモリの上限と止められるコンポーネントの一覧を追加 |
