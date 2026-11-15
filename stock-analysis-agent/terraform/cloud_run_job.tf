@@ -124,6 +124,8 @@ resource "google_cloud_scheduler_job" "edinet_index" {
   name      = "${var.edinet_job_name}-daily"
   schedule  = var.edinet_index_schedule
   time_zone = "Asia/Tokyo"
+  # standby の間はローカル backend の定期処理が EDINET index を担う
+  paused = var.standby
 
   http_target {
     http_method = "POST"

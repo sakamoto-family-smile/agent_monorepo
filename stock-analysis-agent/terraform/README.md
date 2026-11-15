@@ -252,3 +252,31 @@ gcloud run services update stock-analysis-line --region=asia-northeast1 \
 
 terraform は `image` の drift を無視する（`ignore_changes`）ので、上記 `gcloud run
 services update` 直叩きで OK。
+
+## 待機モード（standby）— PROPOSAL-0013
+
+ローカル（Mac mini）が active の間、GCP 側はリソースを消さずに待機させる。`standby = true` で apply すると:
+
+| リソース | standby = true | standby = false（GCP が active） |
+|---|---|---|
+| webhook の公開（`allUsers` の `run.invoker`） | 外す（LINE も外部も呼べない） | 付ける |
+| Cloud Scheduler `stock-edinet-index-daily` | 一時停止（ローカルの定期処理が担う） | 再開 |
+| Cloud Run（webhook / worker） | 残す（min=0 なので費用はほぼ 0） | 同じ |
+| Cloud SQL `stock_analysis_db` / GCS / Secret / Tasks | 残す | 同じ |
+
+```bash
+terraform apply -var standby=true    # ローカルへ切り替えた後
+terraform apply -var standby=false   # GCP へ戻すとき (データのコピーと Webhook 切替の前)
+```
+
+切替の全体手順（停止 → `ops.db_copy` → EDINET 同期 → Webhook 切替 → 疎通確認）は
+`make cutover-to-local` / `make cutover-to-gcp` が行う。
+
+### GCP に戻すときの注意
+
+- **イメージを最新にする**: 待機中にローカルでコードが進んでいるので、上の「更新（image 入れ替え）」で
+  build し、webhook・worker・EDINET Job の 3 つを新しいイメージにしてから Webhook を向ける
+  （`gcloud run services update stock-analysis-worker ...` / `gcloud run jobs update stock-edinet-index ...` も同様）
+- **Secret**: ローカルで値を変えた（Claude の OAuth token を更新した等）なら、Secret Manager にも入れる
+- **ゼロから作り直す場合**: 本ファイル冒頭の手順 0〜5 をそのまま行えばよい（Cloud SQL の DB / user は
+  `deletion_policy = ABANDON` なので destroy しても shared-pg 上に残る）

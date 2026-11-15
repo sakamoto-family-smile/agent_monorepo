@@ -49,3 +49,7 @@ analytics_pubsub_topic    = "analytics-events"
 # tasks_max_concurrent_dispatches = 3
 # tasks_max_attempts              = 3
 # media_retention_days            = 1
+
+# PROPOSAL-0013: ローカル (Mac mini) が active の間は true (webhook 非公開・Scheduler 停止)。
+# 切替は make cutover-to-local / cutover-to-gcp が行う。
+# standby = false
