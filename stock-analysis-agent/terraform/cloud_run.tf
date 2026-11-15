@@ -250,9 +250,10 @@ resource "google_cloud_run_v2_service" "stock" {
   ]
 }
 
-# LINE webhook は public access が必要 (LINE Platform は任意 IP から POST する)
+# LINE webhook は public access が必要 (LINE Platform は任意 IP から POST する)。
+# standby (ローカルが active) の間は公開を外し、古いデータの GCP 側に LINE が届かないようにする。
 resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
-  count = local.deploy_service ? 1 : 0
+  count = local.deploy_service && !var.standby ? 1 : 0
 
   project  = var.project_id
   location = google_cloud_run_v2_service.stock[0].location
