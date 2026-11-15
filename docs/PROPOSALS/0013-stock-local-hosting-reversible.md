@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | Implementing |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-11-15 |
 | **Updated** | 2026-11-15 |
 | **Target** | stock-analysis-agent |
-| **Related PRs** | (none yet) |
+| **Related PRs** | #259 (設計), #260, #261, #262, #263, cutover (本 PR) |
 | **Supersedes** | — |
 | **Superseded by** | — |
 
@@ -360,3 +360,9 @@ security-platform の `src/notify/health.py` と同じく、**Mac の内側か�
 |---|---|---|
 | 2026-11-15 | Draft | 初稿 |
 | 2026-11-15 | Draft | 日次ジョブを backend 内の定期処理に変更、同時分析数・メモリの上限と止められるコンポーネントの一覧を追加 |
+| 2026-11-15 | Approved | #259 merged |
+| 2026-11-15 | PR #260 | ローカル実行環境 (compose / env 雛形 / Funnel 設定) |
+| 2026-11-15 | PR #261 | DB コピー・照合ツール (SQLite ⇄ Postgres) と EDINET 同期 |
+| 2026-11-15 | PR #262 | backend 内の定期処理・死活監視・backup・同時分析数の上限 |
+| 2026-11-15 | PR #263 | terraform の待機モード (standby) |
+| 2026-11-15 | PR | 切替の自動化 (LINE Webhook / secrets 同期 / cutover-to-local・gcp) |

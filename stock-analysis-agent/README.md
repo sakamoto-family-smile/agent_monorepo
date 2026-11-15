@@ -494,6 +494,32 @@ OFFSITE_BACKUP_DIR=/Volumes/Backup/stock-analysis make local-offsite-install  # 
 make local-down && make local-restore && make local-up  # 最新の backup から戻す (BACKUP=... で指定)
 ```
 
+### ローカル ⇄ GCP の切替
+
+GCP は standby (webhook 非公開・Scheduler 停止、`terraform/README.md` 参照) で残しておき、
+どちら向きにも 1 コマンドで切り替える。途中で確認を挟み、失敗したらそこで止まる。
+`DRY_RUN=1` で実行するコマンドを表示するだけにできる。
+
+```bash
+DRY_RUN=1 make cutover-to-local   # 手順の確認
+make cutover-to-local             # GCP → ローカル
+make cutover-to-gcp               # ローカル → GCP
+```
+
+| 手順 | cutover-to-local | cutover-to-gcp |
+|---|---|---|
+| 1 | LINE の Webhook 再送を有効にする (手動) | 同じ |
+| 2 | ローカル起動 → Funnel 経由で届くか確認 → backend を止める | 最終 backup → backend を止める |
+| 3 | GCP の webhook を非公開 → Cloud Tasks の残りを消化 → queue 停止 | 今のコードで build し、webhook / worker / EDINET Job を更新 |
+| 4 | Cloud SQL → SQLite へコピーと照合 (`ops.db_copy`) | Secret Manager へ差分を反映 (`ops.secrets_sync`) |
+| 5 | EDINET を GCS からローカルへ | standby 解除・queue 再開 |
+| 6 | backend 起動 | SQLite → Cloud SQL へコピーと照合 (連番補正) |
+| 7 | Webhook をローカルへ切替・疎通テスト (`ops.line_webhook`) | EDINET をローカルから GCS へ |
+| 8 | GCP を standby に (`terraform apply -var standby=true`) | Webhook を Cloud Run へ切替・疎通テスト → ローカルを止める |
+
+前提: `gcloud auth login` / `gcloud auth application-default login`、`brew install cloud-sql-proxy`、
+`terraform/terraform.tfvars`。`make secrets-diff` / `make webhook-get` で状態を確認できる。
+
 ---
 
 ## GCP デプロイ (LINE 経由で利用) — PROPOSAL-0011 P1

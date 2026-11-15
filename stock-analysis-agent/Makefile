@@ -10,7 +10,8 @@
 
 .PHONY: dev dev-down run install test lint help \
 	local-up local-up-private local-down local-logs local-ps local-config \
-	local-backup local-restore local-edinet-index local-offsite-install local-offsite-uninstall local-offsite-status
+	local-backup local-restore local-edinet-index local-offsite-install local-offsite-uninstall local-offsite-status \
+	cutover-to-local cutover-to-gcp secrets-diff secrets-pull secrets-push webhook-get
 
 # ---- ローカル開発 -------------------------------------------------------
 
@@ -86,6 +87,29 @@ local-offsite-uninstall:
 
 local-offsite-status:
 	scripts/local/offsite_backup_launchd.sh status
+
+# ---- ローカル ⇄ GCP の切替 (PROPOSAL-0013) --------------------------------
+# DRY_RUN=1 を付けると、実行するコマンドを表示するだけ
+
+cutover-to-local:
+	scripts/cutover/to_local.sh
+
+cutover-to-gcp:
+	scripts/cutover/to_gcp.sh
+
+# config/local.env と Secret Manager の秘密情報 (値は表示しない)
+secrets-diff:
+	cd app && uv run python -m ops.secrets_sync diff
+
+secrets-pull:
+	cd app && uv run python -m ops.secrets_sync pull
+
+secrets-push:
+	cd app && uv run python -m ops.secrets_sync push
+
+# 今の LINE Webhook URL
+webhook-get:
+	cd app && uv run python -m ops.line_webhook get
 
 # ---- ヘルプ --------------------------------------------------------------
 
