@@ -32,6 +32,12 @@ print(json.dumps({
     "edinet_code_csv_path": s.edinet_code_csv_path,
     "enable_web_api": s.enable_web_api,
     "enable_api_docs": s.enable_api_docs,
+    "max_concurrency": s.analysis_max_concurrency,
+    "edinet_schedule": s.edinet_schedule_enabled,
+    "backup": s.backup_enabled,
+    "backup_dir": s.backup_dir,
+    "health": s.health_check_enabled,
+    "state_path": s.scheduler_state_path,
 }))
 """
 
@@ -76,6 +82,7 @@ def test_example_leaves_secrets_empty():
         "CLAUDE_CODE_OAUTH_TOKEN",
         "BRAVE_API_KEY",
         "EDINET_API_KEY",
+        "HEALTHCHECK_PING_BASE",
     ):
         assert env[key] == "", f"{key} は雛形では空にする"
 
@@ -96,3 +103,18 @@ def test_example_builds_local_production_settings():
     assert s["edinet_cache_backend"] == "local"
     assert s["edinet_cache_root"].startswith("/app/var/")
     assert s["edinet_code_csv_path"].startswith("/app/var/")
+    assert s["max_concurrency"] == 2
+    assert s["edinet_schedule"] is True
+    assert s["backup"] is True
+    assert s["backup_dir"].startswith("/app/var/")
+    assert s["health"] is True
+    assert s["state_path"].startswith("/app/var/")
+
+
+def test_scheduled_jobs_are_disabled_by_default():
+    """GCP (Cloud Run) では定期処理を動かさない。既定値は無効のまま。"""
+    s = _settings_from({})
+
+    assert s["edinet_schedule"] is False
+    assert s["backup"] is False
+    assert s["health"] is False

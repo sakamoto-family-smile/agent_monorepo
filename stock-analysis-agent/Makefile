@@ -9,7 +9,8 @@
 ################################################################################
 
 .PHONY: dev dev-down run install test lint help \
-	local-up local-up-private local-down local-logs local-ps local-config
+	local-up local-up-private local-down local-logs local-ps local-config \
+	local-backup local-restore local-edinet-index local-offsite-install local-offsite-uninstall local-offsite-status
 
 # ---- ローカル開発 -------------------------------------------------------
 
@@ -63,6 +64,28 @@ local-ps:
 # compose の設定を展開して検証する (秘密情報は出さない)
 local-config:
 	$(LOCAL_COMPOSE) --profile public config --quiet && echo "docker-compose.local.yml: OK"
+
+# 定期処理 (backup / EDINET index) を今すぐ 1 回動かす。SQLite を VM の外 (ホスト) から書かないよう、
+# backend コンテナの中で実行する
+local-backup:
+	$(LOCAL_COMPOSE) exec backend python -c "import asyncio; from services.backup import run_backup; print(asyncio.run(run_backup()))"
+
+local-edinet-index:
+	$(LOCAL_COMPOSE) exec backend python -m batch.edinet_index_etl $(ARGS)
+
+# backup から戻す (backend を止めてから)。BACKUP=path/to/file で指定、省略時は最新
+local-restore:
+	scripts/local/restore.sh $(BACKUP)
+
+# backup を外部ディスク / iCloud にコピーする launchd (毎日 04:00)
+local-offsite-install:
+	scripts/local/offsite_backup_launchd.sh install
+
+local-offsite-uninstall:
+	scripts/local/offsite_backup_launchd.sh uninstall
+
+local-offsite-status:
+	scripts/local/offsite_backup_launchd.sh status
 
 # ---- ヘルプ --------------------------------------------------------------
 
