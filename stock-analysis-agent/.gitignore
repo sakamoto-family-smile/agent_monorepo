@@ -12,3 +12,6 @@ dist/
 build/
 .pytest_cache/
 
+
+# ローカル本番の設定 (秘密情報を含む)。雛形 (*.env.example) だけ追跡する
+config/*.env

@@ -407,3 +407,50 @@ async def test_confident_dict_hit_includes_name_in_ack(monkeypatch):
     await line_handler._cmd_analyze(["トヨタ"], ev, deps)
     assert any("トヨタ (7203.T)" in r["text"] for r in client.replies)
     assert len(scheduled) == 1
+
+
+# ---------------------------------------------------------------------------
+# 同時分析数の上限 (PROPOSAL-0013、in-process 実行時)
+# ---------------------------------------------------------------------------
+
+
+async def test_in_process_analysis_waits_for_a_free_slot(monkeypatch):
+    import asyncio
+
+    from services.analysis_limiter import reset_analysis_slots
+
+    monkeypatch.setattr(config.settings, "analyze_rate_limit_per_day", 0)
+    monkeypatch.setattr(config.settings, "tasks_enabled", False)
+    monkeypatch.setattr(config.settings, "analysis_max_concurrency", 1)
+    reset_analyze_limiter()
+    reset_analysis_slots()
+
+    release = asyncio.Event()
+    delivered: list[str] = []
+
+    async def fake_deliver(deps, *, to, target):  # noqa: ANN001
+        await release.wait()
+        delivered.append(to)
+
+    monkeypatch.setattr(line_handler, "run_and_deliver_analysis", fake_deliver)
+
+    scheduled: list = []
+    clients = [_StubClient(), _StubClient()]
+    for user, client in zip(("U_a", "U_b"), clients):
+        deps = line_handler.HandlerDeps(
+            line_client=client, schedule_background=lambda f: scheduled.append(f)
+        )
+        ev = LineTextEvent(
+            event_type="text", line_user_id=user, reply_token="rt", text="分析 トヨタ"
+        )
+        await line_handler._cmd_analyze(["トヨタ"], ev, deps)
+
+    tasks = [asyncio.create_task(job()) for job in scheduled]
+    await asyncio.sleep(0.01)
+    assert clients[0].pushes == []
+    assert [p["text"] for p in clients[1].pushes] == [line_handler.ANALYZE_QUEUED_TEXT]
+
+    release.set()
+    await asyncio.gather(*tasks)
+    assert delivered == ["U_a", "U_b"]
+    reset_analysis_slots()
