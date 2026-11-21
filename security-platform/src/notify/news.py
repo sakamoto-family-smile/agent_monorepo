@@ -7,10 +7,14 @@ intel.db は読み取り専用で開き、report_extractions の brief (重大�
 - 並べ方: 重大度 → 使っている技術に関係あり → 公式・調査会社・報道の順 → 新しい順
 - KEV: 追加されたものは全部 (LLM を通さない)。関係ある製品を上に
 - URL はフィードに書かれた元記事のものだけを使う (LLM の出力からは取らない)
+
+週次は前の週 (月〜日, notify_timezone) の分を GitHub Issue (private リポジトリ) の Markdown にする。
+記事の題名・要約は外部の入力なので、Markdown の記法とメンション (@) を無効にしてから載せる。
 """
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -252,3 +256,143 @@ def daily_message(s: Selection, now: datetime, tz: ZoneInfo) -> str:
     if s.groups:
         lines.append("要約は記事を LLM が読んで作ったものです。対応の判断は元記事で確かめてください")
     return "\n".join(lines)
+
+
+# ── 週次 ──────────────────────────────────────────────────────────────────
+WEEKLY_GROUP_LIMIT = 60
+WEEKLY_KEV_LIMIT = 60
+LABEL = "news"
+LABEL_COLOR = "0e8a16"
+
+
+@dataclass(frozen=True)
+class Week:
+    start: date  # 月曜
+    tz: ZoneInfo
+
+    @property
+    def end(self) -> date:  # 翌週の月曜 (含まない)
+        return self.start + timedelta(days=7)
+
+    @property
+    def key(self) -> str:
+        y, w, _ = self.start.isocalendar()
+        return f"{y}-W{w:02d}"
+
+    @property
+    def label(self) -> str:
+        return f"{self.key} ({self.start:%m/%d}〜{self.end - timedelta(days=1):%m/%d})"
+
+    def utc_range(self) -> tuple[datetime, datetime]:
+        def at(d: date) -> datetime:
+            return datetime(d.year, d.month, d.day, tzinfo=self.tz)
+        return at(self.start), at(self.end)
+
+
+def previous_week(now: datetime, tz: ZoneInfo) -> Week:
+    today = now.astimezone(tz).date()
+    return Week(today - timedelta(days=today.weekday() + 7), tz)
+
+
+@dataclass(frozen=True)
+class Weekly:
+    week: Week
+    groups: tuple[ArticleGroup, ...]
+    kev: tuple[Kev, ...]
+    relevant_kev: frozenset[str]
+    severity_counts: dict[str, int]  # その週に要約が付いた記事の重大度ごとの件数
+    unbriefed: int  # その週に抽出が終わったのに要約が無い記事
+
+
+def select_weekly(intel: Engine, week: Week, cfg: NewsConfig) -> Weekly:
+    since, until = week.utc_range()
+    groups = group_articles(load_articles(intel, since, until), cfg)
+    kevs = sort_kev(load_kev(intel, week.start, week.end), cfg)
+    counts: dict[str, int] = dict.fromkeys(SEVERITY_LABELS, 0)
+    unbriefed = 0
+    try:
+        with intel.connect() as conn:
+            for sev, n in conn.execute(text(
+                "SELECT severity, COUNT(*) FROM report_extractions WHERE status = 'done' "
+                "AND finished_at >= :s AND finished_at < :u GROUP BY severity"
+            ), {"s": to_iso(since), "u": to_iso(until)}).all():
+                if sev is None:
+                    unbriefed = n
+                elif sev in counts:
+                    counts[sev] = n
+    except OperationalError:
+        pass
+    return Weekly(week, tuple(groups), tuple(kevs), frozenset(k.cve for k in kevs
+                                                              if cfg.kev_relevant(k.vendor, k.product)),
+                  counts, unbriefed)
+
+
+_MD_SPECIAL = re.compile(r"([\\`*_{}\[\]()<>#+!|~])")
+_SAFE_URL = re.compile(r"^https://[^\s<>\"'`]+$")
+
+
+def md_text(value: str | None) -> str:
+    """外部の文字列を Markdown の本文に載せる。記法・HTML・メンション・改行を無効にする。"""
+    v = " ".join((value or "").split())
+    return _MD_SPECIAL.sub(r"\\\1", v).replace("@", "＠")
+
+
+def md_link(url: str | None) -> str:
+    return f"<{url}>" if url and _SAFE_URL.match(url) else "-"
+
+
+def _group_md(g: ArticleGroup) -> list[str]:
+    a = g.lead
+    head = f"- **[{SEVERITY_LABELS[g.severity]}]** {md_text(a.summary_ja)}"
+    meta = [f"出典: {md_text(a.feed_id)}" + (f" ほか {len(g.others)} 件" if g.others else ""),
+            f"題名: {md_text(a.title)[:200]}"]
+    if g.relevant:
+        meta.insert(0, f"関係あり: {', '.join(g.relevant)}")
+    if a.identifiers:
+        meta.append(", ".join(a.identifiers[:5]))
+    return [head, f"  - {' / '.join(meta)}", f"  - {md_link(a.url)}"]
+
+
+def weekly_issue(w: Weekly) -> tuple[str, str]:
+    title = f"週次セキュリティニュース {w.week.label}"
+    relevant = [g for g in w.groups if g.relevant]
+    others = [g for g in w.groups if not g.relevant]
+    crit = sum(1 for g in w.groups if g.severity == "critical")
+    lines = [
+        f"<!-- security-platform:news-week={w.week.key} -->",
+        f"## {w.week.label}",
+        "",
+        f"- 重大 {crit} 件 / 高 {len(w.groups) - crit} 件 (同じ CVE / GHSA の記事はまとめて 1 件)",
+        f"- CISA KEV への追加 {len(w.kev)} 件 (使っている製品 {len(w.relevant_kev)} 件)",
+        "",
+        "要約は記事を LLM が読んで作ったものです。対応の判断は元記事で確かめてください。",
+    ]
+    for heading, groups in (("使っている技術に関係するもの", relevant), ("重大・高の記事", others)):
+        if not groups:
+            continue
+        lines += ["", f"## {heading} ({len(groups)} 件)", ""]
+        for g in groups[:WEEKLY_GROUP_LIMIT]:
+            lines += _group_md(g)
+        if len(groups) > WEEKLY_GROUP_LIMIT:
+            lines.append(f"- ほか {len(groups) - WEEKLY_GROUP_LIMIT} 件")
+    if w.kev:
+        lines += ["", f"## CISA KEV への追加 ({len(w.kev)} 件)", "",
+                  "| CVE | 内容 | 追加日 | 備考 |", "|---|---|---|---|"]
+        for k in w.kev[:WEEKLY_KEV_LIMIT]:
+            notes = [n for n in ("関係あり" if k.cve in w.relevant_kev else "",
+                                 "ランサムウェアで悪用" if k.ransomware == "Known" else "") if n]
+            name = k.name or " ".join(p for p in (k.vendor, k.product) if p)
+            lines.append(f"| {k.cve} | {md_text(name)} | {k.date_added} | {' / '.join(notes) or '-'} |")
+        if len(w.kev) > WEEKLY_KEV_LIMIT:
+            lines.append(f"\nほか {len(w.kev) - WEEKLY_KEV_LIMIT} 件")
+    counts = " / ".join(f"{SEVERITY_LABELS[k]} {v}" for k, v in w.severity_counts.items())
+    lines += ["", "## 判定の内訳", "", f"- 要約が付いた記事: {counts}",
+              f"- 抽出は終わったが要約が無い記事: {w.unbriefed} 件"]
+    return title, "\n".join(lines) + "\n"
+
+
+def weekly_line(w: Weekly, url: str) -> str:
+    crit = sum(1 for g in w.groups if g.severity == "critical")
+    return (f"【週次セキュリティニュース】{w.week.label}\n"
+            f"重大 {crit} / 高 {len(w.groups) - crit} 件、KEV の追加 {len(w.kev)} 件 "
+            f"(使っている製品 {len(w.relevant_kev)} 件)\n{url}")

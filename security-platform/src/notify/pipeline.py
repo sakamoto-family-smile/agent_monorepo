@@ -7,6 +7,7 @@
 | notify_digest | 15 分 | 1 日 1 回、DIGEST_HOUR 時を過ぎたら日次まとめを LINE で送る |
 | notify_issues | 30 分 | 未対応の Finding を GitHub Issues (private リポジトリ) に写す |
 | notify_news | 15 分 | 1 日 1 回、日次まとめの後に重大ニュース (KEV の追加・重大な記事) を LINE で送る (PROPOSAL-0015) |
+| notify_news_weekly | 30 分 | 週 1 回 (月曜の日次まとめの時刻以降)、前の週の重大ニュースを GitHub Issue にし、LINE にリンクを送る |
 
 notify.db にだけ書き、detection.db・intel.db は読み取り専用で開く。送った通知は
 notifications.dedupe_key で記録し、途中で落ちても同じものを二重に送らない。
@@ -48,6 +49,7 @@ JOB_HEALTH = "notify_health"
 JOB_DIGEST = "notify_digest"
 JOB_ISSUES = "notify_issues"
 JOB_NEWS = "notify_news"
+JOB_NEWS_WEEKLY = "notify_news_weekly"
 FINDING_EVENTS = ("finding.opened", "finding.reopened", "finding.updated")
 WARNING_EVENT = "warning.opened"
 
@@ -64,6 +66,7 @@ class NotifySettings:
     mirror_interval: timedelta = timedelta(minutes=10)
     news_config: news.NewsConfig | None = None  # None なら重大ニュースを送らない
     news_daily_limit: int = 5
+    news_weekly: bool = False  # 週次の Issue を作るか (news_config も要る)
 
 
 def is_p1_alert(event: Event) -> bool:
@@ -281,6 +284,50 @@ class NotifyPipeline:
                                       "VALUES (:i, :k, :s, :t)"), {"i": item_key, "k": key, "s": shown,
                                                                   "t": to_iso(now)})
             detail["status"] = status
+
+    def run_news_weekly(self, now: datetime | None = None, *, force: bool = False) -> None:
+        """前の週の分を 1 件の Issue にして LINE にリンクを送る。途中で失敗しても、次の回に続きからやり直す
+        (Issue は記録してから LINE を送るので、二重に立てない)。"""
+        with self._run(JOB_NEWS_WEEKLY) as detail:
+            now = now or utc_now()
+            cfg, intel = self.cfg.news_config, self._intel()
+            if cfg is None or not self.cfg.news_weekly:
+                detail["skipped"] = "disabled"
+                return
+            if not self.github.configured or intel is None:
+                detail["skipped"] = "GitHub Issues が未設定" if intel else "intel.db がありません"
+                return
+            week = news.previous_week(now, self.cfg.timezone)
+            due = datetime.combine(week.end, datetime.min.time(), self.cfg.timezone) + timedelta(
+                hours=self.cfg.digest_hour)
+            line_key = f"news-weekly:{week.key}"
+            with self.engine.connect() as conn:
+                number = conn.execute(text("SELECT number FROM news_issues WHERE week = :w"),
+                                      {"w": week.key}).scalar()
+            if (now < due and not force) or (number is not None and self._already_sent(line_key)):
+                detail["skipped"] = "not due"
+                return
+            weekly = news.select_weekly(intel, week, cfg)
+            if number is None:
+                title, body = news.weekly_issue(weekly)
+                self.github.ensure_label(news.LABEL, news.LABEL_COLOR)
+                number = self.github.create(title, body, [news.LABEL])
+                with self.engine.begin() as conn:
+                    conn.execute(text("INSERT INTO news_issues (week, number, state, created_at) "
+                                      "VALUES (:w, :n, 'open', :t)"), {"w": week.key, "n": number, "t": to_iso(now)})
+            detail.update(week=week.key, issue=number, articles=len(weekly.groups), kev=len(weekly.kev))
+            if not self._already_sent(line_key):
+                detail["status"] = self._send("news_weekly", news.weekly_line(weekly, self.github.issue_url(number)),
+                                              line_key)
+            with self.engine.connect() as conn:
+                old = conn.execute(text("SELECT week, number FROM news_issues WHERE state = 'open' AND week != :w"),
+                                   {"w": week.key}).all()
+            for old_week, old_number in old:  # 前の週までの Issue は閉じる (読み終えたものを開いたままにしない)
+                self.github.close(old_number)
+                with self.engine.begin() as conn:
+                    conn.execute(text("UPDATE news_issues SET state = 'closed', closed_at = :t WHERE week = :w"),
+                                 {"t": to_iso(now), "w": old_week})
+            detail["closed"] = len(old)
 
     # ── GitHub Issues ─────────────────────────────────────────────────────
     def run_issues(self) -> None:

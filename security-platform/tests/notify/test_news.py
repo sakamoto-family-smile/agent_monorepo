@@ -34,13 +34,14 @@ def env(tmp_path: Path):
     apis = FakeApis()
     client = httpx.Client(transport=httpx.MockTransport(apis))
 
-    def make(cfg: news.NewsConfig | None = CFG, limit: int = 5, line_token: str = "tok") -> NotifyPipeline:
+    def make(cfg: news.NewsConfig | None = CFG, limit: int = 5, line_token: str = "tok", weekly: bool = True,
+             gh_token: str = "ghtok") -> NotifyPipeline:
         return NotifyPipeline(
             make_engine(paths.sqlite_path("notify")), lambda: None,
             lambda: make_engine(paths.sqlite_path("intel"), read_only=True), paths.sbom_images_dir,
-            LineChannel(client, line_token, ["Uaaa"]), GitHubIssues(client, "", ""),
+            LineChannel(client, line_token, ["Uaaa"]), GitHubIssues(client, gh_token, "owner/findings"),
             NotifySettings(TZ, 9, "P3", timedelta(hours=1), timedelta(days=7), {}, news_config=cfg,
-                           news_daily_limit=limit),
+                           news_daily_limit=limit, news_weekly=weekly),
         )
 
     return intel, make, apis
@@ -225,3 +226,70 @@ def test_brief_check(env):
     with intel.begin() as conn:
         conn.execute(text("UPDATE report_extractions SET severity = NULL, prompt_version = '2026-11-07.1'"))
     assert brief_checks(intel, NOW)[0].ok
+
+
+# ── 週次 ──────────────────────────────────────────────────────────────────
+MONDAY = datetime(2026, 11, 23, 9, 0, tzinfo=TZ)  # 2026-W48 の月曜。前の週は W47 (11/16〜11/22)
+
+
+def test_previous_week():
+    w = news.previous_week(MONDAY.astimezone(UTC), TZ)
+    assert (w.key, w.label) == ("2026-W47", "2026-W47 (11/16〜11/22)")
+    assert news.previous_week(datetime(2026, 11, 29, 23, 0, tzinfo=TZ), TZ).key == "2026-W47"  # 日曜の夜も同じ週
+
+
+def test_markdown_is_neutralized():
+    assert news.md_text("@alice [x](javascript:1) <img>\n|") == "＠alice \\[x\\]\\(javascript:1\\) \\<img\\> \\|"
+    assert news.md_link("https://ex.test/a?b=1") == "<https://ex.test/a?b=1>"
+    assert news.md_link('https://ex.test/"><script>') == "-" and news.md_link("http://ex.test") == "-"
+
+
+def test_weekly_issue_and_line_link(env):
+    intel, make, apis = env
+    in_week = datetime(2026, 11, 18, 12, 0, tzinfo=TZ)
+    add_article(intel, 1, "critical", topics=("github-actions",), at=in_week, summary="@team Action が侵害された。")
+    add_article(intel, 2, "high", at=in_week)
+    add_article(intel, 3, "low", at=in_week)
+    add_article(intel, 4, "critical", at=MONDAY + timedelta(hours=-1))  # 今週の記事は載せない (月曜 0 時より後)
+    add_kev(intel, "CVE-2026-9", "Google", "Chromium V8", "2026-11-17", ransomware="Known")
+    p = make()
+
+    p.run_news_weekly((MONDAY - timedelta(minutes=30)).astimezone(UTC))  # 月曜の 9 時前
+    assert apis.issues == {}
+    p.run_news_weekly(MONDAY.astimezone(UTC))
+    p.run_news_weekly((MONDAY + timedelta(hours=1)).astimezone(UTC))
+    [issue] = apis.issues.values()
+    assert issue["title"] == "週次セキュリティニュース 2026-W47 (11/16〜11/22)" and issue["labels"] == ["news"]
+    body = issue["body"]
+    assert "## 使っている技術に関係するもの (1 件)" in body and "＠team Action が侵害された。" in body
+    assert "## 重大・高の記事 (1 件)" in body and "記事 2 の要約" in body and "記事 3" not in body
+    assert "記事 4" not in body
+    assert "| CVE-2026-9 | Google Chromium V8 Vulnerability | 2026-11-17 | 関係あり / ランサムウェアで悪用 |" in body
+    assert "- 要約が付いた記事: 重大 1 / 高 1 / 中 0 / 低 1 / - 0" in body
+    [line] = apis.texts()
+    assert line == ("【週次セキュリティニュース】2026-W47 (11/16〜11/22)\n重大 1 / 高 1 件、KEV の追加 1 件 "
+                    "(使っている製品 1 件)\nhttps://github.com/owner/findings/issues/1")
+
+    # 翌週は新しい Issue を立て、前の週を閉じる
+    p.run_news_weekly((MONDAY + timedelta(days=7)).astimezone(UTC))
+    assert [i["state"] for i in apis.issues.values()] == ["closed", "open"]
+    assert q(p, "SELECT week, state FROM news_issues ORDER BY week") == [("2026-W47", "closed"), ("2026-W48", "open")]
+
+
+def test_weekly_retries_line_without_creating_twice(env):
+    intel, make, apis = env
+    p = make()
+    apis.line_status = 500
+    with pytest.raises(Exception, match="LINE push failed"):
+        p.run_news_weekly(MONDAY.astimezone(UTC))
+    assert len(apis.issues) == 1
+    apis.line_status = 200
+    p.run_news_weekly((MONDAY + timedelta(minutes=30)).astimezone(UTC))
+    assert len(apis.issues) == 1 and len(apis.texts()) == 1
+
+
+def test_weekly_skipped_when_disabled_or_unconfigured(env):
+    _, make, apis = env
+    make(weekly=False).run_news_weekly(MONDAY.astimezone(UTC))
+    make(gh_token="").run_news_weekly(MONDAY.astimezone(UTC))
+    assert apis.issues == {} and apis.line == []

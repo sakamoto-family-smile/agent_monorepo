@@ -345,6 +345,7 @@ GitHub Issues はすでに使っていて、スマホからも読め、コメン
 |---|---|---|
 | 2026-11-22 | Draft | 初稿 |
 | 2026-11-22 | Approved | #266 merged |
+| 2026-11-22 | PR3 | 週次の GitHub Issue (`notify_news_weekly` ジョブ・`make notify-news-weekly`)。記事の題名・要約は Markdown の記法とメンションを無効にして載せる。既定は無効 (`NEWS_WEEKLY_ENABLED`) |
 | 2026-11-22 | PR2 | 日次の重大ニュース (`notify_news` ジョブ・`make notify-news`・監視 `news:brief`)。既定は無効 (`NEWS_DAILY_ENABLED`) |
 | 2026-11-22 | PR1 | brief の抽出・保存、報道系フィード、LLM の上限 80 回。評価: Haiku で 14 件中 14 件が重大度の期待どおり (critical の見逃し 0) |
 

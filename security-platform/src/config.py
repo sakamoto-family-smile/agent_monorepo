@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     news_daily_enabled: bool = False
     news_daily_limit: int = 5  # 載せる記事の数 (同じ CVE の記事は 1 件に数える)
     news_path: Path = BASE_DIR / "config" / "news.yaml"  # 使っている技術 (イメージに焼き込む)
+    news_weekly_enabled: bool = False  # 月曜に前の週の分を GitHub Issue にする (GITHUB_ISSUES_* が要る)
 
     # B 自動改修 (remediation サービス)。トークンは config/remediation.env から remediation コンテナにだけ渡す
     remediation_repo: str = "sakamoto-family-smile/agent_monorepo"  # owner/repo
