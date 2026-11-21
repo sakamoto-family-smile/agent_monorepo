@@ -1,4 +1,4 @@
-# PROPOSAL-0015: ゴルフメモ・スイング動画・レッスン計測データを LINE で貯めて分析する golf-notes-agent
+# PROPOSAL-0016: ゴルフメモ・スイング動画・レッスン計測データを LINE で貯めて分析する golf-notes-agent
 
 | | |
 |---|---|
