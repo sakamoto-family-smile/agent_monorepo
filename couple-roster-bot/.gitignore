@@ -1,0 +1,11 @@
+# couple-roster-bot ローカル生成物
+.venv/
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+# サービスアカウント鍵は絶対にコミットしない
+*-credentials.json
+service-account*.json

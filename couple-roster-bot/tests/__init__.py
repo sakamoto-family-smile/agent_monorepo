@@ -1,0 +1,1 @@
+"""couple-roster-bot テスト。"""
