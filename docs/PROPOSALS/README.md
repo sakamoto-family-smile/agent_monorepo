@@ -77,7 +77,7 @@ docs/PROPOSALS/NNNN-short-kebab-title.md
 | [0011](0011-stock-analysis-agent-line-gcp.md) | stock-analysis-agent を LINE 経由で使えるよう GCP に配備 | stock-analysis-agent | Implemented |
 | [0012](0012-stock-watchlist.md) | stock-analysis-agent ユーザー別マイリスト (ウォッチリスト) | stock-analysis-agent | Implementing |
 | [0013](0013-stock-local-hosting-reversible.md) | stock-analysis-agent をローカル (Mac mini) へ移行し GCP へ戻せる状態を保つ | stock-analysis-agent | Implementing |
-| [0014](0014-llm-gateway.md) | LLM Gateway（LiteLLM + Langfuse + 評価データセット）を stock-analysis-agent から導入 | llm-gateway (新規) + stock-analysis-agent | In Review |
+| [0014](0014-llm-gateway.md) | LLM Gateway（LiteLLM + Langfuse + 評価データセット）を stock-analysis-agent から導入 | llm-gateway (新規) + stock-analysis-agent | Implementing |
 
 新しい提案を作るたびに上記表に 1 行追加する (forget-me-not)。
 
