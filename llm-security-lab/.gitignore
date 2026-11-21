@@ -1,0 +1,32 @@
+# Python / uv
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.python-version
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+*.egg-info/
+uv.lock
+
+# Env
+.env
+.env.local
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# 攻撃結果ファイル (regression mode 以外は git 対象外)
+results/
+
+# Ollama モデル data (docker volume 経由なのでホスト側には出ないはずだが念のため)
+ollama_data/
+
+# OS
+.DS_Store
+Thumbs.db
