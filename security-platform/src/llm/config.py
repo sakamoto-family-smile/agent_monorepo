@@ -10,7 +10,7 @@ class LlmSettings(BaseSettings):
 
     provider: str = "claude-code"  # claude-code / fake (anthropic / gemini は L4 PR4)
     model: str = "haiku"
-    daily_limit: int = 50  # 1 日に LLM を呼ぶ回数の上限
+    daily_limit: int = 80  # 1 日に LLM を呼ぶ回数の上限 (報道の記事は intel が 1 日 30 件までしか依頼しない)
     run_hour: int = 3  # 常駐で動く時刻 (timezone の時)。Max プランの上限は対話と共有なので夜に回す
     window_hours: int = 3
     timezone: str = "Asia/Tokyo"

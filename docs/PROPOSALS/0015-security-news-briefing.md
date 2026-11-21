@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | Implementing |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-11-22 |
 | **Updated** | 2026-11-22 |
 | **Target** | security-platform |
-| **Related PRs** | (本 PR: 設計) |
+| **Related PRs** | #266 (設計), PR1 (brief の抽出) |
 | **Supersedes** | — |
 | **Superseded by** | — |
 
@@ -179,9 +179,9 @@ Claude・MCP / Docker / macOS など) に関係するものを上に並べる。
 | `topics_json` | TEXT NULL | topics の配列 |
 | `brief_identifiers_json` | TEXT NULL | identifiers の配列 |
 
-`feeds` の設定 (`config/feeds.yaml`) に `brief_only: true` を足せるようにする。
-`brief_only` のフィード (報道系) の記事は `claims` を捨て、`report_claims` に入れない
-(照合・早期警告に使わない)。
+報道系のフィードは `config/feeds.yaml` で `trust: news` にする。`trust: news` の記事は `claims` を捨て、
+`report_claims` に入れない (照合・早期警告に使わない)。設定の項目は増やさない
+(当初は `brief_only` を足す案だったが、`news` の意味と同じなので trust で決める)。
 
 **notify.db** (migration `0002_news`)。
 
@@ -195,9 +195,9 @@ Claude・MCP / Docker / macOS など) に関係するものを上に並べる。
 | ファイル | 変更 | 内容 |
 |---|---|---|
 | `src/llm/schema.py` | 変更 | `brief` の形・`TOPICS`・重大度の基準をプロンプトに追加。`PROMPT_VERSION` を上げる |
-| `src/intel/extraction.py` | 変更 | `brief` の検証と保存。`brief_only` のフィードは claims を捨てる。依頼の順を official → research → news、news は 1 日 30 件まで |
-| `src/intel/sources/feeds.py` | 変更 | `brief_only` の設定を読む |
-| `config/feeds.yaml` | 変更 | 報道系フィードを追加 (候補: BleepingComputer, The Hacker News, Security NEXT, piyolog。RSS が使えるかは実装時に確認) |
+| `src/intel/extraction.py` | 変更 | `brief` の検証と保存。`trust: news` の記事は claims を捨てる。依頼は official・research を先に、news は 1 日 30 件まで |
+| `config/feeds.yaml` | 変更 | 報道系フィードを追加 (BleepingComputer, The Hacker News, Security NEXT, piyolog) |
+| `src/llm/eval.py` / `eval_cases.json` | 変更 | 重大度の期待を足し、報道向けの評価用記事 (ゼロデイ・SaaS の侵害・誇張した見出し・要約へのインジェクションなど) を追加 |
 | `src/llm/config.py` | 変更 | `daily_limit` の既定を 80 に |
 | `src/notify/news.py` | 新規 | 日次・週次の対象を選ぶ規則と、LINE の文・Issue の本文を組み立てる |
 | `src/notify/pipeline.py` | 変更 | `run_digest` のあとに重大ニュースを送る。週次ジョブ `notify_news_weekly` を追加 |
@@ -341,6 +341,8 @@ GitHub Issues はすでに使っていて、スマホからも読め、コメン
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-11-22 | Draft | 初稿 |
+| 2026-11-22 | Approved | #266 merged |
+| 2026-11-22 | PR1 | brief の抽出・保存、報道系フィード、LLM の上限 80 回。評価: Haiku で 14 件中 14 件が重大度の期待どおり (critical の見逃し 0) |
 
 予定している PR:
 
