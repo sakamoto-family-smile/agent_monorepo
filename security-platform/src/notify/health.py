@@ -3,6 +3,8 @@
 - intel:<source>: 情報源ごとの最終成功が取得間隔の STALE_FACTOR 倍より古い
 - feed:<feed_id>: L4 のフィードの最終成功が FEED_STALE より古い (一度も取れていなければ FEED_FIRST_FAILURES 回失敗で)
 - llm:extractor: L4 の記事の抽出待ちが EXTRACT_QUEUE_MAX_AGE より古い (extractor が止まっている・トークン切れ)
+- news:brief: 抽出は終わっているのに BRIEF_WINDOW の間 brief が 1 件も付いていない
+  (指示や出力の形の崩れで、要約だけ全部捨てている。PROPOSAL-0015)
 - detection:scan: 照合の最終成功が照合間隔の STALE_FACTOR 倍より古い
 - sbom:<service>: 本番イメージの SBOM (make detection-images) が IMAGE_SBOM_MAX_AGE_DAYS より古い
 - host:<host_id>: 開発 PC のツール一覧 (launchd の make detection-host) が HOST_INVENTORY_MAX_AGE_HOURS より古い
@@ -20,7 +22,7 @@ from pathlib import Path
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import OperationalError
 
-from ..common.timeutil import parse_iso
+from ..common.timeutil import parse_iso, to_iso
 from ..detection.host_inventory import (
     InvalidInventory,
     list_inventories,
@@ -118,6 +120,28 @@ def extractor_checks(engine: Engine | None, state_dir: Path | None, now: datetim
     hours = waited.total_seconds() / 3600
     return [Check("llm:extractor", waited <= max_age,
                   f"抽出待ち {n} 件 (最も古いもので {hours:.0f} 時間前から){stopped}")]
+
+
+BRIEF_WINDOW = timedelta(hours=48)
+BRIEF_MIN_DONE = 3  # これより少ない日は判断しない (記事が少ない日がある)
+BRIEF_SINCE_PROMPT = "2026-11-22.1"  # brief を出すようになった指示の版 (src/llm/schema.py の PROMPT_VERSION)
+
+
+def brief_checks(engine: Engine | None, now: datetime, window: timedelta = BRIEF_WINDOW) -> list[Check]:
+    if engine is None:
+        return []
+    try:
+        with engine.connect() as conn:
+            done, briefed = conn.execute(text(
+                "SELECT COUNT(*), COUNT(severity) FROM report_extractions "
+                "WHERE status = 'done' AND finished_at >= :s AND prompt_version >= :v"
+            ), {"s": to_iso(now - window), "v": BRIEF_SINCE_PROMPT}).one()
+    except OperationalError:
+        return []  # intel.db が PROPOSAL-0015 より前
+    hours = int(window.total_seconds() // 3600)
+    if done < BRIEF_MIN_DONE:
+        return [Check("news:brief", True, f"直近 {hours} 時間の抽出 {done} 件 (少ないので判断しない)")]
+    return [Check("news:brief", briefed > 0, f"直近 {hours} 時間の抽出 {done} 件のうち要約あり {briefed} 件")]
 
 
 def detection_checks(

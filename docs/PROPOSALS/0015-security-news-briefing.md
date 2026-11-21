@@ -188,6 +188,7 @@ Claude・MCP / Docker / macOS など) に関係するものを上に並べる。
 | テーブル | 主な列 | 用途 |
 |---|---|---|
 | `notifications` (既存) | `dedupe_key` = `news:YYYY-MM-DD` / `news-weekly:YYYY-Www` | 二重送信を防ぐ (今と同じ仕組み) |
+| `news_items` (新規) | `item_key` (PK, `report:<id>` / `kev:<CVE>`), `dedupe_key`, `shown`, `handled_at` | 日次で扱った記事・KEV。翌日以降に重ねない |
 | `news_issues` (新規) | `week` (PK), `issue_number`, `state`, `body_hash`, `created_at`, `closed_at` | 週次 Issue の記録。翌週の Issue を立てたら前の週を閉じる |
 
 ### 4.4 主要モジュール / ファイル
@@ -214,7 +215,9 @@ Claude・MCP / Docker / macOS など) に関係するものを上に並べる。
    その中で official → research → news、最後に新しい順
 4. 上位 5 件を載せ、残りは「ほか n 件 (週次まとめに載ります)」とだけ書く
 5. KEV はすべて載せる (1 日 0〜6 件程度)。関係ある製品を上に並べ、7 件を超えたら残りは件数だけ
-6. 記事も KEV も 0 件なら送らない (日次まとめに「重大ニュース: なし」の 1 行を足す)
+6. 記事も KEV も 0 件なら送らない (その日は済んだものとして記録する)
+7. 送った記事・KEV と、載せきれなかったものは notify.db の `news_items` に記録し、翌日以降に重ねて送らない。
+   記事は要約が付いてから 7 日以内、KEV は追加日から 3 日以内のものだけを日次で扱う
 
 **LINE の文の例**
 
@@ -342,6 +345,7 @@ GitHub Issues はすでに使っていて、スマホからも読め、コメン
 |---|---|---|
 | 2026-11-22 | Draft | 初稿 |
 | 2026-11-22 | Approved | #266 merged |
+| 2026-11-22 | PR2 | 日次の重大ニュース (`notify_news` ジョブ・`make notify-news`・監視 `news:brief`)。既定は無効 (`NEWS_DAILY_ENABLED`) |
 | 2026-11-22 | PR1 | brief の抽出・保存、報道系フィード、LLM の上限 80 回。評価: Haiku で 14 件中 14 件が重大度の期待どおり (critical の見逃し 0) |
 
 予定している PR:

@@ -22,8 +22,9 @@ RUN uv sync --frozen --no-dev --no-install-project --no-cache
 COPY src ./src
 COPY migrations ./migrations
 COPY dbt ./dbt
-# L4 のフィード一覧だけ焼き込む (config/ の他のファイルには秘密情報がある)
+# L4 のフィード一覧と重大ニュースの設定だけ焼き込む (config/ の他のファイルには秘密情報がある)
 COPY config/feeds.yaml ./config/feeds.yaml
+COPY config/news.yaml ./config/news.yaml
 
 # DuckDB の sqlite 拡張はビルド時に入れておく (実行時にダウンロードしない)
 # compose はホストの UID で動かすので、拡張 (HOME 配下) は誰でも読めるようにする。

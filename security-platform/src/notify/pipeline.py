@@ -6,6 +6,7 @@
 | notify_health | 30 分 | 取得停止など (health.py) の状態が変わったら LINE で送る (停止・復旧) |
 | notify_digest | 15 分 | 1 日 1 回、DIGEST_HOUR 時を過ぎたら日次まとめを LINE で送る |
 | notify_issues | 30 分 | 未対応の Finding を GitHub Issues (private リポジトリ) に写す |
+| notify_news | 15 分 | 1 日 1 回、日次まとめの後に重大ニュース (KEV の追加・重大な記事) を LINE で送る (PROPOSAL-0015) |
 
 notify.db にだけ書き、detection.db・intel.db は読み取り専用で開く。送った通知は
 notifications.dedupe_key で記録し、途中で落ちても同じものを二重に送らない。
@@ -27,10 +28,11 @@ from sqlalchemy import Connection, Engine, text
 
 from ..common.events import Consumer, Event
 from ..common.timeutil import parse_iso, to_iso, utc_now
-from . import issues, messages
+from . import issues, messages, news
 from .channels import GitHubIssues, LineChannel
 from .health import (
     Check,
+    brief_checks,
     detection_checks,
     extractor_checks,
     feed_checks,
@@ -45,6 +47,7 @@ JOB_EVENTS = "notify_events"
 JOB_HEALTH = "notify_health"
 JOB_DIGEST = "notify_digest"
 JOB_ISSUES = "notify_issues"
+JOB_NEWS = "notify_news"
 FINDING_EVENTS = ("finding.opened", "finding.reopened", "finding.updated")
 WARNING_EVENT = "warning.opened"
 
@@ -59,6 +62,8 @@ class NotifySettings:
     intel_schedule: dict[str, timedelta]
     host_max_age: timedelta = timedelta(hours=48)
     mirror_interval: timedelta = timedelta(minutes=10)
+    news_config: news.NewsConfig | None = None  # None なら重大ニュースを送らない
+    news_daily_limit: int = 5
 
 
 def is_p1_alert(event: Event) -> bool:
@@ -189,7 +194,7 @@ class NotifyPipeline:
         hosts = host_checks(self.hosts_dir, self.cfg.host_max_age, now) if self.hosts_dir else []
         intel = self._intel()
         return intel_checks(intel, self.cfg.intel_schedule, now) + feed_checks(intel, now) + extractor_checks(
-            intel, self.llm_state_dir, now) + detection_checks(
+            intel, self.llm_state_dir, now) + brief_checks(intel, now) + detection_checks(
             self._detection(), self.cfg.scan_interval, self.sbom_dir, self.cfg.sbom_max_age, now) + hosts \
             + (remediation_checks(self._remediation(), self.cfg.mirror_interval, now) if self._remediation else [])
 
@@ -234,6 +239,48 @@ class NotifyPipeline:
             since = parse_iso(last) if last else now - timedelta(days=1)
             body = messages.digest(detection, since, now, self.checks(now), self.cfg.timezone, self._intel())
             detail["status"] = self._send("digest", body, key)
+
+    # ── 重大ニュース ──────────────────────────────────────────────────────
+    def news_selection(self, now: datetime) -> news.Selection | None:
+        intel, cfg = self._intel(), self.cfg.news_config
+        if intel is None or cfg is None:
+            return None
+        with self.engine.connect() as conn:
+            handled = set(conn.execute(text("SELECT item_key FROM news_items")).scalars())
+        return news.select_daily(intel, handled, now, cfg, self.cfg.news_daily_limit, self.cfg.timezone)
+
+    def run_news(self, now: datetime | None = None, *, force: bool = False) -> None:
+        """日次まとめを送った後 (送れない日は 1 時間後) に 1 日 1 回。force なら時刻を待たない。"""
+        with self._run(JOB_NEWS) as detail:
+            now = now or utc_now()
+            local = now.astimezone(self.cfg.timezone)
+            key = f"news:{local:%Y-%m-%d}"
+            if self.cfg.news_config is None:
+                detail["skipped"] = "disabled"
+                return
+            due = self._already_sent(f"digest:{local:%Y-%m-%d}") or local.hour >= self.cfg.digest_hour + 1
+            if (not due and not force) or self._already_sent(key):
+                detail["skipped"] = "not due"
+                return
+            selection = self.news_selection(now)
+            if selection is None:
+                detail["skipped"] = "intel.db がありません"
+                return
+            detail.update(articles=len(selection.groups), overflow=len(selection.overflow),
+                          kev=len(selection.kev) + len(selection.kev_overflow))
+            with self.engine.begin() as conn:
+                if selection.empty:  # 送るものが無い日も、その日は済んだことにする
+                    status = "empty"
+                    conn.execute(text("INSERT OR IGNORE INTO notifications (dedupe_key, channel, kind, status, body, "
+                                      "sent_at) VALUES (:k, 'line', 'news', 'empty', '', :t)"),
+                                 {"k": key, "t": to_iso(now)})
+                else:
+                    status = self._send("news", news.daily_message(selection, now, self.cfg.timezone), key, conn)
+                for item_key, shown in selection.keys():
+                    conn.execute(text("INSERT OR IGNORE INTO news_items (item_key, dedupe_key, shown, handled_at) "
+                                      "VALUES (:i, :k, :s, :t)"), {"i": item_key, "k": key, "s": shown,
+                                                                  "t": to_iso(now)})
+            detail["status"] = status
 
     # ── GitHub Issues ─────────────────────────────────────────────────────
     def run_issues(self) -> None:
