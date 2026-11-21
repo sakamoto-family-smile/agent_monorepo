@@ -80,8 +80,8 @@ Flex Message で返る。「OK」で確定、誤りがあれば「キャリー 1
   backend 内のスケジューラで動かす（PROPOSAL-0013 §3.3 と同じ方針）。
 - 外部へ送るデータは LLM API への入力（テキスト・画像・動画のキーフレーム）のみ。
   embedding はローカルモデルで作り、外に出さない。
-- レッスン計測画像のフォーマット（項目名・レイアウト）は**サンプル画像の受領後に確定**する。
-  それまでは「主要項目の列 + 未知項目を入れる `extra` JSON」の可変スキーマで設計しておく（§4.2）。
+- レッスン計測画像の項目は 2026-11-21 受領のサンプル（1 球ごとの 15 項目）で確定した（§4.2.1）。
+  レイアウト変更や未知の項目に備え、確定列に入らない項目は `extra_json` に原文のまま残す。
 
 ### [必須] 3.3 Risks and Mitigations
 
@@ -154,10 +154,7 @@ media           id, session_id, raw_event_id, kind (video|image), path, sha256,
                 source (line|folder)
 
 lesson_captures id, session_id, media_id, ocr_model, ocr_raw_json, status (pending|confirmed|rejected)
-launch_metrics  id, capture_id, shot_no, club, ball_speed, club_speed, smash_factor,
-                launch_angle, spin_rate, spin_axis, carry, total, offline, apex,
-                extra_json, confidence_json
-                -- 列は一般的な項目の仮置き。サンプル画像受領後に確定し、未知項目は extra_json
+launch_metrics  1 球 = 1 行。列は §4.2.1
 metric_edits    metric_id, field, before, after, edited_at   -- 訂正履歴
 
 rounds          id, session_id, course, total, putts, fairways_hit, gir, penalties, source
@@ -167,6 +164,60 @@ swing_analyses  id, media_id, method (pose|llm), version, keyframes_json, metric
                 findings_text, created_at
                 -- method と version を残し、解析手法を変えても過去と比較・再計算できる
 ```
+
+#### 4.2.1 レッスン計測データ（`launch_metrics`）
+
+サンプル（2026-11-21 受領）:
+
+```
+2026/10/07 17:09 7アイアン
+飛距離: 149.9yd / キャリー: 131.4yd / ラン: 18.5yd
+クラブスピード: 31.6m/s / ボールスピード: 44.3m/s / ミート率: 1.40（高い）
+最高到達点: 15.7m / 落下角度: 33.1° / 左右のズレ: 左 6.5yd
+打ち上げ角度(縦): 16.1° / バックスピン: 4449rpm（少ない）/ 打ち出し角度(横): 右 2.3°
+サイドスピン: 857rpm（ドロー・左回転）/ クラブ軌道: 5.8°（In-Out）/ フェース角度: 右 1.9°（Opened）
+```
+
+**符号の規約: 右・オープン・イントゥアウトを正とする**（右打ち前提。左右の向きは打球方向から見た向き）。
+画面の表記（「左」「In-Out」「Opened」など）は失わないよう、`labels_json` に原文のまま残す。
+単位は画面の単位（yd / m/s / m / ° / rpm）のまま保存し、換算はクエリ側で行う。
+
+| 列 | 画面の項目 | 単位 | サンプル値 | 正規化 |
+|---|---|---|---|---|
+| `shot_at` | 日時 | — | 2026-10-07 17:09 | JST の datetime。セッションの紐づけキーにもなる |
+| `club` | クラブ | — | `7I` | 「7アイアン」→ `7I`、「ドライバー」→ `1W` などに正規化。原文は `labels_json` |
+| `total_yd` | 飛距離 | yd | 149.9 | |
+| `carry_yd` | キャリー | yd | 131.4 | |
+| `run_yd` | ラン | yd | 18.5 | |
+| `club_speed_mps` | クラブスピード | m/s | 31.6 | |
+| `ball_speed_mps` | ボールスピード | m/s | 44.3 | |
+| `smash_factor` | ミート率 | — | 1.40 | 評価（高い）は `labels_json.smash_factor` |
+| `apex_m` | 最高到達点 | m | 15.7 | |
+| `descent_angle_deg` | 落下角度 | ° | 33.1 | |
+| `offline_yd` | 左右のズレ | yd | −6.5 | 左 = 負 |
+| `launch_v_deg` | 打ち上げ角度(縦) | ° | 16.1 | |
+| `backspin_rpm` | バックスピン | rpm | 4449 | 評価（少ない）は `labels_json.backspin` |
+| `launch_h_deg` | 打ち出し角度(横) | ° | +2.3 | 右 = 正 |
+| `sidespin_rpm` | サイドスピン | rpm | −857 | 左回転（ドロー）= 負。原文は `labels_json.sidespin` |
+| `club_path_deg` | クラブ軌道 | ° | +5.8 | In-Out = 正 / Out-In = 負 |
+| `face_angle_deg` | フェース角度 | ° | +1.9 | 右（Opened）= 正 / 左（Closed）= 負 |
+| `face_to_path_deg` | （派生） | ° | −3.9 | `face_angle − club_path`。保存はせずビューで計算 |
+
+その他の列: `id`, `capture_id`, `shot_no`, `labels_json`（画面の評価・方向の原文）,
+`extra_json`（確定列に無い項目）, `confidence_json`（項目ごとの OCR 信頼度）, `check_flags`（下記の検算結果）。
+
+**OCR 後の検算**（どれかに当てはまる球は確認 Flex で注意表示し、確定前に人が見る）:
+
+| 検算 | 式 | サンプル |
+|---|---|---|
+| 距離の整合 | `total ≈ carry + run`（±0.2yd） | 131.4 + 18.5 = 149.9 ✓ |
+| ミート率の整合 | `smash ≈ ball_speed / club_speed`（±0.02） | 44.3 / 31.6 = 1.402 ✓ |
+| 曲がりの向き | サイドスピンの符号と `face_to_path` の符号が一致 | 左回転（−）と −3.9° ✓ |
+| 方向表記と符号 | 「左」「右」「In-Out」「Opened」などの表記と数値の符号が一致 | ✓ |
+| 値の範囲 | クラブごとの妥当範囲（例: 7I の打ち上げ角 5〜35°） | ✓ |
+
+分析では、クラブ別のキャリーのばらつき、`face_to_path` と `offline_yd` の関係、
+練習メモ（例:「フェースが開く」）が書かれた前後の数値の変化などを扱う。
 
 ### 4.3 API
 
@@ -215,11 +266,11 @@ golf-notes-agent/
 
 ### [必須] 4.5 Test Plan
 
-- **Unit**: 署名検証、許可リスト、冪等キー、スコア文字列の抽出、OCR 結果 → `launch_metrics` の正規化、
+- **Unit**: 署名検証、許可リスト、冪等キー、スコア文字列の抽出、OCR 結果 → `launch_metrics` の正規化（符号規約・クラブ名）、§4.2.1 の検算、
   スイング指標の計算（固定のキーポイント列を入力）
 - **Integration**: webhook → raw_events → jobs → media 保存までを LINE API をモックして通す。
   リトライと失効時の通知。SQLite のバックアップ・復元
-- **Golden**: レッスン計測画像のサンプル（受領後）を固定入力にし、OCR 結果の期待値と項目一致率を計測。
+- **Golden**: レッスン計測画像のサンプルを固定入力にし、OCR 結果の期待値（§4.2.1 のサンプル値）との項目一致率を計測。
   モデル・プロンプト変更時の回帰検知に使う
 - **Manual**: 実機の LINE で各メッセージ種別を送信、Funnel 経由で届くことを確認。月 1 で復元リハーサル
 - カバレッジ 80% 以上（LLM 呼び出し部はモック）
@@ -296,6 +347,7 @@ webhook は 1 秒以内に 200 を返す。保存確認の返信は 10 秒以内
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-11-21 | Draft | 初稿 |
+| 2026-11-21 | Draft | レッスン計測サンプル受領。`launch_metrics` の列・符号規約・検算を確定（§4.2.1） |
 
 ### 実装フェーズ
 
