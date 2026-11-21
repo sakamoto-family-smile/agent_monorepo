@@ -27,7 +27,7 @@ make health
 | `CLAUDE_CODE_OAUTH_TOKEN` | 定額プランのトークン (Vertex AI に移るまで)。gateway がそのまま Anthropic に渡す |
 | `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` | 設定しない (定額プランのトークンの代わりに送られる) |
 
-Claude Code の設定 `modelOverrides` で別名を既知のモデルに対応付ける (例: `{"claude-opus-4-6": "stock-analysis"}`)。
+Claude Code の設定 `modelOverrides` で別名を既知のモデルに対応付ける (例: `{"claude-opus-5-5": "stock-analysis"}`)。
 対応付けがないと CLI は別名を未知のモデルとして扱い、毎回 1 本目の呼び出しが 400 で失敗してから送り直す。
 
 ## Langfuse v4 の注意

@@ -4,7 +4,8 @@
 model_list:
   - model_name: stock-analysis
     litellm_params:
-      model: anthropic/claude-opus-4-6
+      model: anthropic/claude-opus-5-5
+  # 後継モデルの試験用。後継が出たらここに割り当て、評価データセットで比べてから stock-analysis を替える
   - model_name: stock-analysis-next
     litellm_params:
       model: anthropic/claude-opus-5-5
