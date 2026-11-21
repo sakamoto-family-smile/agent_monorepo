@@ -35,7 +35,7 @@ Tailscale Funnel で `/api/line` だけを公開する。データの正本は�
 ### [必須] 2.1 Goals
 
 - [ ] LINE で送ったテキスト・スイング動画・画像が、取りこぼしゼロ・二重保存ゼロで Mac mini に保存される
-- [ ] レッスンの計測結果画像を OCR し、クラブ別の弾道・距離などの数値を DB に残せる（確認してから確定）
+- [ ] レッスンの計測結果テキストを LINE に貼るだけで、クラブ別の弾道・距離などの数値が DB に残る（画像しかない場合は OCR で補完）
 - [ ] メモ・動画・計測値・スコアが「セッション（練習 1 回 / レッスン 1 回 / ラウンド 1 回）」単位で紐づく
 - [ ] LINE で自然文の質問に、根拠（日付・メモ抜粋・数値）付きで回答できる
 - [ ] 同じアングルのスイング動画を時系列で比較し、変化を数値と言葉で返せる
@@ -57,8 +57,9 @@ Tailscale Funnel で `/api/line` だけを公開する。データの正本は�
 「📝 練習メモを保存（ドライバー / 方向性）」と返る。同じ日の動画・メモは自動で同じ練習セッションに入る。
 
 #### 3.1.2 レッスンの計測結果を数値で残す
-レッスン後に計測結果の画像を送ると、OCR 結果（クラブ・ボール初速・打ち出し角・スピン量・キャリー等）が
-Flex Message で返る。「OK」で確定、誤りがあれば「キャリー 182」のように訂正して確定する。
+レッスン後に計測結果のテキスト（日時・クラブ・飛距離・キャリー…の 15 項目）を LINE に貼ると、
+ルールベースで解析して即保存し、「⛳ 7I 1 球を保存（キャリー 131.4yd / 左 6.5yd）」と返る。
+検算に引っかかった球だけ Flex Message で確認を求める。テキストが無く画像しかない場合は OCR して、確認後に確定する。
 
 #### 3.1.3 スイング動画を比較する
 後方からのスイング動画を送ると保存され、Phase 4 以降は「先月の同アングルと比べて、トップでの頭の位置が
@@ -90,7 +91,7 @@ Flex Message で返る。「OK」で確定、誤りがあれば「キャリー 1
 | LINE webhook 署名検証漏れ / 他人からの送信 | High | 署名検証失敗は 401。許可リスト外 userId は silent drop。テストでカバー |
 | Mac mini のディスク故障でデータ消失 | High | 日次で SQLite `.backup` + media を外部 SSD に rsync（世代管理）。月 1 で復元リハーサル |
 | 受信直後の取得失敗で LINE 側の動画が失効 | High | 原本イベントを先に保存し、取得はジョブとしてリトライ（指数バックオフ）。失敗が続いたら LINE で通知 |
-| OCR の誤読で誤った数値が蓄積 | Medium | 確定前に必ず確認ステップを挟む。OCR 原文・信頼度・訂正履歴を保持し、再 OCR 可能にする |
+| 計測テキストの書式変更で解析が漏れる / OCR の誤読 | Medium | 未知の行は `extra_json` に残し、必須項目が欠けたら確認を求める。原文・訂正履歴を保持し、パーサ更新後に原本から再解析。OCR は確定前に必ず確認 |
 | Funnel 公開による攻撃面の増加 | Medium | 公開は `/api/line` 配下のみ。`APP_ENV=prod` で docs / 管理 API を無効化。レート制限 |
 | LLM 費用の増加（動画解析・分析） | Medium | 分類は軽量モデル、OCR・分析のみ上位モデル。動画は全フレームでなくキーフレームのみ送る。月額上限を設定 |
 | Mac mini 停止中はメモが届かない | Low | LINE の Webhook 再送を有効化。外部の死活監視で停止を検知して通知 |
@@ -117,7 +118,8 @@ Flex Message で返る。「OK」で確定、誤りがあれば「キャリー 1
 │   ├ job runner (アプリ内キュー, SQLite の jobs テーブル)                    │
 │   │   ├ fetch_media     LINE から画像・動画を取得し data/media/ へ         │
 │   │   ├ classify_memo   メモのタグ付け・セッション紐づけ                    │
-│   │   ├ ocr_lesson      計測画像 → 構造化 → 確認 Flex                       │
+│   │   ├ parse_lesson    計測テキスト → 構造化 (ルールベース, LLM 不要)      │
+│   │   ├ ocr_lesson      計測画像しか無い場合 → OCR → 確認 Flex             │
 │   │   ├ embed           ローカル embedding → sqlite-vec                     │
 │   │   └ analyze_swing   姿勢推定 (MediaPipe) + キーフレームの LLM 所見      │
 │   ├ scheduler: 03:00 backup / 週次レポート / 失敗ジョブ再試行               │
@@ -153,7 +155,8 @@ media           id, session_id, raw_event_id, kind (video|image), path, sha256,
                 width, height, fps, duration_ms, angle (dtl|face_on|unknown), club,
                 source (line|folder)
 
-lesson_captures id, session_id, media_id, ocr_model, ocr_raw_json, status (pending|confirmed|rejected)
+lesson_captures id, session_id, source (text|image), raw_event_id, media_id, parser_version,
+                ocr_model, raw_text, status (pending|confirmed|rejected)
 launch_metrics  1 球 = 1 行。列は §4.2.1
 metric_edits    metric_id, field, before, after, edited_at   -- 訂正履歴
 
@@ -204,9 +207,9 @@ swing_analyses  id, media_id, method (pose|llm), version, keyframes_json, metric
 | `face_to_path_deg` | （派生） | ° | −3.9 | `face_angle − club_path`。保存はせずビューで計算 |
 
 その他の列: `id`, `capture_id`, `shot_no`, `labels_json`（画面の評価・方向の原文）,
-`extra_json`（確定列に無い項目）, `confidence_json`（項目ごとの OCR 信頼度）, `check_flags`（下記の検算結果）。
+`extra_json`（確定列に無い項目）, `confidence_json`（OCR 時のみ。項目ごとの信頼度）, `check_flags`（下記の検算結果）。
 
-**OCR 後の検算**（どれかに当てはまる球は確認 Flex で注意表示し、確定前に人が見る）:
+**取り込み時の検算**（テキスト・OCR 共通。どれかに当てはまる球は確認 Flex で注意表示し、確定前に人が見る）:
 
 | 検算 | 式 | サンプル |
 |---|---|---|
@@ -232,8 +235,9 @@ LINE 上のコマンド（リッチメニューからも呼べる）:
 | 入力 | 動作 |
 |---|---|
 | 自由文 | メモとして保存（Phase 2 から自動分類） |
+| 計測テキスト（`YYYY/MM/DD HH:MM <クラブ>` で始まり `キャリー:` 等を含む） | レッスン計測として解析・保存（Phase 2）。1 メッセージに複数球があれば日時行で区切る |
 | 動画 | スイング動画として保存。直後に「後方？正面？ クラブは？」を Quick Reply で聞く |
-| 画像 | レッスン計測画像として OCR（Phase 2）。スコアカード等との判別は LLM で行い、迷ったら Quick Reply で聞く |
+| 画像 | 計測テキストが無い場合のみ、レッスン計測画像として OCR（Phase 2）。スコアカード等との判別は LLM で行い、迷ったら Quick Reply で聞く |
 | `練習開始` / `レッスン開始` / `ラウンド開始 <コース名>` | セッションを明示的に開始 |
 | `スコア 92 パット34 FW7/14 パーオン5` | スコアとして抽出 → 確認 |
 | `取消` | 直前の 1 件を論理削除 |
@@ -247,7 +251,7 @@ golf-notes-agent/
 │ ├ line/        webhook, 署名検証, reply/push, Flex テンプレート
 │ ├ ingest/      raw_events 保存, media 取得, 取り込みフォルダ監視 (Phase 4)
 │ ├ jobs/        SQLite キュー, ワーカー, リトライ
-│ ├ enrich/      分類, セッション紐づけ, スコア抽出, レッスン OCR
+│ ├ enrich/      分類, セッション紐づけ, スコア抽出, レッスン計測の解析 / OCR
 │ ├ swing/       キーフレーム抽出 (ffmpeg), 姿勢推定 (MediaPipe), 指標計算, 比較
 │ ├ search/      ローカル embedding, sqlite-vec
 │ ├ agent/       分析エージェントとツール定義 (sql_readonly, search_memos, get_metrics, compare_swings)
@@ -266,11 +270,11 @@ golf-notes-agent/
 
 ### [必須] 4.5 Test Plan
 
-- **Unit**: 署名検証、許可リスト、冪等キー、スコア文字列の抽出、OCR 結果 → `launch_metrics` の正規化（符号規約・クラブ名）、§4.2.1 の検算、
+- **Unit**: 署名検証、許可リスト、冪等キー、スコア文字列の抽出、計測テキストのパーサ（§4.2.1 のサンプルを固定入力、項目の順序違い・欠損・複数球・未知の行）→ `launch_metrics` の正規化（符号規約・クラブ名）、§4.2.1 の検算、
   スイング指標の計算（固定のキーポイント列を入力）
 - **Integration**: webhook → raw_events → jobs → media 保存までを LINE API をモックして通す。
   リトライと失効時の通知。SQLite のバックアップ・復元
-- **Golden**: レッスン計測画像のサンプルを固定入力にし、OCR 結果の期待値（§4.2.1 のサンプル値）との項目一致率を計測。
+- **Golden**: §4.2.1 のサンプルテキストを固定入力にし、全項目が期待値と一致すること。OCR は画像サンプルを入手したら同様に追加。
   モデル・プロンプト変更時の回帰検知に使う
 - **Manual**: 実機の LINE で各メッセージ種別を送信、Funnel 経由で届くことを確認。月 1 で復元リハーサル
 - カバレッジ 80% 以上（LLM 呼び出し部はモック）
@@ -278,11 +282,11 @@ golf-notes-agent/
 ### [推奨] 4.6 Migration / Rollback
 
 新規モジュールのため移行なし。派生データは `POST /admin/reprocess` で原本から再生成できるので、
-分類・OCR・解析ロジックの変更は「新バージョンで再生成 → 比較 → 切替」でロールバック可能。
+分類・計測解析・OCR・動画解析ロジックの変更は「新バージョンで再生成 → 比較 → 切替」でロールバック可能。
 
 ### [推奨] 4.7 Feature Enablement
 
-フェーズごとに env フラグで有効化する（`ENABLE_CLASSIFY` / `ENABLE_LESSON_OCR` / `ENABLE_AGENT` /
+フェーズごとに env フラグで有効化する（`ENABLE_CLASSIFY` / `ENABLE_LESSON_METRICS` / `ENABLE_LESSON_OCR` / `ENABLE_AGENT` /
 `ENABLE_SWING_ANALYSIS`）。Phase 1 の保存機能はフラグなしで常に有効。
 
 ---
@@ -292,7 +296,7 @@ golf-notes-agent/
 ### 5.1 Monitoring
 
 - analytics-platform（ローカル JSONL）に `memo_ingested` / `media_saved` / `job_failed` /
-  `lesson_ocr_confirmed` / `llm_call`（費用・トークン）を emit
+  `lesson_metrics_saved` / `llm_call`（費用・トークン）を emit
 - Healthchecks.io への ping で死活監視（PROPOSAL-0013 と同じ）
 
 ### 5.2 Troubleshooting
@@ -301,7 +305,7 @@ golf-notes-agent/
 |---|---|
 | LINE の「検証」が失敗する | Funnel 無効 / sidecar 停止 / パス違い。`tailscale funnel status` を確認 |
 | 動画が保存されない | 変換待ちのタイムアウト。`jobs` の `last_error` を確認し、`fetch_media` を再実行 |
-| OCR の項目がずれる | 計測画像のレイアウト変更。golden テストで差分を確認し、プロンプトを更新して再 OCR |
+| 計測値の項目が欠ける・ずれる | 計測テキストの書式変更。`extra_json` に入った行を確認し、パーサを更新して原本から再解析 |
 
 ### 5.3 Dependencies
 
@@ -311,7 +315,7 @@ sqlite-vec、ローカル embedding モデル（多言語対応のもの）、an
 ### [推奨] 5.4 Non-Functional Requirements
 
 #### 性能 (Performance)
-webhook は 1 秒以内に 200 を返す。保存確認の返信は 10 秒以内、OCR の確認 Flex は 30 秒以内。
+webhook は 1 秒以内に 200 を返す。保存確認の返信は 10 秒以内、計測テキストの保存返信は 10 秒以内、OCR の確認 Flex は 30 秒以内。
 
 #### コスト (Cost)
 インフラ費は 0（既存の Mac mini と Tailscale 無料枠）。LLM 費は月額上限を設定し、超過時は分析系を停止して保存のみ継続。
@@ -347,6 +351,7 @@ webhook は 1 秒以内に 200 を返す。保存確認の返信は 10 秒以内
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-11-21 | Draft | 初稿 |
+| 2026-11-21 | Draft | 計測データはテキストで取得できると判明。取り込みの主経路をテキスト解析（LLM 不要）にし、OCR は補完に変更 |
 | 2026-11-21 | Draft | レッスン計測サンプル受領。`launch_metrics` の列・符号規約・検算を確定（§4.2.1） |
 
 ### 実装フェーズ
@@ -354,7 +359,7 @@ webhook は 1 秒以内に 200 を返す。保存確認の返信は 10 秒以内
 | Phase | 内容 | 完了条件 |
 |---|---|---|
 | 1 MVP | webhook・許可リスト・冪等保存・media 取得・取消・バックアップ・Funnel | 1 か月使って取りこぼしゼロ |
-| 2 | メモ分類・セッション化・**レッスン計測 OCR**・スコア抽出・リッチメニュー | 計測値とスコアが確定データとしてたまる |
+| 2 | メモ分類・セッション化・**レッスン計測の取り込み（テキスト解析、画像は OCR で補完）**・スコア抽出・リッチメニュー | 計測値とスコアが確定データとしてたまる |
 | 3 | ローカル embedding・LINE での QA・週次レポート・MCP サーバ | 根拠付きで質問に答えられる |
 | 4 | スイング解析（姿勢推定・キーフレーム所見・時系列比較）・取り込みフォルダ | 同アングル動画の変化を数値と言葉で返せる |
 | 5 | スコアアプリ CSV 取り込み（可能なら）・次の練習テーマの自律提案 | — |
