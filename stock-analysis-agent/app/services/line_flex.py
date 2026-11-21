@@ -244,6 +244,60 @@ def screener_ranking_carousel(candidates: list[dict[str, Any]]) -> dict:
 # ---------------------------------------------------------------------------
 
 
+# 投資判断バッジ: rating → (絵文字つきラベル接頭辞, 文字色)
+_RECO_BADGE_STYLES = {
+    "buy_candidate": ("🟢", "#15803D"),
+    "hold": ("🟡", "#B45309"),
+    "avoid": ("🔴", "#B91C1C"),
+}
+
+
+def _recommendation_blocks(recommendation: dict[str, Any] | None) -> list[dict]:
+    """投資判断バッジ + 根拠 + 免責文の Flex components を返す (無ければ空)。"""
+    if not recommendation:
+        return []
+    style = _RECO_BADGE_STYLES.get(recommendation.get("rating", ""))
+    if style is None:
+        return []
+    emoji, color = style
+    label = recommendation.get("label") or ""
+    blocks: list[dict] = [
+        {
+            "type": "text",
+            "text": f"{emoji} 投資判断: {label}",
+            "weight": "bold",
+            "size": "md",
+            "color": color,
+        }
+    ]
+    reasons = list(recommendation.get("reasons") or [])[:_MAX_RATIONALE_LINES]
+    if reasons:
+        blocks.append(
+            {
+                "type": "text",
+                "text": "\n".join(f"• {_truncate(r, 80)}" for r in reasons),
+                "size": "xs",
+                "color": "#444444",
+                "wrap": True,
+                "margin": "sm",
+            }
+        )
+    disclaimer = recommendation.get("disclaimer")
+    if disclaimer:
+        blocks.append(
+            {
+                "type": "text",
+                "text": _truncate(disclaimer, 200),
+                "size": "xxs",
+                "color": _SUBTLE_COLOR,
+                "wrap": True,
+                "margin": "sm",
+            }
+        )
+    blocks.append({"type": "separator", "margin": "md"})
+    return blocks
+
+
 def analysis_summary_bubble(
     *,
     ticker: str,
@@ -251,12 +305,15 @@ def analysis_summary_bubble(
     body_text: str,
     report_url: str | None = None,
     md_url: str | None = None,
+    recommendation: dict[str, Any] | None = None,
 ) -> dict:
     """個別株分析の要約 bubble。
 
     - `report_url`: HTML 版全文の閲覧 URL → footer に「📖 全文を読む」ボタン
     - `md_url`: 生 Markdown の DL URL → footer に「📄 .md を保存」ボタン (secondary)
     どちらも None なら footer なし (PROPOSAL-0011 §4.3)。
+    - `recommendation`: `BuyRecommendation.model_dump()`。あれば本文冒頭に
+      判定バッジ (🟢 買い検討 / 🟡 様子見 / 🔴 見送り) + 根拠 + 免責文を表示。
     """
     title = company_name or ticker
     bubble: dict = {
@@ -281,13 +338,15 @@ def analysis_summary_bubble(
         "body": {
             "type": "box",
             "layout": "vertical",
+            "spacing": "sm",
             "contents": [
+                *_recommendation_blocks(recommendation),
                 {
                     "type": "text",
                     "text": _truncate(body_text, _MAX_NARRATIVE_CHARS),
                     "wrap": True,
                     "size": "sm",
-                }
+                },
             ],
         },
     }
