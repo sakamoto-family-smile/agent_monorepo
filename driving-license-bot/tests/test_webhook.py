@@ -123,6 +123,20 @@ def test_webhook_rejects_invalid_signature(client: TestClient) -> None:
     assert res.status_code == 401
 
 
+@pytest.mark.parametrize("body", [b"\xff\xfe not utf-8", b"not json"])
+def test_webhook_unsigned_malformed_body_is_401(client: TestClient, body: bytes) -> None:
+    """署名なしの不正な body は解釈せずに 401 (500 にしない)。"""
+    for sig in ("", "invalid"):
+        res = client.post("/webhook", content=body, headers={"X-Line-Signature": sig})
+        assert res.status_code == 401
+
+
+@pytest.mark.parametrize("body", [b"\xff\xfe not utf-8", b"not json"])
+def test_webhook_signed_malformed_body_is_400(client: TestClient, body: bytes) -> None:
+    res = client.post("/webhook", content=body, headers={"X-Line-Signature": _sign(body)})
+    assert res.status_code == 400
+
+
 def test_webhook_503_when_line_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LINE_CHANNEL_SECRET", "")
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "")

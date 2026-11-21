@@ -234,6 +234,12 @@ variable "review_admin_allowed_emails" {
   default     = []
 }
 
+variable "review_admin_oauth_redirect_url" {
+  type        = string
+  description = "OAuth callback の絶対 URL (OAuth client に登録した Authorized redirect URI と同じ値)。空ならリクエストの Host / X-Forwarded-* から動的生成する。初回 apply 後に output review_admin_oauth_redirect_url の値を設定するのを推奨。"
+  default     = ""
+}
+
 # ---- Monitoring alert (Phase 2-B3) ----
 
 variable "alert_notification_emails" {
