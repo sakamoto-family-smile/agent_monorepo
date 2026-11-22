@@ -444,6 +444,84 @@ make test
 
 ---
 
+## ローカル本番 (Mac mini 常駐) — PROPOSAL-0013
+
+GCP と同じ Dockerfile のイメージを Mac mini 上の Docker Compose で動かす。DB は SQLite、
+非同期処理は in-process、チャート / 全文はインメモリ配信、LINE Webhook は Tailscale Funnel で
+`/api/line` 配下だけを公開する。GCP との違いはすべて環境変数 (`config/local.env`) で切り替える。
+
+- 設計: [docs/PROPOSALS/0013-stock-local-hosting-reversible.md](../docs/PROPOSALS/0013-stock-local-hosting-reversible.md)
+
+```bash
+cd stock-analysis-agent
+cp config/local.env.example config/local.env && chmod 600 config/local.env    # 秘密情報と PUBLIC_BASE_URL を埋める
+cp config/tailscale.env.example config/tailscale.env && chmod 600 config/tailscale.env  # TS_AUTHKEY (初回のみ使用)
+make local-config        # compose の設定を検証
+make local-up            # backend + Funnel で起動 (Funnel なしは make local-up-private)
+make local-logs
+```
+
+| 項目 | 場所 |
+|---|---|
+| 永続データ (SQLite / EDINET cache / 利用ログ) | ホストの `${STOCK_LOCAL_DATA_DIR:-./data/local}` (コンテナ内 `/app/var`) |
+| Edinetcode.csv | `${STOCK_LOCAL_DATA_DIR}/edinet-code/Edinetcode.csv` に手動で置く |
+| 手元からの確認 | `http://127.0.0.1:${STOCK_LOCAL_PORT:-8001}/health` (localhost のみに公開) |
+| 外部公開 | `https://<TS_HOSTNAME>.<tailnet>.ts.net/api/line/*` のみ ([config/tailscale-serve.json](config/tailscale-serve.json)) |
+
+Tailscale 側の事前準備 (HTTPS 証明書・Funnel の許可・auth key) は `config/tailscale.env.example` を参照。
+backend は `mem_limit: 4g` / `cpus: 4` で動かす (security-platform と同居するため)。
+
+### 定期処理・死活監視・backup
+
+SQLite に書くのは backend の 1 プロセスだけにするため、日次ジョブは backend 内で動く
+(`app/services/scheduler.py`)。どれも既定は無効で、`config/local.env` で個別に止められる。
+
+| ジョブ | 設定 | 内容 |
+|---|---|---|
+| `edinet_index` | `EDINET_SCHEDULE_ENABLED` / `EDINET_SCHEDULE_TIME` (02:00) | EDINET 書類一覧の rolling 更新 (失敗時は 1 時間後に再試行) |
+| `backup` | `BACKUP_ENABLED` / `BACKUP_TIME` (03:00) / `BACKUP_RETENTION_DAYS` | SQLite のオンライン backup を `/app/var/backups` に世代保存 |
+| `health` | `HEALTH_CHECK_ENABLED` / `HEALTH_CHECK_INTERVAL_SECONDS` (300) | EDINET・backup の鮮度、Funnel 経由の到達性、分析の連続失敗を確認し、状態が変わったら `HEALTH_NOTIFY_USER_IDS` に LINE |
+
+- 止まっている間に過ぎた日次ジョブは、起動後すぐ 1 回実行する (`/app/var/scheduler_state.json`)
+- `HEALTHCHECK_PING_BASE` (security-platform と同じ Ping key) を設定すると、`stock-backend` (生存)・
+  `stock-health`・`stock-edinet_index`・`stock-backup`・`stock-offsite_backup` に ping する
+- in-process 実行の同時分析数は `ANALYSIS_MAX_CONCURRENCY` (既定 2)。超えた分は「順番待ち」と返して待たせる
+
+```bash
+make local-backup                                 # 今すぐ backup
+make local-edinet-index ARGS="--from 2026-06-01"  # EDINET index の backfill
+OFFSITE_BACKUP_DIR=/Volumes/Backup/stock-analysis make local-offsite-install  # 外部ディスクへ毎日 04:00 にコピー
+make local-down && make local-restore && make local-up  # 最新の backup から戻す (BACKUP=... で指定)
+```
+
+### ローカル ⇄ GCP の切替
+
+GCP は standby (webhook 非公開・Scheduler 停止、`terraform/README.md` 参照) で残しておき、
+どちら向きにも 1 コマンドで切り替える。途中で確認を挟み、失敗したらそこで止まる。
+`DRY_RUN=1` で実行するコマンドを表示するだけにできる。
+
+```bash
+DRY_RUN=1 make cutover-to-local   # 手順の確認
+make cutover-to-local             # GCP → ローカル
+make cutover-to-gcp               # ローカル → GCP
+```
+
+| 手順 | cutover-to-local | cutover-to-gcp |
+|---|---|---|
+| 1 | LINE の Webhook 再送を有効にする (手動) | 同じ |
+| 2 | ローカル起動 → Funnel 経由で届くか確認 → backend を止める | 最終 backup → backend を止める |
+| 3 | GCP の webhook を非公開 → Cloud Tasks の残りを消化 → queue 停止 | 今のコードで build し、webhook / worker / EDINET Job を更新 |
+| 4 | Cloud SQL → SQLite へコピーと照合 (`ops.db_copy`) | Secret Manager へ差分を反映 (`ops.secrets_sync`) |
+| 5 | EDINET を GCS からローカルへ | standby 解除・queue 再開 |
+| 6 | backend 起動 | SQLite → Cloud SQL へコピーと照合 (連番補正) |
+| 7 | Webhook をローカルへ切替・疎通テスト (`ops.line_webhook`) | EDINET をローカルから GCS へ |
+| 8 | GCP を standby に (`terraform apply -var standby=true`) | Webhook を Cloud Run へ切替・疎通テスト → ローカルを止める |
+
+前提: `gcloud auth login` / `gcloud auth application-default login`、`brew install cloud-sql-proxy`、
+`terraform/terraform.tfvars`。`make secrets-diff` / `make webhook-get` で状態を確認できる。
+
+---
+
 ## GCP デプロイ (LINE 経由で利用) — PROPOSAL-0011 P1
 
 LINE から `分析 トヨタ` のように使える本番サービスを Cloud Run に配備する。MVP は

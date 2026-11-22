@@ -29,7 +29,8 @@ from services.db_models import Base  # noqa: E402
 alembic_config = context.config
 
 if alembic_config.config_file_name is not None:
-    fileConfig(alembic_config.config_file_name)
+    # 同じプロセスから command.upgrade を呼ぶ ops.db_copy のロガーを止めない
+    fileConfig(alembic_config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

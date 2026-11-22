@@ -42,6 +42,7 @@ from models.stock import (
 )
 from services.access_control import get_analyze_limiter, is_user_allowed
 from services.media import store_chart_png, store_report_html, store_report_md
+from services.analysis_limiter import get_analysis_slots
 from services.task_queue import enqueue_analysis
 from services.line_client import (
     LineBotClient,
@@ -110,6 +111,10 @@ DISCLAIMER_SHORT = (
 ANALYZE_ACK_TEMPLATE = (
     "📊 {target} の分析を開始しました。\n"
     "完了まで {eta}ほどかかります。完了次第、結果をお送りします。"
+)
+
+ANALYZE_QUEUED_TEXT = (
+    "⏳ ほかの分析が進行中のため、順番待ちです。順番が来たら自動で始めます。"
 )
 
 ANALYZE_FAIL_TEMPLATE = (
@@ -716,13 +721,21 @@ async def _cmd_analyze(
         except Exception:
             logger.exception("enqueue_analysis failed; falling back to in-process")
 
+    async def _notify_queued() -> None:
+        await deps.line_client.push_text(to=user_id, text=ANALYZE_QUEUED_TEXT)
+
     async def _job() -> None:
-        try:
-            await run_and_deliver_analysis(deps, to=user_id, target=target)
-        except Exception as e:
-            await push_analysis_failure(
-                deps, to=user_id, target=target, reason=str(e)
-            )
+        # in-process 実行は同時分析数を抑える (PROPOSAL-0013。GCP では Cloud Tasks が担う)
+        slots = get_analysis_slots()
+        async with slots.slot(on_wait=_notify_queued):
+            try:
+                await run_and_deliver_analysis(deps, to=user_id, target=target)
+                slots.record_result(ok=True)
+            except Exception as e:
+                slots.record_result(ok=False)
+                await push_analysis_failure(
+                    deps, to=user_id, target=target, reason=str(e)
+                )
 
     deps.schedule_background(_job)
 

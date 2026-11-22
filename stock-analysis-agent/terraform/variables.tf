@@ -16,6 +16,16 @@ variable "service_name" {
 }
 
 # ─────────────────────────────────────────────────────────────────────
+# 待機モード (PROPOSAL-0013: ローカル常駐中は GCP を standby で残す)
+# ─────────────────────────────────────────────────────────────────────
+
+variable "standby" {
+  type        = bool
+  default     = false
+  description = "true でローカル (Mac mini) が active の間の待機モードにする。リソースは残したまま、webhook の公開 (allUsers invoker) を外し、EDINET index の Cloud Scheduler を一時停止する。GCP に戻すときは false で apply する。"
+}
+
+# ─────────────────────────────────────────────────────────────────────
 # Cloud SQL (PROPOSAL-0011 P2-B: shared-pg に相乗り)
 # ─────────────────────────────────────────────────────────────────────
 

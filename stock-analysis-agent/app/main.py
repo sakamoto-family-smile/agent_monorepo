@@ -13,6 +13,7 @@ from instrumentation import (
 )
 from services.database import init_db
 from services.db_engine import dispose_engine
+from services.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
@@ -36,10 +37,13 @@ async def lifespan(app: FastAPI):
     await init_db()
     setup_observability()
     await start_upload_loop()
+    # ローカル常駐時の定期処理 (EDINET index / backup / 死活監視)。GCP では既定で無効 (PROPOSAL-0013)
+    await start_scheduler()
     logger.info("Stock Analysis Agent started (env=%s)", settings.app_env)
     try:
         yield
     finally:
+        await stop_scheduler()
         await shutdown_observability()
         await dispose_engine()
 

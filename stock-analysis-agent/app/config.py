@@ -162,6 +162,33 @@ class Settings:
     # PROPOSAL-0012: 1 ユーザーのマイリスト登録上限 (yfinance バッチ負荷抑制)
     watchlist_max_items: int = int(os.getenv("WATCHLIST_MAX_ITEMS", "30"))
 
+    # ── PROPOSAL-0013: ローカル常駐時の運用 ──
+    # in-process 実行 (TASKS_ENABLED=false) の同時分析数。GCP では Cloud Tasks の
+    # max_concurrent_dispatches が上限を持つ。0 以下で無制限。
+    analysis_max_concurrency: int = int(os.getenv("ANALYSIS_MAX_CONCURRENCY", "2"))
+
+    # backend 内の定期処理。GCP (Cloud Run は複数 instance / min=0) では使わないので既定は無効。
+    # ローカルでは config/local.env で有効にする。時刻は Asia/Tokyo の HH:MM。
+    edinet_schedule_enabled: bool = os.getenv("EDINET_SCHEDULE_ENABLED", "false").lower() == "true"
+    edinet_schedule_time: str = os.getenv("EDINET_SCHEDULE_TIME", "02:00")
+    backup_enabled: bool = os.getenv("BACKUP_ENABLED", "false").lower() == "true"
+    backup_time: str = os.getenv("BACKUP_TIME", "03:00")
+    backup_dir: str = os.getenv("BACKUP_DIR", "data/backups")
+    backup_retention_days: int = int(os.getenv("BACKUP_RETENTION_DAYS", "14"))
+    health_check_enabled: bool = os.getenv("HEALTH_CHECK_ENABLED", "false").lower() == "true"
+    health_check_interval_seconds: int = int(os.getenv("HEALTH_CHECK_INTERVAL_SECONDS", "300"))
+    # 監視の状態が変わったときに LINE で知らせる管理者の userId (CSV)。空なら通知しない
+    health_notify_user_ids: str = os.getenv("HEALTH_NOTIFY_USER_IDS", "")
+    # Healthchecks.io 互換の ping 先 (例 https://hc-ping.com/<ping-key>)。空なら ping しない。
+    # security-platform と同じ Ping key を共用し、slug は stock-<job> にする
+    healthcheck_ping_base: str = os.getenv("HEALTHCHECK_PING_BASE", "")
+    # 定期処理の最終成功時刻を残すファイル (再起動をまたいで取りこぼしを判定する)
+    scheduler_state_path: str = os.getenv("SCHEDULER_STATE_PATH", "data/scheduler_state.json")
+
+    @property
+    def health_notify_user_id_list(self) -> list[str]:
+        return [u.strip() for u in self.health_notify_user_ids.split(",") if u.strip()]
+
     @property
     def family_user_id_set(self) -> frozenset[str]:
         if not self.family_user_ids:

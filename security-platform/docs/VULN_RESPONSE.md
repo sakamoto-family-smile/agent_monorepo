@@ -312,15 +312,21 @@ flowchart LR
   (`ANTHROPIC_API_KEY` があると `-p` ではそちらが優先されて従量課金になるため渡さない。`--bare` はトークンを読まないので使わない)
 - **原文との突き合わせ (grounding)。** 根拠の 1 文 (`quote`) とパッケージ名が記事にそのまま含まれる主張だけを
   `grounded = 1` にする。記事にない版・CVE などは落として `notes_json` に書く。`grounded = 0` は評価のために残すだけ
-- **対象の絞り込み。** 初回の取得で既にあった記事 (`initial = 1`)・`news`・脆弱性や悪性パッケージの語を含まない記事は
+- **対象の絞り込み。** 初回の取得で既にあった記事 (`initial = 1`)・脆弱性や悪性パッケージ・侵害の語を含まない記事は
   LLM にかけない (`skipped`)。本文が変わった記事は抽出し直す。2026 年 10 月の実績では 1 日 3〜4 件
+- **重大ニュースの brief (PROPOSAL-0015)。** 同じ 1 回の呼び出しで、記事の重大度 (`critical`〜`none`)・
+  日本語の要約 (140 字以内)・分類 (`topics`)・CVE / GHSA の ID も出させ、`report_extractions` に保存する
+  (notify の重大ニュースに使う)。要約に改行・URL があるもの、知らない分類があるものは brief だけ捨てる (主張は取り込む)。
+  報道 (`trust: news`) の記事は brief だけを使い、主張は照合・早期警告に使わない。報道の依頼は 1 日 (UTC) 30 件までで、
+  公式・調査会社の記事を先に依頼する
 - **Max プランの枠を使い切らない。** Max プランの上限は対話の利用と共有なので、常駐の extractor は夜
-  (`LLM_RUN_HOUR` 時から `LLM_WINDOW_HOURS` 時間、既定 3〜6 時) だけ、1 日 `LLM_DAILY_LIMIT` 回 (既定 50) まで呼ぶ。
+  (`LLM_RUN_HOUR` 時から `LLM_WINDOW_HOURS` 時間、既定 3〜6 時) だけ、1 日 `LLM_DAILY_LIMIT` 回 (既定 80) まで呼ぶ。
   認証の失敗・利用上限ではその夜は止め、記事は次の夜にやり直す。有料のプロバイダへは自動で切り替えない
 - **失敗のやり直し。** 1 件ごとの失敗は 3 回までやり直し、それでも駄目なら `failed`。続けて 3 件失敗したら LLM 側の問題とみなしてその回を止める
 - **差し替え。** `LLM_PROVIDER` (`claude-code` / `fake`、`anthropic`・`gemini` は L4 PR4) と `LLM_MODEL` で選ぶ。
   主張ごとに provider・model・`prompt_version` を記録する。指示や出力の形を変えたら `PROMPT_VERSION` を上げ、
-  `make llm-eval` で前後を比べる (評価用の記事は `src/llm/eval_cases.json`。記事の中の指示に従わないかも見る)
+  `make llm-eval` で前後を比べる (評価用の記事は `src/llm/eval_cases.json`。記事の中の指示に従わないかも見る。
+  brief は重大度が期待の範囲に入るか・critical の見逃し (`critical_missed`)・要約が検証を通るかを数える)
 - **Claude Code の版は固定。** extractor イメージは npm の platform パッケージの tarball を SHA-512 を確かめてから入れる
   (`infra/Dockerfile` の `CLAUDE_CODE_VERSION`・`CLAUDE_CODE_SHA512_*`)。更新するときは公開から 1 週間以上たった版にし、
   registry の `dist.integrity` (base64) を 16 進にした値で置き換える
@@ -331,7 +337,7 @@ flowchart LR
 |---|---|---|
 | `CLAUDE_CODE_OAUTH_TOKEN` | (空) | `claude setup-token` で発行する Max プランの長期トークン (1 年)。空なら抽出しない (`llm:extractor` で知らせる) |
 | `LLM_PROVIDER` / `LLM_MODEL` | `claude-code` / `haiku` | 抽出に使う LLM |
-| `LLM_DAILY_LIMIT` | 50 | 1 日に LLM を呼ぶ回数の上限 |
+| `LLM_DAILY_LIMIT` | 80 | 1 日に LLM を呼ぶ回数の上限 |
 | `LLM_RUN_HOUR` / `LLM_WINDOW_HOURS` / `LLM_TIMEZONE` | 3 / 3 / `Asia/Tokyo` | 常駐の extractor が動く時間帯 |
 
 ### 確度と照合 (L4)
