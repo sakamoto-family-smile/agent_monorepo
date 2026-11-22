@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | In Review |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-11-21 |
-| **Updated** | 2026-11-21 |
+| **Updated** | 2026-11-22 |
 | **Target** | golf-notes-agent (新規) |
 | **Related PRs** | (none yet) |
 | **Supersedes** | — |

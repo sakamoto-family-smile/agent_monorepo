@@ -1,0 +1,18 @@
+# サービスは別名だけを呼ぶ。実際のモデルはここだけに書く (EOSL の切り替えもここ)。
+# anthropic/ の向き先には、クライアントが Authorization で送った定額プランのトークンが
+# そのまま渡される (Vertex AI のクォータが取れたら vertex_ai/ に替える)。
+model_list:
+  - model_name: stock-analysis
+    litellm_params:
+      model: anthropic/claude-opus-5-5
+  # 後継モデルの試験用。後継が出たらここに割り当て、評価データセットで比べてから stock-analysis を替える
+  - model_name: stock-analysis-next
+    litellm_params:
+      model: anthropic/claude-opus-5-5
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+
+litellm_settings:
+  callbacks: ["langfuse_otel"]

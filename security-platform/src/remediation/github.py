@@ -114,3 +114,73 @@ class GitHub:
                 resp.read()
                 raise GitHubError(f"GitHub tarball {sha[:12]} failed: {resp.status_code} {resp.text[:300]}")
             yield resp
+
+    # ── PR (Git Data API でコミットを作る。手元に git は要らない) ────────────
+    def create_commit(self, base_sha: str, path: str, content: str, message: str) -> str:
+        """base_sha の上で path だけを content に置き換えたコミットを作る (ブランチはまだ作らない)。"""
+        base = self.check(self.request("GET", f"/repos/{self.repo}/git/commits/{base_sha}"), "get commit").json()
+        blob = self.check(self.request("POST", f"/repos/{self.repo}/git/blobs",
+                                       json={"content": content, "encoding": "utf-8"}), "create blob").json()
+        tree = self.check(self.request("POST", f"/repos/{self.repo}/git/trees", json={
+            "base_tree": base["tree"]["sha"],
+            "tree": [{"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]}],
+        }), "create tree").json()
+        commit = self.check(self.request("POST", f"/repos/{self.repo}/git/commits", json={
+            "message": message, "tree": tree["sha"], "parents": [base_sha],
+        }), "create commit").json()
+        return str(commit["sha"])
+
+    def create_branch(self, branch: str, sha: str) -> None:
+        self.check(self.request("POST", f"/repos/{self.repo}/git/refs",
+                                json={"ref": f"refs/heads/{branch}", "sha": sha}), "create branch")
+
+    def delete_branch(self, branch: str) -> None:
+        resp = self.request("DELETE", f"/repos/{self.repo}/git/refs/heads/{branch}")
+        if resp.status_code not in (204, 404, 422):  # 404/422: 消えている (マージで自動削除など)
+            self.check(resp, "delete branch")
+
+    def changed_files(self, base: str, head: str) -> list[str]:
+        data = self.check(self.request("GET", f"/repos/{self.repo}/compare/{base}...{head}"), "compare").json()
+        return [str(f["filename"]) for f in data.get("files") or []]
+
+    def compare_status(self, base: str, head: str) -> str:
+        """head から見た base: ``ahead`` / ``identical`` なら head は base を含む。"""
+        data = self.check(self.request("GET", f"/repos/{self.repo}/compare/{base}...{head}"), "compare").json()
+        return str(data.get("status", ""))
+
+    def create_pull(self, branch: str, base: str, title: str, body: str) -> dict[str, Any]:
+        return self.check(self.request("POST", f"/repos/{self.repo}/pulls", json={
+            "title": title, "head": branch, "base": base, "body": body, "maintainer_can_modify": True,
+        }), "create pull request").json()
+
+    def get_pull(self, number: int) -> dict[str, Any]:
+        return self.check(self.request("GET", f"/repos/{self.repo}/pulls/{number}"), "get pull request").json()
+
+    def close_pull(self, number: int) -> None:
+        self.check(self.request("PATCH", f"/repos/{self.repo}/pulls/{number}", json={"state": "closed"}),
+                   "close pull request")
+
+    def enable_auto_merge(self, node_id: str, method: str = "MERGE") -> None:
+        """CI (必須のチェック) が通ったら GitHub がマージする。"""
+        query = ("mutation($id: ID!, $method: PullRequestMergeMethod!) { enablePullRequestAutoMerge("
+                 "input: {pullRequestId: $id, mergeMethod: $method}) { clientMutationId } }")
+        resp = self.check(self.request("POST", "/graphql", json={
+            "query": query, "variables": {"id": node_id, "method": method}}), "enable auto-merge")
+        errors = resp.json().get("errors")
+        if errors:
+            raise GitHubError(f"GitHub enable auto-merge failed: {str(errors)[:300]}")
+
+    def check_runs(self, sha: str) -> list[dict[str, Any]]:
+        data = self.check(self.request("GET", f"/repos/{self.repo}/commits/{sha}/check-runs",
+                                       params={"per_page": 100}), "list check runs").json()
+        return list(data.get("check_runs") or [])
+
+    def workflow_runs(self, workflow: str, head_sha: str) -> list[dict[str, Any]]:
+        data = self.check(self.request("GET", f"/repos/{self.repo}/actions/workflows/{workflow}/runs",
+                                       params={"head_sha": head_sha, "per_page": 20}), "list workflow runs").json()
+        return list(data.get("workflow_runs") or [])
+
+    def run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        data = self.check(self.request("GET", f"/repos/{self.repo}/actions/runs/{run_id}/jobs",
+                                       params={"per_page": 100}), "list jobs").json()
+        return list(data.get("jobs") or [])

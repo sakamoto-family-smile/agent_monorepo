@@ -3,6 +3,7 @@
 #
 #   target app        intel / detection / analytics / notify / migrate
 #   target extractor  L4 の記事の抽出 (app + Claude Code の CLI)
+#   target updater    L5 の隔離した更新役 (app + サービスの uv.lock と同じ世代の uv)
 FROM python:3.15-slim-bookworm AS app
 
 ENV PYTHONUNBUFFERED=1 \
@@ -22,8 +23,9 @@ RUN uv sync --frozen --no-dev --no-install-project --no-cache
 COPY src ./src
 COPY migrations ./migrations
 COPY dbt ./dbt
-# L4 のフィード一覧だけ焼き込む (config/ の他のファイルには秘密情報がある)
+# L4 のフィード一覧と重大ニュースの設定だけ焼き込む (config/ の他のファイルには秘密情報がある)
 COPY config/feeds.yaml ./config/feeds.yaml
+COPY config/news.yaml ./config/news.yaml
 
 # DuckDB の sqlite 拡張はビルド時に入れておく (実行時にダウンロードしない)
 # compose はホストの UID で動かすので、拡張 (HOME 配下) は誰でも読めるようにする。
@@ -47,3 +49,13 @@ RUN if [ "$TARGETARCH" = arm64 ]; then sha="$CLAUDE_CODE_SHA512_arm64"; else sha
 FROM app AS extractor
 COPY --from=claude-code /claude /usr/local/bin/claude
 CMD ["python", "-m", "src.llm", "serve"]
+
+# ── L5: 依存の更新 (uv lock) の隔離した更新役。サービスの uv.lock を書いている uv と同じ世代にする ────
+FROM app AS updater
+COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /usr/local/bin/uv
+# requires-python が 3.12 / 3.13 に限られるサービスのために、ビルド時に入れておく (実行時はダウンロードしない)
+USER root
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
+RUN uv python install 3.12 3.13 && chmod -R a+rX,go-w /opt/uv-python
+USER app
+CMD ["python", "-m", "src.remediation", "updater"]

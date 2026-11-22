@@ -267,8 +267,8 @@ class IntelPipeline:
         with self._run("extract", "incremental", emit=emit) as ctx:
             r = extraction.run(self.engine, llm / "in", llm / "out", utc_now_iso())
             ctx.fetched, ctx.changed, ctx.skipped = r.ingested, r.grounded, r.failed
-            logger.info("extract: %d ingested (%d claims, %d grounded), %d retried, %d failed; "
-                        "%d queued, %d skipped by prefilter", r.ingested, r.claims, r.grounded, r.retried,
+            logger.info("extract: %d ingested (%d claims, %d grounded, %d briefs), %d retried, %d failed; "
+                        "%d queued, %d skipped by prefilter", r.ingested, r.claims, r.grounded, r.briefs, r.retried,
                         r.failed, r.queued, r.skipped)
             if r.assessed:
                 a = r.assessed

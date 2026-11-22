@@ -105,6 +105,12 @@ class GitHubIssues:
                            "create issue")
         return int(resp.json()["number"])
 
+    def issue_url(self, number: int) -> str:
+        return f"https://github.com/{self.repo}/issues/{number}"
+
+    def close(self, number: int) -> None:
+        self._check(self._request("PATCH", f"/issues/{number}", json={"state": "closed"}), "close issue")
+
     def update(self, number: int, *, title: str, body: str, labels: list[str], state: str) -> None:
         self._check(self._request("PATCH", f"/issues/{number}", json={
             "title": title, "body": body, "labels": labels, "state": state,
