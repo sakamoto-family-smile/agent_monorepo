@@ -11,8 +11,11 @@ security_platform:
         - sqlite
       # スナップショットの dbt_valid_from などはタイムゾーンなしの timestamp で入る。
       # ホスト (JST) とコンテナ (UTC) で 9 時間ずれないよう、セッションを UTC に固定する
+      # メモリの上限。Mac mini の Docker は 8GB を gateway 一式などと分け合うので、既定 (8 割) のままだと
+      # intel.db を読むスナップショットで Docker 全体が足りなくなり dbt が OOM で落ちる。超えた分はディスクに逃がす
       settings:
         TimeZone: UTC
+        memory_limit: "{{ env_var('SEC_DUCKDB_MEMORY_LIMIT', '1536MB') }}"
       attach:
         - path: "{{ env_var('SEC_DATA_DIR') }}/intel.db"
           alias: intel

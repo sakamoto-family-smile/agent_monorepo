@@ -2,6 +2,8 @@
 # - イメージをダイジェストで固定する
 # - 画面 (3000) と MinIO (9090) だけを 127.0.0.1 に出し、他は compose 内だけにする
 # - v4 の ai-gateway は使わない
+# - ClickHouse のメモリに上限を付ける (Mac mini の Docker は 8GB を他のサービスと分け合う。
+#   上限がないとキャッシュで 2GB 以上使い、security-platform の集計が OOM で落ちた)
 services:
   langfuse-worker:
     image: docker.langfuse.com/langfuse/langfuse-worker@sha256:27e8b49d619a013bca38ed9b0853456e19f5667a23e8e26e3a10d4e28485f49c
@@ -14,6 +16,7 @@ services:
     profiles: ["disabled"]
   clickhouse:
     ports: !reset []
+    mem_limit: 1536m
   minio:
     ports: !override
       - 127.0.0.1:9090:9000
