@@ -1,0 +1,95 @@
+{
+  "size": {
+    "width": 2500,
+    "height": 1686
+  },
+  "selected": true,
+  "name": "golf-notes v1",
+  "chatBarText": "メニュー",
+  "areas": [
+    {
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 833,
+        "height": 843
+      },
+      "action": {
+        "type": "postback",
+        "label": "📝 メモ",
+        "data": "action=mode&mode=memo",
+        "displayText": "📝 メモ"
+      }
+    },
+    {
+      "bounds": {
+        "x": 833,
+        "y": 0,
+        "width": 834,
+        "height": 843
+      },
+      "action": {
+        "type": "postback",
+        "label": "📊 計測",
+        "data": "action=mode&mode=metrics",
+        "displayText": "📊 計測"
+      }
+    },
+    {
+      "bounds": {
+        "x": 1667,
+        "y": 0,
+        "width": 833,
+        "height": 843
+      },
+      "action": {
+        "type": "postback",
+        "label": "🎥 動画",
+        "data": "action=mode&mode=video",
+        "displayText": "🎥 動画"
+      }
+    },
+    {
+      "bounds": {
+        "x": 0,
+        "y": 843,
+        "width": 833,
+        "height": 843
+      },
+      "action": {
+        "type": "postback",
+        "label": "▶ 開始/終了",
+        "data": "action=session",
+        "displayText": "▶ 開始/終了"
+      }
+    },
+    {
+      "bounds": {
+        "x": 833,
+        "y": 843,
+        "width": 834,
+        "height": 843
+      },
+      "action": {
+        "type": "postback",
+        "label": "🏌 スコア",
+        "data": "action=mode&mode=score",
+        "displayText": "🏌 スコア"
+      }
+    },
+    {
+      "bounds": {
+        "x": 1667,
+        "y": 843,
+        "width": 833,
+        "height": 843
+      },
+      "action": {
+        "type": "postback",
+        "label": "🔍 振り返り",
+        "data": "action=mode&mode=ask",
+        "displayText": "🔍 振り返り"
+      }
+    }
+  ]
+}

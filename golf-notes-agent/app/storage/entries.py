@@ -10,14 +10,19 @@ from datetime import datetime
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.storage.tables import media, memos, raw_events
+from app.storage.tables import media, memos, raw_events, score_texts
 from app.timeutil import iso
 
 # 取消の対象になるテーブルと、返信での呼び方
 UNDOABLE: dict[str, tuple[sa.Table, str]] = {
     "memo": (memos, "メモ"),
     "media": (media, "動画・画像"),
+    "score": (score_texts, "スコア"),
 }
+
+
+# 動画・画像ごとに付けられる情報
+TAGS = {"video": ("angle", "club"), "image": ("purpose",)}
 
 
 @dataclass(frozen=True)
@@ -60,6 +65,42 @@ async def add_media(
         )
     )
     return int(res.inserted_primary_key[0])
+
+
+async def add_score(
+    conn: AsyncConnection, *, session_id: int, raw_event_id: int, text: str, now: datetime
+) -> int:
+    res = await conn.execute(
+        sa.insert(score_texts).values(
+            session_id=session_id, raw_event_id=raw_event_id, text=text, created_at=iso(now)
+        )
+    )
+    return int(res.inserted_primary_key[0])
+
+
+async def tag_media(conn: AsyncConnection, media_id: int, kind: str, **values: str | None) -> bool:
+    """動画 (angle / club) か画像 (purpose) に情報を付ける。種類が合わなければ何もせず False。"""
+    allowed = {k: v for k, v in values.items() if k in TAGS[kind]}
+    res = await conn.execute(
+        sa.update(media).where(media.c.id == media_id, media.c.kind == kind).values(**allowed)
+    )
+    return res.rowcount == 1
+
+
+async def counts(conn: AsyncConnection, session_id: int) -> dict[str, int]:
+    """セッションに入っているもの (取り消したものを除く) の件数。"""
+    result: dict[str, int] = {}
+    for kind, (table, _) in UNDOABLE.items():
+        result[kind] = int(
+            (
+                await conn.execute(
+                    sa.select(sa.func.count()).where(
+                        table.c.session_id == session_id, table.c.deleted_at.is_(None)
+                    )
+                )
+            ).scalar_one()
+        )
+    return result
 
 
 async def latest(conn: AsyncConnection, user_id: str) -> Entry | None:

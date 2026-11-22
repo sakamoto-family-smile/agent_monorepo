@@ -108,3 +108,24 @@ media = sa.Table(
     sa.Column("created_at", sa.Text, nullable=False),
     sa.Column("deleted_at", sa.Text),
 )
+
+input_modes = sa.Table(
+    "input_modes",
+    metadata,
+    sa.Column("user_id", sa.Text, primary_key=True),
+    sa.Column("mode", sa.Text, nullable=False),  # metrics | video | score | course (memo は行なし)
+    sa.Column("params_json", sa.Text, nullable=False),  # 動画モードの angle / club など
+    sa.Column("expires_at", sa.Text, nullable=False),
+    sa.Column("updated_at", sa.Text, nullable=False),
+)
+
+score_texts = sa.Table(
+    "score_texts",
+    metadata,
+    sa.Column("id", sa.Integer, primary_key=True),
+    sa.Column("session_id", sa.Integer, sa.ForeignKey("sessions.id"), nullable=False),
+    sa.Column("raw_event_id", sa.Integer, sa.ForeignKey("raw_events.id"), nullable=False),
+    sa.Column("text", sa.Text, nullable=False),
+    sa.Column("created_at", sa.Text, nullable=False),
+    sa.Column("deleted_at", sa.Text),
+)

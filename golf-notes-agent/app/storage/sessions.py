@@ -112,3 +112,31 @@ async def touch(conn: AsyncConnection, session_id: int, now: datetime) -> None:
 async def get(conn: AsyncConnection, session_id: int) -> SessionRef | None:
     row = (await conn.execute(sa.select(sessions).where(sessions.c.id == session_id))).first()
     return _ref(row) if row else None
+
+
+async def start(conn: AsyncConnection, kind: str, now: datetime, tz: ZoneInfo) -> SessionRef:
+    """開始ボタン。開いているセッションがあれば終了してから新しく作る。"""
+    if kind not in KINDS:
+        raise ValueError(f"unknown session kind: {kind}")
+    current = await open_session(conn, now)
+    if current:
+        await end(conn, current.id, now)
+    day = now.astimezone(tz).date().isoformat()
+    res = await conn.execute(
+        sa.insert(sessions).values(
+            kind=kind, date=day, provisional=False, started_at=iso(now), last_activity_at=iso(now)
+        )
+    )
+    return SessionRef(id=int(res.inserted_primary_key[0]), kind=kind, date=day, provisional=False)
+
+
+async def end(conn: AsyncConnection, session_id: int, now: datetime) -> None:
+    await conn.execute(
+        sa.update(sessions)
+        .where(sessions.c.id == session_id, sessions.c.ended_at.is_(None))
+        .values(ended_at=iso(now), end_reason="manual")
+    )
+
+
+async def set_course(conn: AsyncConnection, session_id: int, course_id: int) -> None:
+    await conn.execute(sa.update(sessions).where(sessions.c.id == session_id).values(course_id=course_id))
