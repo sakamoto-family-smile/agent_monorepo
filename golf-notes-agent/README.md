@@ -30,14 +30,17 @@
 
 ```
 app/
-├ main.py        FastAPI の組み立て。起動時にマイグレーションし、同じプロセスでジョブのワーカーを動かす
+├ main.py        FastAPI の組み立て。起動時にマイグレーションし、同じプロセスでジョブのワーカーと定期処理を動かす
 ├ webhook.py     POST /api/line/webhook (署名検証 → 許可リスト → 原本の保存 → 処理 → reply)
 ├ handlers/      イベントごとの保存と返事 (dispatch: メッセージ / postback: ボタン / lesson: 計測)
 ├ lesson/        計測テキストの読み取り (parser) と検算 (checks)
 ├ line/          署名検証・イベントの読み取り・Messaging API
 ├ jobs/          ジョブキュー (golf.db の jobs)・ワーカー・動画と画像の取得
 ├ storage/       テーブル定義・原本・セッション・入力モード・コース・メモ・動画
-└ push.py        push の送信と月の通数の上限
+├ push.py        push の送信と月の通数の上限
+├ scheduler.py   定期処理 (日次バックアップ・死活監視の ping)
+├ backup.py      golf.db の .backup と世代管理
+└ reprocess.py   原本から作り直す CLI
 migrations/      Alembic (golf.db)。分析では確定した計測だけを含むビュー v_launch_metrics (face_to_path_deg 付き) を使う
 ```
 
@@ -71,6 +74,32 @@ LINE の Webhook URL は `https://golf-notes.<tailnet>.ts.net/api/line/webhook`�
 `./data`（`GOLF_DATA_DIR` で変更可）に `golf.db`・`raw/`・`media/`・`backup/` を置く。
 **golf.db をホストの macOS から直接開かない**（Docker Desktop の VM の中で書き込み中の WAL を壊す恐れがある）。
 中身を見るときは `make sh-db`（コンテナの中で読み取り専用で開く）。
+
+### バックアップ
+
+- backend が毎日 3 時以降に `data/backup/golf-YYYYMMDD.db` を作る（SQLite の backup API。整合性を確かめてから置き、14 世代残す）。
+  Mac mini が止まっていて過ぎた分は起動後に作る。失敗したら push と Healthchecks.io の /fail で知らせる。今すぐ作るときは `make backup-now`
+- 外部 SSD へは `data/backup/`・`raw/`・`media/` だけを rsync する（golf.db 本体はコピーしない）:
+
+  ```bash
+  GOLF_OFFSITE_DIR=/Volumes/<SSD>/golf-notes make offsite           # 1 回
+  GOLF_OFFSITE_DIR=/Volumes/<SSD>/golf-notes make offsite-install   # launchd で毎日 4:30
+  ```
+
+- 復元: backend を止め、`data/backup/golf-YYYYMMDD.db` を `data/golf.db` に置き換えて（`golf.db-wal`・`-shm` は消す）起動する。
+  その日のバックアップ以降の分は `make reprocess KIND=raw` で原本から raw_events に戻せる
+
+### 原本から作り直す
+
+```bash
+make reprocess KIND=lesson DRY_RUN=1   # 計測テキストをいまのパーサで読み直したときに変わるものを表示
+make reprocess KIND=lesson             # 置き換える (取り消した計測はそのまま)
+make reprocess KIND=raw                # data/raw/ にあって DB に無い原本を取り込む
+```
+
+### 死活監視
+
+`config/local.env` の `HEALTHCHECK_PING_URL` に Healthchecks.io の URL を入れると、5 分おきに ping する（Period 5 分・Grace 15 分くらい）。
 
 ## テスト
 

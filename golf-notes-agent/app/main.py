@@ -2,7 +2,7 @@
 
     uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8080
 
-起動時に golf.db を最新のスキーマにし、同じプロセスの中でジョブのワーカーを動かす
+起動時に golf.db を最新のスキーマにし、同じプロセスの中でジョブのワーカーと定期処理 (バックアップ・死活監視) を動かす
 (golf.db に書くのはこのプロセスだけ)。
 """
 from __future__ import annotations
@@ -21,6 +21,7 @@ from app.deps import Deps
 from app.jobs import media as media_job
 from app.jobs.worker import Worker
 from app.line.api import HttpLineApi, LineApi
+from app.scheduler import Scheduler
 from app.storage import db
 from app.timeutil import Clock, utcnow
 
@@ -61,13 +62,17 @@ def create_app(
         deps = await open_deps(settings, line, clock)
         app.state.deps = deps
         stop = asyncio.Event()
-        task = asyncio.create_task(build_worker(deps).run_forever(stop))
+        tasks = [
+            asyncio.create_task(build_worker(deps).run_forever(stop)),
+            asyncio.create_task(Scheduler(deps).run_forever(stop)),
+        ]
         try:
             yield
         finally:
             stop.set()
-            with suppress(asyncio.CancelledError):
-                await task
+            for task in tasks:
+                with suppress(asyncio.CancelledError):
+                    await task
             await close_deps(deps)
 
     # 本番では docs・OpenAPI を出さない (Funnel で公開するのは /api/line 配下だけだが念のため)

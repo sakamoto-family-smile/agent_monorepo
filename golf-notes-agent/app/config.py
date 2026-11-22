@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo
 DEFAULT_TZ = "Asia/Tokyo"
 # push の月の上限。LINE の無料の通数 (コミュニケーションプランで月 200 通) より余裕を持たせる (§4.3.2)
 DEFAULT_PUSH_MONTHLY_LIMIT = 150
+DEFAULT_BACKUP_HOUR = 3
+DEFAULT_BACKUP_KEEP = 14
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,10 @@ class Settings:
     allowed_user_ids: frozenset[str]
     tz: ZoneInfo
     push_monthly_limit: int = DEFAULT_PUSH_MONTHLY_LIMIT
+    backup_hour: int = DEFAULT_BACKUP_HOUR
+    backup_keep: int = DEFAULT_BACKUP_KEEP
+    # Healthchecks.io の ping URL (空なら ping しない)
+    healthcheck_ping_url: str = ""
 
     @property
     def is_prod(self) -> bool:
@@ -72,4 +78,7 @@ class Settings:
             allowed_user_ids=ids,
             tz=ZoneInfo(env.get("TZ_NAME", DEFAULT_TZ)),
             push_monthly_limit=int(env.get("PUSH_MONTHLY_LIMIT", str(DEFAULT_PUSH_MONTHLY_LIMIT))),
+            backup_hour=int(env.get("BACKUP_HOUR", str(DEFAULT_BACKUP_HOUR))),
+            backup_keep=int(env.get("BACKUP_KEEP", str(DEFAULT_BACKUP_KEEP))),
+            healthcheck_ping_url=env.get("HEALTHCHECK_PING_URL", ""),
         )

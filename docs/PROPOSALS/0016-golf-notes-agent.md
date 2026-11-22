@@ -279,8 +279,10 @@ swing_analyses  id, media_id, method (pose|llm), version, keyframes_json, metric
 
 本番には管理用の HTTP API を置かない。原本からの再解析は、backend のコンテナの中で動く CLI で行う
 （`make reprocess KIND=lesson [SINCE=2026-11-01] [DRY_RUN=1]`。中身は
-`docker compose exec backend python -m app.reprocess ...`）。backend のプロセスにジョブとして渡すので、
-golf.db に書くのは backend の 1 プロセスのままになる。`DRY_RUN=1` は差分だけを表示する。
+`docker compose exec backend python -m app.reprocess ...`）。backend と同じコンテナ（同じ VM）の中で動くので、
+backend と同時に書いても SQLite のロックが効く（busy_timeout で待つ）。避けたいのはホストの macOS からの書き込みで、
+それは起きない。`DRY_RUN=1` は差分だけを表示する。対象は `lesson`（計測テキストの読み直し）と
+`raw`（data/raw/ にあって raw_events に無い原本の取り込み。処理の途中で失敗したイベントの回収）。
 
 #### 4.3.1 リッチメニューと入力モード
 
@@ -513,6 +515,7 @@ gateway を通す。そのため Phase 1 は LLM を使わない範囲（保存�
 | 2026-11-22 | Implementing | Phase 1 PR1: 受信と保存の土台（署名検証・許可リスト・原本の保存と webhookEventId での重複防止・メモ・動画と画像の取得ジョブ・取消・push の上限・compose と Funnel） |
 | 2026-11-22 | Implementing | Phase 1 PR2: リッチメニュー（定義・画像・登録スクリプト）・入力モード（30 分）・動画のアングルとクラブ・画像の用途・セッションの開始と終了・コース名（表記ゆれをまとめる）・スコアの原文。`input_modes` にはセッションを持たせず、開いているセッションは `sessions` から引く |
 | 2026-11-22 | Implementing | Phase 1 PR3: 計測テキストの読み取り（ルールベース、`parser_version` 1）と検算・計測の日時でのセッションの決め方・確認（確定 / 取消）・付け替え・読めないときのメモへの保存・ボタンなしの自動判定。確認は Flex ではなく Quick Reply にした。分析用にビュー `v_launch_metrics`（確定したものだけ、`face_to_path_deg` 付き）を追加 |
+| 2026-11-22 | Implementing | Phase 1 PR4: 日次バックアップ（コンテナ内で SQLite の backup API → `data/backup/golf-YYYYMMDD.db`、整合性の確認、14 世代）・外部 SSD への rsync（`scripts/offsite_backup.sh`、launchd で毎日 4:30。golf.db 本体はコピーしない）・再解析の CLI（`lesson` / `raw`）・Healthchecks.io への ping（5 分おき、失敗時は /fail）。再解析は backend にジョブで渡さず、同じコンテナの中の別プロセスで動かす（§4.3 を更新） |
 
 ### 実装フェーズ
 
