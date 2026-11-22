@@ -44,6 +44,47 @@ async def test_save_and_get_reports_roundtrip(db):
     assert json.loads(r["report_data"])["report_text"] == "強気"
 
 
+async def test_save_report_keeps_evaluation_columns(db):
+    from sqlalchemy import select
+
+    from services.db_engine import get_sessionmaker
+    from services.db_models import Report
+
+    ev = db.ReportEvaluation(
+        trace_id="a" * 32,
+        llm_model="stock-analysis",
+        stance="bullish",
+        confidence="medium",
+        base_date="2026-11-20",
+        base_close=3000.5,
+        forecast_horizon_days=21,
+        forecast_end_date="2026-12-19",
+        forecast_bands={90: 3400.0, 10: 2700.0, 50: 3050.0},
+    )
+    rid = await db.save_report("7203.T", "トヨタ", {"report_text": "x"}, evaluation=ev)
+    async with get_sessionmaker()() as session:
+        row = (await session.scalars(select(Report).where(Report.id == rid))).one()
+    assert (row.trace_id, row.llm_model, row.stance, row.confidence) == (
+        "a" * 32, "stock-analysis", "bullish", "medium"
+    )
+    assert (row.base_date, row.base_close, row.forecast_horizon_days, row.forecast_end_date) == (
+        "2026-11-20", 3000.5, 21, "2026-12-19"
+    )
+    assert json.loads(row.forecast_bands) == {"10": 2700.0, "50": 3050.0, "90": 3400.0}
+
+
+async def test_save_report_without_evaluation_leaves_columns_empty(db):
+    from sqlalchemy import select
+
+    from services.db_engine import get_sessionmaker
+    from services.db_models import Report
+
+    rid = await db.save_report("AAPL", "Apple", {})
+    async with get_sessionmaker()() as session:
+        row = (await session.scalars(select(Report).where(Report.id == rid))).one()
+    assert row.trace_id is None and row.stance is None and row.forecast_bands is None
+
+
 async def test_get_reports_orders_desc_and_limits(db):
     for i in range(3):
         await db.save_report("AAPL", "Apple", {"n": i})

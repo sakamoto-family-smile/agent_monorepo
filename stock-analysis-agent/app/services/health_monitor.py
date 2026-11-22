@@ -9,6 +9,7 @@ Mac 自体の停止は内側からは分からないので、Healthchecks.io へ
 - backup        最新の backup ファイルが STALE_AFTER より古い
 - funnel        PUBLIC_BASE_URL 経由で /api/line/webhook に届かない (外から LINE が届くかの確認)
 - analysis      分析が ANALYSIS_FAILURE_THRESHOLD 回続けて失敗している
+- llm-gateway   LLM gateway (LiteLLM) が応答しない (PROPOSAL-0014。止まると分析がすべて失敗する)
 """
 
 from __future__ import annotations
@@ -72,6 +73,17 @@ async def funnel_check(public_base_url: str, client: httpx.AsyncClient) -> Check
     return Check("funnel", False, f"想定外の応答 HTTP {resp.status_code}")
 
 
+async def gateway_check(gateway_url: str, client: httpx.AsyncClient) -> Check:
+    """LiteLLM の liveliness は認証なしで 200 を返す。"""
+    try:
+        resp = await client.get(f"{gateway_url}/health/liveliness", timeout=FUNNEL_TIMEOUT_SECONDS)
+    except httpx.HTTPError as e:
+        return Check("llm-gateway", False, f"接続できません ({type(e).__name__})")
+    if resp.status_code == 200:
+        return Check("llm-gateway", True, "応答あり")
+    return Check("llm-gateway", False, f"想定外の応答 HTTP {resp.status_code}")
+
+
 async def collect_checks(
     *,
     now: datetime,
@@ -87,6 +99,8 @@ async def collect_checks(
         checks.append(backup_check(now, Path(s.backup_dir)))
     if s.public_base_url:
         checks.append(await funnel_check(s.public_base_url, client))
+    if s.llm_gateway_url:
+        checks.append(await gateway_check(s.llm_gateway_url, client))
     checks.append(analysis_check(consecutive_failures))
     return checks
 
@@ -143,5 +157,6 @@ __all__ = [
     "format_notice",
     "freshness_check",
     "funnel_check",
+    "gateway_check",
     "transitions",
 ]

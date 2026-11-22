@@ -343,3 +343,4 @@ P0 の検証のあと、ローカルで一巡させてから GCP に広げる。
 | 2026-11-21 | Draft | Vertex AI のクォータ申請が自動却下された経緯を追記 |
 | 2026-11-22 | In Review | 課金方式を決定（最終形は Vertex AI、当面は定額プランを gateway に通す）。#265 |
 | 2026-11-22 | P0 | 検証結果を [notes/proposal-0014-p0-2026-11-22.md](notes/proposal-0014-p0-2026-11-22.md) に記録。Langfuse は v4（OpenTelemetry）、分析単位は Langfuse のセッション、別名は Claude Code の `modelOverrides` で既知のモデルに対応付ける。`llm-gateway/` の雛形を追加 |
+| 2026-11-22 | PR2 | stock-analysis-agent を設定で gateway 経由にできるようにした（ローカル本番の雛形は gateway 経由、GCP は PR4 まで直接）。reports に trace ID・総合判断・予測帯を保存する。キー発行（PR1 の残り）とエージェント用ネットワークも追加。結果は [notes/proposal-0014-pr2-2026-11-22.md](notes/proposal-0014-pr2-2026-11-22.md) |

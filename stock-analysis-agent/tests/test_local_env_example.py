@@ -38,6 +38,9 @@ print(json.dumps({
     "backup_dir": s.backup_dir,
     "health": s.health_check_enabled,
     "state_path": s.scheduler_state_path,
+    "llm_gateway_url": s.llm_gateway_url,
+    "llm_gateway_model": s.llm_gateway_model,
+    "llm_model": s.llm_model,
 }))
 """
 
@@ -83,6 +86,7 @@ def test_example_leaves_secrets_empty():
         "BRAVE_API_KEY",
         "EDINET_API_KEY",
         "HEALTHCHECK_PING_BASE",
+        "LLM_GATEWAY_KEY",
     ):
         assert env[key] == "", f"{key} は雛形では空にする"
 
@@ -108,6 +112,10 @@ def test_example_builds_local_production_settings():
     assert s["backup"] is True
     assert s["backup_dir"].startswith("/app/var/")
     assert s["health"] is True
+    # LLM は gateway 経由 (PROPOSAL-0014)
+    assert s["llm_gateway_url"] == "http://litellm:4000"
+    assert s["llm_gateway_model"] == "stock-analysis"
+    assert s["llm_model"] == "claude-opus-5-5"
     assert s["state_path"].startswith("/app/var/")
 
 

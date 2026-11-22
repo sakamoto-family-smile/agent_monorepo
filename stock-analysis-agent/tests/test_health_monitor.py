@@ -65,10 +65,40 @@ async def test_funnel_check_fails_on_other_status_or_error():
     assert "ConnectError" in check.detail
 
 
+async def test_gateway_check_reads_liveliness():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200)
+
+    async with _client(handler) as c:
+        assert (await hm.gateway_check("http://litellm:4000", c)).ok
+    assert seen == ["http://litellm:4000/health/liveliness"]
+
+    async with _client(lambda r: httpx.Response(503)) as c:
+        check = await hm.gateway_check("http://litellm:4000", c)
+    assert not check.ok and check.detail == "想定外の応答 HTTP 503"
+
+
+async def test_collect_checks_includes_gateway_when_configured(monkeypatch):
+    monkeypatch.setattr(config.settings, "edinet_schedule_enabled", False)
+    monkeypatch.setattr(config.settings, "backup_enabled", False)
+    monkeypatch.setattr(config.settings, "public_base_url", "")
+    monkeypatch.setattr(config.settings, "llm_gateway_url", "http://litellm:4000")
+
+    async with _client(lambda r: httpx.Response(200)) as c:
+        checks = await hm.collect_checks(
+            now=NOW, last_success=lambda job: NOW, consecutive_failures=0, client=c
+        )
+    assert [c.key for c in checks] == ["llm-gateway", "analysis"]
+
+
 async def test_collect_checks_only_includes_enabled_items(monkeypatch, tmp_path):
     monkeypatch.setattr(config.settings, "edinet_schedule_enabled", True)
     monkeypatch.setattr(config.settings, "backup_enabled", False)
     monkeypatch.setattr(config.settings, "public_base_url", "")
+    monkeypatch.setattr(config.settings, "llm_gateway_url", "")
 
     async with _client(lambda r: httpx.Response(405)) as c:
         checks = await hm.collect_checks(

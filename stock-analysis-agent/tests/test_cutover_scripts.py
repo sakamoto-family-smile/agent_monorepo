@@ -17,6 +17,7 @@ SECRETS = {
     "LINE_CHANNEL_SECRET": "line-secret-value",
     "LINE_CHANNEL_ACCESS_TOKEN": "line-token-value",
     "CLAUDE_CODE_OAUTH_TOKEN": "oauth-token-value",
+    "LLM_GATEWAY_KEY": "gateway-key-value",
 }
 
 
@@ -58,6 +59,7 @@ def _index(lines: list[str], needle: str) -> int:
 def test_to_local_order(env_file, tmp_path):
     lines = _dry_run("to_local.sh", env_file, tmp_path)
 
+    gateway_up = _index(lines, "4000/health/liveliness → HTTP 200")
     funnel_check = _index(lines, "ts.net/api/line/webhook → HTTP 405")
     stop_local = _index(lines, "stop backend")
     close_gcp = _index(lines, "remove-iam-policy-binding")
@@ -69,7 +71,7 @@ def test_to_local_order(env_file, tmp_path):
     switch = _index(lines, "ops.line_webhook set https://stock-analysis.tail1234.ts.net/api/line/webhook")
     standby = _index(lines, "terraform apply -var standby=true")
 
-    assert funnel_check < stop_local < close_gcp < drain < pause < copy < edinet < start_local < switch < standby
+    assert gateway_up < funnel_check < stop_local < close_gcp < drain < pause < copy < edinet < start_local < switch < standby
 
 
 def test_to_gcp_order(env_file, tmp_path):
