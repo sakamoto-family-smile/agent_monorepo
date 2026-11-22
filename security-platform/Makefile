@@ -4,7 +4,7 @@
         test clean logs \
         vuln-migrate intel-bootstrap intel-osv intel-osv-full intel-kev intel-epss intel-reports intel-extract intel-claims \
         llm-check llm-run llm-eval \
-        intel-health remediation-mirror remediation-status detection-scan detection-findings detection-images detection-host host-inventory-install host-inventory-uninstall detection-exceptions notify-test notify-digest notify-health analytics duck-ui up down ps logs-vuln
+        intel-health remediation-mirror remediation-status detection-scan detection-findings detection-images detection-host host-inventory-install host-inventory-uninstall detection-exceptions notify-test notify-digest notify-news notify-news-weekly notify-health analytics duck-ui up down ps logs-vuln
 
 # ── defaults ────────────────────────────────────────────────────────────────
 DASHBOARD_PORT ?= 8000
@@ -58,6 +58,8 @@ help:
 	@echo "    detection-host   開発 PC のツール一覧を作る (ホストで実行)。定期実行は host-inventory-install (launchd、1 日 1 回)"
 	@echo "    detection-exceptions ARGS='list|add ...|revoke <id>'  例外 (誤検知・リスク受容) の管理"
 	@echo "    notify-test    LINE にテスト送信   notify-digest  日次まとめを今すぐ送る   notify-health  監視項目の状態"
+	@echo "    notify-news    重大ニュースを今すぐ送る (DRY_RUN=1 で表示だけ)"
+	@echo "    notify-news-weekly 前の週の週次まとめの Issue を今すぐ作る (DRY_RUN=1 で本文を表示だけ)"
 	@echo "    analytics      dbt build → data/security.duckdb を差し替え"
 	@echo "    duck-ui        DuckDB UI を読み取り専用で開く (http://localhost:4213)"
 	@echo ""
@@ -200,6 +202,12 @@ notify-test:
 
 notify-digest:
 	$(COMPOSE) run --rm --no-deps notify python -m src.notify digest
+
+notify-news:
+	$(COMPOSE) run --rm --no-deps notify python -m src.notify news $(if $(DRY_RUN),--dry-run,)
+
+notify-news-weekly:
+	$(COMPOSE) run --rm --no-deps notify python -m src.notify news-weekly $(if $(DRY_RUN),--dry-run,)
 
 notify-health:
 	$(COMPOSE) run --rm --no-deps notify python -m src.notify health

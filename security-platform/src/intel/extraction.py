@@ -8,6 +8,9 @@
    - extractor 待ちは MAX_PENDING 件まで
 3. 確度: 主張を判定し直し、confirmed を照合に使う Advisory にする (src/intel/claims.py)
 4. 揃える: in/ のファイルを queued の記事と一致させる (古い依頼に LLM の枠を使わない)
+
+結果の brief (重大度・日本語の要約・分類, PROPOSAL-0015) は report_extractions に保存し、notify が重大ニュースに使う。
+報道 (trust = news) の記事は brief だけを使い、主張は取り込まない (誤報が多いので照合・早期警告に使わない)。
 """
 from __future__ import annotations
 
@@ -22,7 +25,7 @@ from sqlalchemy import Connection, Engine, bindparam, text
 
 from ..llm.exchange import JobResult, job_id, list_ids, read_result, write_job
 from ..llm.grounding import ground
-from ..llm.schema import ExtractInput, validate_output
+from ..llm.schema import ExtractInput, parse_brief, validate_output
 from .claims import AssessResult, assess
 
 logger = logging.getLogger(__name__)
@@ -30,12 +33,15 @@ logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
 MAX_PENDING = 200
 SCAN_LIMIT = 1000  # 1 回に絞り込みにかける記事の数
-TRUSTS = ("official", "research")  # news は誤報の多さを見てから (L4 の方針)
+TRUSTS = ("official", "research", "news")
+BRIEF_ONLY_TRUSTS = ("news",)  # brief だけ使い、主張は取り込まない
+NEWS_DAILY_LIMIT = 30  # 報道の記事を 1 日 (UTC) に依頼する上限。LLM の枠を公式・調査会社の記事に残す
 
 PREFILTER = re.compile(
     r"malicious|malware|compromis|backdoor|typosquat|supply[- ]?chain|vulnerab|exploit|cve-\d{4}-\d+|ghsa-"
     r"|security (?:advisory|update|release|fix|bulletin)|credential|stealer|\bworm\b|hijack|takeover|trojan"
-    r"|脆弱性|不正|マルウェア|侵害|悪性|悪意|注意喚起|攻撃|乗っ取",
+    r"|breach|ransomware|zero[- ]?day|0-day|leak|hack"
+    r"|脆弱性|不正|マルウェア|侵害|悪性|悪意|注意喚起|攻撃|乗っ取|漏えい|漏洩|流出|ランサム|ゼロデイ",
     re.IGNORECASE,
 )
 
@@ -49,6 +55,7 @@ class ExtractResult:
     retried: int = 0
     claims: int = 0
     grounded: int = 0
+    briefs: int = 0
     assessed: AssessResult | None = None
 
 
@@ -70,8 +77,12 @@ def _remove(dirs: tuple[Path, Path], jid: str) -> None:
 def _store(conn: Connection, row: dict, r: JobResult, out: dict, now: str, result: ExtractResult) -> None:
     rid, h = row["report_id"], row["content_hash"]
     conn.execute(text("DELETE FROM report_claims WHERE report_id = :r"), {"r": rid})
+    claims = [] if row["trust"] in BRIEF_ONLY_TRUSTS else out["claims"]
+    brief = parse_brief(out.get("brief"))
+    if out.get("brief") is not None and brief is None:
+        logger.info("drop invalid brief of %s", rid)
     grounded = 0
-    for idx, c in enumerate(out["claims"]):
+    for idx, c in enumerate(claims):
         g = ground(source_text(row["title"], row["summary"]), c)
         grounded += g.grounded
         conn.execute(text("""
@@ -86,12 +97,17 @@ def _store(conn: Connection, row: dict, r: JobResult, out: dict, now: str, resul
     conn.execute(text("""
         UPDATE report_extractions SET status = 'done', provider = :p, model = :m, prompt_version = :pv,
           about_specific_packages = :about, claims = :n, grounded_claims = :g, error = NULL, finished_at = :t,
+          severity = :sev, summary_ja = :sum, topics_json = :topics, brief_identifiers_json = :bids,
           updated_at = :now
         WHERE report_id = :r
     """), {"p": r.provider, "m": r.model, "pv": r.prompt_version, "about": out["about_specific_packages"],
-           "n": len(out["claims"]), "g": grounded, "t": r.finished_at, "now": now, "r": rid})
-    result.claims += len(out["claims"])
+           "n": len(claims), "g": grounded, "t": r.finished_at, "now": now, "r": rid,
+           "sev": brief.severity if brief else None, "sum": brief.summary_ja if brief else None,
+           "topics": json.dumps(list(brief.topics)) if brief else None,
+           "bids": json.dumps(list(brief.identifiers)) if brief else None})
+    result.claims += len(claims)
     result.grounded += grounded
+    result.briefs += brief is not None
 
 
 def ingest(engine: Engine, in_dir: Path, out_dir: Path, now: str) -> ExtractResult:
@@ -105,7 +121,7 @@ def ingest(engine: Engine, in_dir: Path, out_dir: Path, now: str) -> ExtractResu
             continue
         with engine.begin() as conn:
             row = conn.execute(text("""
-                SELECT e.report_id, e.content_hash, e.attempts, r.title, r.summary FROM report_extractions e
+                SELECT e.report_id, e.content_hash, e.attempts, r.title, r.summary, r.trust FROM report_extractions e
                 JOIN reports r ON r.report_id = e.report_id AND r.content_hash = e.content_hash
                 WHERE e.job_id = :j AND e.status = 'queued'
             """), {"j": jid}).mappings().first()
@@ -142,23 +158,34 @@ def ingest(engine: Engine, in_dir: Path, out_dir: Path, now: str) -> ExtractResu
 
 
 # ── 依頼 ──────────────────────────────────────────────────────────────────
-def queue(engine: Engine, in_dir: Path, now: str, result: ExtractResult, max_pending: int = MAX_PENDING) -> None:
+def queue(engine: Engine, in_dir: Path, now: str, result: ExtractResult, max_pending: int = MAX_PENDING,
+          news_daily_limit: int = NEWS_DAILY_LIMIT) -> None:
     with engine.begin() as conn:
         pending = conn.execute(text("SELECT COUNT(*) FROM report_extractions WHERE status = 'queued'")).scalar_one()
+        news_today = conn.execute(text("""
+            SELECT COUNT(*) FROM report_extractions e JOIN reports r ON r.report_id = e.report_id
+            WHERE r.trust IN :brief_only AND e.queued_at >= :day
+        """).bindparams(bindparam("brief_only", expanding=True)),
+            {"brief_only": list(BRIEF_ONLY_TRUSTS), "day": now[:10]}).scalar_one()
+        # 公式・調査会社の記事を先に (報道が上限で待っている間も、ほかの記事の依頼を止めない)
         rows = conn.execute(text("""
-            SELECT r.report_id, r.content_hash, r.title, r.summary, r.url FROM reports r
+            SELECT r.report_id, r.content_hash, r.title, r.summary, r.url, r.trust FROM reports r
             LEFT JOIN report_extractions e ON e.report_id = r.report_id
             WHERE r.initial = 0 AND r.trust IN :trusts
               AND (e.report_id IS NULL OR e.content_hash != r.content_hash)
-            ORDER BY r.first_seen_at, r.report_id
+            ORDER BY r.trust IN :brief_only, r.first_seen_at, r.report_id
             LIMIT :n
-        """).bindparams(bindparam("trusts", expanding=True)),
-            {"n": SCAN_LIMIT, "trusts": list(TRUSTS)}).mappings().all()
+        """).bindparams(bindparam("trusts", expanding=True), bindparam("brief_only", expanding=True)),
+            {"n": SCAN_LIMIT, "trusts": list(TRUSTS), "brief_only": list(BRIEF_ONLY_TRUSTS)}).mappings().all()
         for row in rows:
             body = source_text(row["title"], row["summary"])
             matched = PREFILTER.search(body) is not None
             if matched and pending >= max_pending:
                 continue  # 待ちが減ったら次の回で依頼する
+            news = row["trust"] in BRIEF_ONLY_TRUSTS
+            if matched and news and news_today >= news_daily_limit:
+                continue  # 翌日 (UTC) に依頼する
+            news_today += matched and news
             jid = job_id(row["report_id"], row["content_hash"])
             if matched:
                 write_job(in_dir, ExtractInput(jid, row["report_id"], row["content_hash"], row["title"],
@@ -176,7 +203,7 @@ def queue(engine: Engine, in_dir: Path, now: str, result: ExtractResult, max_pen
                 ON CONFLICT(report_id) DO UPDATE SET content_hash = excluded.content_hash, job_id = excluded.job_id,
                   status = excluded.status, reason = excluded.reason, attempts = 0, provider = NULL, model = NULL,
                   prompt_version = NULL, about_specific_packages = NULL, claims = 0, grounded_claims = 0,
-                  error = NULL, queued_at = excluded.queued_at, finished_at = NULL, updated_at = excluded.updated_at
+                  severity = NULL, summary_ja = NULL, topics_json = NULL, brief_identifiers_json = NULL, error = NULL, queued_at = excluded.queued_at, finished_at = NULL, updated_at = excluded.updated_at
             """), {"r": row["report_id"], "h": row["content_hash"], "j": jid if matched else None,
                    "s": "queued" if matched else "skipped", "reason": None if matched else "prefilter",
                    "q": now if matched else None, "now": now})

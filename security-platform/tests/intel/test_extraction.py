@@ -63,17 +63,18 @@ def test_queue_prefilters_and_skips_initial(env):
     hit = add_report(p, 1, MALWARE)
     add_report(p, 2, "We shipped a faster dashboard.")  # 語がない
     add_report(p, 3, MALWARE, initial=True)  # 初回の取得で既にあった
-    add_report(p, 4, MALWARE, trust="news")  # news はまだ対象外
+    add_report(p, 4, MALWARE, trust="news")  # 報道も依頼する (brief だけ使う)
     add_report(p, 5, "JPCERT: 脆弱性に関する注意喚起")
     r = p.run_extract()
-    assert (r.queued, r.skipped) == (2, 1)
+    assert (r.queued, r.skipped) == (3, 1)
     assert rows(p, "SELECT report_id, status, reason FROM report_extractions ORDER BY report_id") == [
-        (hit, "queued", None), (f"rep_{2:024x}", "skipped", "prefilter"), (f"rep_{5:024x}", "queued", None)]
+        (hit, "queued", None), (f"rep_{2:024x}", "skipped", "prefilter"), (f"rep_{4:024x}", "queued", None),
+        (f"rep_{5:024x}", "queued", None)]
     job = exchange.read_job(dirs.in_dir, exchange.list_ids(dirs.in_dir)[0])
     assert job.report_id == hit and job.text == MALWARE and job.title == "Security news"
 
     again = p.run_extract()  # 依頼済み・対象外は数え直さない
-    assert (again.queued, again.skipped) == (0, 0) and len(exchange.list_ids(dirs.in_dir)) == 2
+    assert (again.queued, again.skipped) == (0, 0) and len(exchange.list_ids(dirs.in_dir)) == 3
 
 
 def test_ingest_grounds_claims(env):
@@ -99,6 +100,76 @@ def test_ingest_grounds_claims(env):
     extract(dirs, lambda _i: {"about_specific_packages": True, "claims": [{**CLAIM, "versions": ["1.0.4"]}]})
     p.run_extract()
     assert rows(p, f"SELECT versions_json FROM report_claims WHERE report_id = '{rid}'") == [('["1.0.4"]',)]
+
+
+BRIEF = {"severity": "critical", "summary_ja": "npm の left-padx に認証情報を盗むマルウェアが混入した。",
+         "topics": ["npm", "supply-chain"], "identifiers": ["cve-2026-12345", "GHSA-2C4M-59x9-FR2G"]}
+
+
+def test_ingest_stores_brief(env):
+    p, dirs = env
+    add_report(p, 1, MALWARE)
+    p.run_extract()
+    extract(dirs, lambda _i: {"about_specific_packages": True, "claims": [CLAIM], "brief": BRIEF})
+    r = p.run_extract()
+    assert (r.ingested, r.claims, r.briefs) == (1, 1, 1)
+    assert rows(p, "SELECT severity, summary_ja, topics_json, brief_identifiers_json FROM report_extractions") == [
+        ("critical", BRIEF["summary_ja"], '["npm", "supply-chain"]', '["CVE-2026-12345", "GHSA-2c4m-59x9-fr2g"]')]
+
+
+@pytest.mark.parametrize("brief", [
+    {**BRIEF, "summary_ja": "詳しくは https://evil.test を見てください。"},
+    {**BRIEF, "summary_ja": "1 行目\n2 行目"},
+    {**BRIEF, "summary_ja": "あ" * 141},
+    {**BRIEF, "topics": ["npm", "made-up"]},
+    {**BRIEF, "severity": "urgent"},
+    {**BRIEF, "identifiers": "CVE-2026-1"},
+    {**BRIEF, "extra": 1},
+])
+def test_invalid_brief_is_dropped_but_claims_are_kept(env, brief):
+    p, dirs = env
+    add_report(p, 1, MALWARE)
+    p.run_extract()
+    extract(dirs, lambda _i: {"about_specific_packages": True, "claims": [CLAIM], "brief": brief})
+    r = p.run_extract()
+    assert (r.ingested, r.claims, r.briefs) == (1, 1, 0)
+    assert rows(p, "SELECT status, severity, summary_ja FROM report_extractions") == [("done", None, None)]
+
+
+def test_news_keeps_brief_but_not_claims(env):
+    p, dirs = env
+    add_report(p, 1, MALWARE, trust="news")
+    p.run_extract()
+    extract(dirs, lambda _i: {"about_specific_packages": True, "claims": [CLAIM], "brief": BRIEF})
+    r = p.run_extract()
+    assert (r.ingested, r.claims, r.briefs) == (1, 0, 1)
+    assert rows(p, "SELECT COUNT(*) FROM report_claims") == [(0,)]
+    assert rows(p, "SELECT claims, severity FROM report_extractions") == [(0, "critical")]
+
+
+def test_output_without_brief_is_still_ingested(env):
+    """指示の版を上げる前に書かれた結果 (brief なし) も取り込む。"""
+    p, dirs = env
+    add_report(p, 1, MALWARE)
+    p.run_extract()
+    extract(dirs, lambda _i: {"about_specific_packages": True, "claims": [CLAIM]})
+    r = p.run_extract()
+    assert (r.ingested, r.claims, r.briefs) == (1, 1, 0)
+
+
+def test_news_daily_limit_and_order(env):
+    p, dirs = env
+    for n in range(1, 5):
+        add_report(p, n, MALWARE, trust="news")
+    research = add_report(p, 9, MALWARE)  # 報道より後に届いても先に依頼する
+    r = extraction.ExtractResult()
+    extraction.queue(p.engine, dirs.in_dir, NOW, r, news_daily_limit=2)
+    assert r.queued == 3
+    assert exchange.read_job(dirs.in_dir, exchange.list_ids(dirs.in_dir)[0]).report_id == research
+    extraction.queue(p.engine, dirs.in_dir, NOW, r := extraction.ExtractResult(), news_daily_limit=2)
+    assert r.queued == 0  # その日の上限に達した報道は待たせる
+    extraction.queue(p.engine, dirs.in_dir, "2026-11-02T00:00:00.000000Z", r, news_daily_limit=2)
+    assert r.queued == 2  # 翌日に依頼する
 
 
 def test_failures_are_retried_then_given_up(env):

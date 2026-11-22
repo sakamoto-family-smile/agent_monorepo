@@ -1,0 +1,35 @@
+# 重大ニュース (PROPOSAL-0015): 使っている技術。ここに当たるものを日次・週次で上に並べる。
+#
+#   stack        : src/llm/schema.py の TOPICS から選ぶ (記事の topics と比べる)
+#   kev_keywords : CISA KEV の vendor / product に含まれていたら「関係あり」にする語 (大文字小文字は区別しない)
+#
+# 変更はこのファイルを直して make up (イメージに焼き込むため)。
+stack:
+  - python
+  - npm
+  - docker
+  - github
+  - github-actions
+  - gcp
+  - anthropic
+  - mcp
+  - ai
+  - macos
+  - ios
+  - browser
+  - line
+  - vpn
+  - database
+  - supply-chain
+kev_keywords:
+  - Google
+  - Chromium
+  - Apple
+  - GitHub
+  - Python
+  - Node.js
+  - Docker
+  - Anthropic
+  - Tailscale
+  - PostgreSQL
+  - SQLite

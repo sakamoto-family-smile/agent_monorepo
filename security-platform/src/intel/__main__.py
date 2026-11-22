@@ -133,7 +133,7 @@ def reports() -> None:
 @app.command()
 def extract() -> None:
     r = locked(build_pipeline().run_extract)()
-    typer.echo(f"ingested={r.ingested} claims={r.claims} grounded={r.grounded} retried={r.retried} "
+    typer.echo(f"ingested={r.ingested} claims={r.claims} grounded={r.grounded} briefs={r.briefs} retried={r.retried} "
                f"failed={r.failed} queued={r.queued} skipped={r.skipped}")
     if r.assessed:
         a = r.assessed

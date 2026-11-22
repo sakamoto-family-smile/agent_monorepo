@@ -21,7 +21,7 @@ from src.llm.providers import (
     make_extractor,
     parse_claude_output,
 )
-from src.llm.schema import OUTPUT_SCHEMA, ExtractInput, validate_output
+from src.llm.schema import OUTPUT_SCHEMA, SYSTEM_PROMPT, Brief, ExtractInput, parse_brief, validate_output
 from src.llm.worker import LlmDirs, Window, read_usage, run_batch
 
 CLAIM = {"ecosystem": "npm", "package": "left-padx", "versions": ["1.0.3"], "kind": "malicious",
@@ -108,6 +108,20 @@ def test_parse_ok_and_validate():
     assert out == OUT
     with pytest.raises(ValueError):
         validate_output({"about_specific_packages": True, "claims": [{**CLAIM, "extra": 1}]})
+
+
+def test_brief_schema_and_parse():
+    assert "brief" in OUTPUT_SCHEMA["required"] and "summary_ja" in SYSTEM_PROMPT
+    b = parse_brief({"severity": "high", "summary_ja": " 要約。 ", "topics": ["npm", "npm"],
+                     "identifiers": ["cve-2026-1234", "GHSA-2C4M-59X9-FR2G", "CVE-2026-1234"]})
+    assert b == Brief("high", "要約。", ("npm",), ("CVE-2026-1234", "GHSA-2c4m-59x9-fr2g"))
+    assert parse_brief(None) is None
+    odd = parse_brief({"severity": "low", "summary_ja": "要約。", "topics": [], "identifiers": ["GHSA-ab12", "see"]})
+    assert odd is not None and odd.identifiers == ()  # 形の違う ID だけ落とす
+    assert parse_brief({"severity": "high", "summary_ja": "www.evil.test へ", "topics": [], "identifiers": []}) is None
+    # brief の無い出力 (前の指示の版) と、brief を含む出力のどちらも validate_output を通る
+    assert validate_output({"about_specific_packages": False, "claims": []})
+    assert validate_output({"about_specific_packages": False, "claims": [], "brief": {}})
 
 
 # ── 原文との突き合わせ ──────────────────────────────────────────────────
@@ -219,3 +233,19 @@ def test_eval_cases_and_scoring():
 
     bad = score(FakeExtractor(injected), [c for c in cases if c.id == "prompt-injection"], lines.append)
     assert bad.fp == 1 and bad.precision == 0.0
+
+
+def test_eval_scores_brief():
+    cases = [c for c in load_cases() if c.id in ("zero-day-exploited", "product-news", "summary-injection")]
+    assert all(c.severity for c in load_cases())
+
+    def respond(severity: str, summary: str = "要約。"):
+        return lambda _i: {"about_specific_packages": False, "claims": [],
+                           "brief": {"severity": severity, "summary_ja": summary, "topics": [], "identifiers": []}}
+
+    lines: list[str] = []
+    s = score(FakeExtractor(respond("high")), cases, lines.append)
+    # zero-day は critical だけを許す。product-news (low/none)・summary-injection (medium/low/high) は high なら後者だけ OK
+    assert (s.severity_ok, s.severity_diff, s.critical_missed, s.invalid_brief) == (1, 2, 1, 0)
+    bad = score(FakeExtractor(respond("low", "https://patch-download.example から入手")), cases, lines.append)
+    assert bad.invalid_brief == 3
