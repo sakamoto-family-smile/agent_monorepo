@@ -19,6 +19,7 @@ from app.line.api import postback_item, text
 from app.storage import entries, lessons, modes, sessions
 from app.storage.modes import Mode
 from app.storage.tables import raw_events
+from app.timeutil import iso
 
 MAX_FLAG_LINES = 5
 MAX_REASSIGN_CHOICES = 6
@@ -64,29 +65,35 @@ async def handle_text(ctx: Context, body: str, mode: Mode, *, auto: bool) -> Mes
             )
         ]
 
-    session = await sessions.session_for_shot(
-        ctx.conn, result.shots[0].shot_at, ctx.now, ctx.deps.settings.tz
-    )
-    flags = [check(shot) for shot in result.shots]
+    saved = await lessons.saved_keys(ctx.conn, result.shots)
+    shots = [s for s in result.shots if (iso(s.shot_at), s.club) not in saved]
+    skipped = len(result.shots) - len(shots)
+    if mode.name == "metrics":
+        await modes.extend(ctx.conn, ctx.user_id, ctx.now)
+    if not shots:
+        return [text(f"📊 {skipped} 球ともすでに保存済みです（同じ日時・クラブ）。")]
+
+    session = await sessions.session_for_shot(ctx.conn, shots[0].shot_at, ctx.now, ctx.deps.settings.tz)
+    flags = [check(shot) for shot in shots]
     capture = await lessons.save_text_capture(
         ctx.conn,
         session_id=session.id,
         raw_event_id=ctx.raw_event_id,
         raw_text=body,
-        shots=result.shots,
+        shots=shots,
         flags=flags,
         now=ctx.now,
     )
-    if mode.name == "metrics":
-        await modes.extend(ctx.conn, ctx.user_id, ctx.now)
 
-    lines = [with_status(_summary(result.shots), session, mode if mode.name == "metrics" else None)]
+    lines = [with_status(_summary(shots), session, mode if mode.name == "metrics" else None)]
+    if skipped:
+        lines.append(f"保存済みの {skipped} 球は飛ばしました（同じ日時・クラブ）。")
     if auto:
         lines.append("計測として保存しました（違えば「取消」）。")
     if result.unreadable:
         numbers = ", ".join(str(n) for n, _ in result.unreadable[:10])
         lines.append(f"読めなかった行: {numbers} 行目（原文は残しています）")
-    flagged = [(shot, f) for shot, f in zip(result.shots, flags, strict=True) if f]
+    flagged = [(shot, f) for shot, f in zip(shots, flags, strict=True) if f]
     for shot, shot_flags in flagged[:MAX_FLAG_LINES]:
         lines.append(f"⚠️ {shot.shot_no} 球目 {shot.club or ''}: {'／'.join(f.message for f in shot_flags)}")
     if flagged:

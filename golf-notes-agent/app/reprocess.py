@@ -3,7 +3,8 @@
     python -m app.reprocess lesson [--since YYYY-MM-DD] [--dry-run]
         計測テキスト (lesson_captures.raw_text) をいまのパーサで読み直し、launch_metrics を置き換える
     python -m app.reprocess raw [--dry-run]
-        data/raw/ の原本のうち raw_events に無いもの (処理の途中で失敗したイベント) を取り込む
+        data/raw/ の原本のうち raw_events に無いもの (DB を復元したあとの分など) を取り込み、
+        redispatch ジョブを積む (backend のワーカーがメモ・動画などに保存し、push で知らせる)
 
 golf.db はホストから開かない。同じコンテナの中なら backend と同時に動いても SQLite のロックが効く
 (busy_timeout で待つ)。--dry-run は変わるものを表示するだけで DB を変えない。
@@ -22,11 +23,12 @@ import sqlalchemy as sa
 from sqlalchemy.engine import Connection
 
 from app.config import Settings
+from app.jobs import redispatch
 from app.lesson.checks import check
 from app.lesson.parser import COLUMNS, PARSER_VERSION, parse
 from app.line.events import parse_event
 from app.storage.db import BUSY_TIMEOUT_MS
-from app.storage.tables import launch_metrics, lesson_captures, raw_events
+from app.storage.tables import jobs, launch_metrics, lesson_captures, raw_events
 from app.timeutil import from_ms, iso
 
 
@@ -108,19 +110,30 @@ def reprocess_lessons(conn: Connection, settings: Settings, since: str | None, d
     return changes
 
 
-def import_missing_raw(conn: Connection, settings: Settings, dry_run: bool) -> list[Path]:
+@dataclass(frozen=True)
+class RawImport:
+    missing: list[Path]
+    broken: list[tuple[Path, str]]
+
+
+def import_missing_raw(conn: Connection, settings: Settings, dry_run: bool, at: datetime) -> RawImport:
     known = {r[0] for r in conn.execute(sa.select(raw_events.c.webhook_event_id)).all()}
     missing: list[Path] = []
-    now = iso(datetime.now(UTC))
+    broken: list[tuple[Path, str]] = []
+    now = iso(at)
     for path in sorted(settings.paths.raw.rglob("*.json")):
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        ev = parse_event(payload)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            ev = parse_event(payload)
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            broken.append((path, f"{type(e).__name__}: {e}"))
+            continue
         if ev.webhook_event_id in known or ev.user_id not in settings.allowed_user_ids:
             continue
         missing.append(path)
         if dry_run:
             continue
-        conn.execute(
+        res = conn.execute(
             sa.insert(raw_events).values(
                 webhook_event_id=ev.webhook_event_id,
                 line_message_id=ev.message_id,
@@ -133,10 +146,22 @@ def import_missing_raw(conn: Connection, settings: Settings, dry_run: bool) -> l
                 received_at=now,
             )
         )
-    return missing
+        conn.execute(
+            sa.insert(jobs).values(
+                kind=redispatch.KIND,
+                ref_id=int(res.inserted_primary_key[0]),
+                status="pending",
+                attempts=0,
+                polls=0,
+                next_run_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    return RawImport(missing=missing, broken=broken)
 
 
-def main(argv: Sequence[str] | None = None, settings: Settings | None = None) -> int:
+def main(argv: Sequence[str] | None = None, settings: Settings | None = None, now: datetime | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.reprocess")
     parser.add_argument("kind", choices=("lesson", "raw"))
     parser.add_argument("--since", help="この日付 (YYYY-MM-DD) 以降に取り込んだものだけ")
@@ -157,10 +182,15 @@ def main(argv: Sequence[str] | None = None, settings: Settings | None = None) ->
                 n = sum(c.changed for c in changes)
                 print(f"lesson: {len(changes)} 件中 {n} 件が変わる (parser {PARSER_VERSION})" + (" [dry-run]" if args.dry_run else ""))
             else:
-                missing = import_missing_raw(conn, settings, args.dry_run)
-                for path in missing:
+                result = import_missing_raw(conn, settings, args.dry_run, now or datetime.now(UTC))
+                for path in result.missing:
                     print(f"missing: {path.relative_to(settings.paths.root)}")
-                print(f"raw: DB に無い原本 {len(missing)} 件" + (" [dry-run]" if args.dry_run else " を取り込みました"))
+                for path, error in result.broken:
+                    print(f"broken: {path.relative_to(settings.paths.root)} ({error})")
+                print(
+                    f"raw: DB に無い原本 {len(result.missing)} 件・読めない原本 {len(result.broken)} 件"
+                    + (" [dry-run]" if args.dry_run else "（取り込んで、やり直しのジョブを積みました）")
+                )
     finally:
         engine.dispose()
     return 0

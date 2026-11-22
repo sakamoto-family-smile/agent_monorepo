@@ -516,6 +516,7 @@ gateway を通す。そのため Phase 1 は LLM を使わない範囲（保存�
 | 2026-11-22 | Implementing | Phase 1 PR2: リッチメニュー（定義・画像・登録スクリプト）・入力モード（30 分）・動画のアングルとクラブ・画像の用途・セッションの開始と終了・コース名（表記ゆれをまとめる）・スコアの原文。`input_modes` にはセッションを持たせず、開いているセッションは `sessions` から引く |
 | 2026-11-22 | Implementing | Phase 1 PR3: 計測テキストの読み取り（ルールベース、`parser_version` 1）と検算・計測の日時でのセッションの決め方・確認（確定 / 取消）・付け替え・読めないときのメモへの保存・ボタンなしの自動判定。確認は Flex ではなく Quick Reply にした。分析用にビュー `v_launch_metrics`（確定したものだけ、`face_to_path_deg` 付き）を追加 |
 | 2026-11-22 | Implementing | Phase 1 PR4: 日次バックアップ（コンテナ内で SQLite の backup API → `data/backup/golf-YYYYMMDD.db`、整合性の確認、14 世代）・外部 SSD への rsync（`scripts/offsite_backup.sh`、launchd で毎日 4:30。golf.db 本体はコピーしない）・再解析の CLI（`lesson` / `raw`）・Healthchecks.io への ping（5 分おき、失敗時は /fail）。再解析は backend にジョブで渡さず、同じコンテナの中の別プロセスで動かす（§4.3 を更新） |
+| 2026-11-22 | Implementing | Phase 1 レビューの反映（PR4 に追加）: 処理に失敗したイベントは原本を残して `redispatch` ジョブでやり直す（原本の保存と同じトランザクションで積み、処理が終われば消す。結果は push）。`reprocess raw` も同じジョブを使う。同じ日時・クラブの球は二重に保存しない。動画の sha256 は受け取りながら計算。webhook の本文は 1MB まで。古いボタン（取り消した計測の確定・終わったラウンドのコース）は無視。取消は届いた順で決める。httpx のログに ping URL を出さない |
 
 ### 実装フェーズ
 

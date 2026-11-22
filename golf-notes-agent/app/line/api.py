@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,7 @@ class LineApiError(Exception):
 class Download:
     content_type: str
     size_bytes: int
+    sha256: str
 
 
 class LineApi(Protocol):
@@ -79,6 +81,8 @@ class HttpLineApi:
         return str(res.json().get("status", "failed"))
 
     async def download(self, message_id: str, dest: Path) -> Download:
+        # 受け取りながら sha256 を計算する (動画をあとから読み直してイベントループを止めない)
+        digest = hashlib.sha256()
         size = 0
         async with self._client.stream(
             "GET", f"{DATA_BASE}/v2/bot/message/{message_id}/content", headers=self._headers
@@ -88,9 +92,10 @@ class HttpLineApi:
             with dest.open("wb") as f:
                 async for chunk in res.aiter_bytes():
                     f.write(chunk)
+                    digest.update(chunk)
                     size += len(chunk)
             content_type = res.headers.get("content-type", "application/octet-stream")
-        return Download(content_type=content_type.split(";")[0].strip(), size_bytes=size)
+        return Download(content_type=content_type.split(";")[0].strip(), size_bytes=size, sha256=digest.hexdigest())
 
 
 def text(body: str, quick_reply: list[dict[str, Any]] | None = None) -> dict[str, Any]:

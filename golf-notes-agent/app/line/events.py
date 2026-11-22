@@ -24,7 +24,12 @@ def signature(body: bytes, channel_secret: str) -> str:
 def verify(body: bytes, header: str | None, channel_secret: str) -> None:
     if not channel_secret or not header:
         raise InvalidSignatureError("missing secret or signature")
-    if not hmac.compare_digest(signature(body, channel_secret), header):
+    try:
+        expected = signature(body, channel_secret).encode("ascii")
+        given = header.encode("ascii")
+    except UnicodeEncodeError as e:
+        raise InvalidSignatureError("non-ascii signature") from e
+    if not hmac.compare_digest(expected, given):
         raise InvalidSignatureError("signature mismatch")
 
 

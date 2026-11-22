@@ -19,6 +19,7 @@ from app import webhook
 from app.config import Settings
 from app.deps import Deps
 from app.jobs import media as media_job
+from app.jobs import redispatch
 from app.jobs.worker import Worker
 from app.line.api import HttpLineApi, LineApi
 from app.scheduler import Scheduler
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_worker(deps: Deps) -> Worker:
-    return Worker(deps=deps, kinds={media_job.KIND: media_job.JOB})
+    return Worker(deps=deps, kinds={media_job.KIND: media_job.JOB, redispatch.KIND: redispatch.JOB})
 
 
 async def open_deps(settings: Settings, line: LineApi | None = None, clock: Clock = utcnow) -> Deps:
@@ -56,6 +57,8 @@ def create_app(
     settings = settings or Settings.from_env()
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    # httpx は INFO でリクエストの URL を出す (Healthchecks の ping URL は秘密を含む)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

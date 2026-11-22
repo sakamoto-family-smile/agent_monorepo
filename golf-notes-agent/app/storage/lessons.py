@@ -66,6 +66,24 @@ async def save_text_capture(
     return Capture(id=capture_id, session_id=session_id, status=status)
 
 
+async def saved_keys(conn: AsyncConnection, shots: list[Shot]) -> set[tuple[str, str | None]]:
+    """同じ日時・同じクラブで保存済みの球 (取消・取り消した取り込みを除く)。重ねて貼ったときに二重に数えない。"""
+    if not shots:
+        return set()
+    rows = (
+        await conn.execute(
+            sa.select(launch_metrics.c.shot_at, launch_metrics.c.club)
+            .join(lesson_captures, lesson_captures.c.id == launch_metrics.c.capture_id)
+            .where(
+                launch_metrics.c.shot_at.in_({iso(s.shot_at) for s in shots}),
+                lesson_captures.c.deleted_at.is_(None),
+                lesson_captures.c.status != "rejected",
+            )
+        )
+    ).all()
+    return {(r.shot_at, r.club) for r in rows}
+
+
 async def get(conn: AsyncConnection, capture_id: int) -> Capture | None:
     row = (
         await conn.execute(
@@ -78,11 +96,16 @@ async def get(conn: AsyncConnection, capture_id: int) -> Capture | None:
 
 
 async def set_status(conn: AsyncConnection, capture_id: int, status: str) -> bool:
+    """確認待ちのものだけ確定 / 取消にする (古いボタンで取り消したものを戻さない)。"""
     if status not in STATUSES:
         raise ValueError(status)
     res = await conn.execute(
         sa.update(lesson_captures)
-        .where(lesson_captures.c.id == capture_id, lesson_captures.c.deleted_at.is_(None))
+        .where(
+            lesson_captures.c.id == capture_id,
+            lesson_captures.c.deleted_at.is_(None),
+            lesson_captures.c.status == "pending",
+        )
         .values(status=status)
     )
     return res.rowcount == 1

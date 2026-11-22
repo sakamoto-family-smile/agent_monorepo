@@ -33,7 +33,9 @@ def backoff(attempts: int) -> timedelta:
     return timedelta(seconds=min(BACKOFF_BASE_SECONDS * 2 ** max(attempts - 1, 0), BACKOFF_MAX_SECONDS))
 
 
-async def enqueue(conn: AsyncConnection, kind: str, ref_id: int, now: datetime) -> None:
+async def enqueue(
+    conn: AsyncConnection, kind: str, ref_id: int, now: datetime, delay: timedelta = timedelta(0)
+) -> None:
     await conn.execute(
         insert(jobs)
         .values(
@@ -42,12 +44,16 @@ async def enqueue(conn: AsyncConnection, kind: str, ref_id: int, now: datetime) 
             status="pending",
             attempts=0,
             polls=0,
-            next_run_at=iso(now),
+            next_run_at=iso(now + delay),
             created_at=iso(now),
             updated_at=iso(now),
         )
         .on_conflict_do_nothing(index_elements=["kind", "ref_id"])
     )
+
+
+async def cancel(conn: AsyncConnection, kind: str, ref_id: int) -> None:
+    await conn.execute(sa.delete(jobs).where(jobs.c.kind == kind, jobs.c.ref_id == ref_id))
 
 
 async def claim_due(conn: AsyncConnection, now: datetime, limit: int = 5) -> list[Job]:

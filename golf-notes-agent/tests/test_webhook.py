@@ -76,7 +76,7 @@ async def test_redelivered_event_is_saved_but_not_replied(env: Env):
     assert env.line.replies == []
 
 
-async def test_one_failing_event_does_not_drop_the_others(env: Env, monkeypatch):
+async def test_failed_handling_keeps_raw_and_retries(env: Env, monkeypatch):
     from app.handlers import dispatch
 
     original = dispatch.handle
@@ -89,8 +89,52 @@ async def test_one_failing_event_does_not_drop_the_others(env: Env, monkeypatch)
     monkeypatch.setattr(dispatch, "handle", flaky)
     res = await env.post(env.text_event("boom"), env.text_event("ok"))
     assert res.status_code == 200
-    # 失敗したイベントはトランザクションごと戻る (原本の JSON ファイルは残る)
+    # 失敗したイベントも原本は DB に残り、やり直しのジョブが積まれる。成功したほうはジョブが消える
+    assert await env.scalar("SELECT count(*) FROM raw_events") == 2
     assert [r["text"] for r in await env.rows("SELECT text FROM memos")] == ["ok"]
+    jobs = await env.rows("SELECT kind, ref_id, status FROM jobs")
+    assert jobs == [{"kind": "redispatch", "ref_id": 1, "status": "pending"}]
+    assert env.line.reply_texts()[0].startswith("⚠️ 保存の途中でエラーが起きました")
+
+    monkeypatch.setattr(dispatch, "handle", original)
+    assert await env.run_jobs() == 0  # 2 分の猶予のあと
+    env.clock.advance(minutes=2)
+    await env.run_jobs()
+    assert sorted(r["text"] for r in await env.rows("SELECT text FROM memos")) == ["boom", "ok"]
+    assert await env.scalar("SELECT status FROM jobs") == "done"
+    assert env.line.pushes[0][1][0]["text"].startswith("（やり直して保存しました）\n📝 メモを保存しました")
+
+
+async def test_successful_handling_leaves_no_retry_job(env: Env):
+    await env.send_text("ふつうのメモ")
+    assert await env.scalar("SELECT count(*) FROM jobs") == 0
+
+
+async def test_too_large_body_is_rejected_before_signature(env: Env):
+    body = b"x" * (1024 * 1024 + 1)
+    res = await env.client.post("/api/line/webhook", content=body, headers={"X-Line-Signature": "x"})
+    assert res.status_code == 413
+
+
+async def test_non_ascii_signature_is_401(env: Env):
+    body = b'{"events": []}'
+    res = await env.client.post(
+        "/api/line/webhook", content=body, headers={"X-Line-Signature": "署名".encode()}
+    )
+    assert res.status_code == 401
+
+
+async def test_malformed_postback_is_ignored(env: Env):
+    data = "&".join(f"k{i}=v" for i in range(20))
+    res = await env.post(env.postback_event(data))
+    assert res.status_code == 200 and env.line.replies == []
+    assert await env.scalar("SELECT count(*) FROM jobs") == 0
+
+
+async def test_undo_uses_arrival_order_within_the_same_second(env: Env):
+    env.line.contents["i1"] = (b"img", "image/jpeg")
+    await env.post(env.media_event("image", "i1"), env.text_event("同じ秒のメモ"))
+    assert (await env.send_text("取消")).startswith("↩️ 直前のメモ")
 
 
 async def test_unsupported_message_type(env: Env):

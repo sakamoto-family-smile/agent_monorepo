@@ -1,6 +1,7 @@
 """共通の fixture: 一時ディレクトリの golf.db・偽の LINE API・時計・署名つきの webhook 送信。"""
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -59,7 +60,7 @@ class FakeLine:
             raise self.download_errors[message_id]
         data, content_type = self.contents[message_id]
         dest.write_bytes(data)
-        return Download(content_type=content_type, size_bytes=len(data))
+        return Download(content_type=content_type, size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
 
     def reply_texts(self) -> list[str]:
         return [m["text"] for _, msgs in self.replies for m in msgs if m["type"] == "text"]

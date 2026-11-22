@@ -25,6 +25,8 @@
 - 届いたイベントはすべて原本として `data/raw/YYYY/MM/<webhookEventId>.json` と `raw_events` に残す。
   同じ webhookEventId（LINE の再送・ボタンの連打）は 2 回目以降を保存しない。
 - 許可リスト（`ALLOWED_USER_IDS`）にない userId からのイベントは、保存も返事もしない。
+- 原本を保存したあとの処理で失敗したら「自動でやり直します」と返し、2 分後に `redispatch` ジョブがやり直す（結果は push）。
+- 同じ日時・同じクラブの計測は二重に保存しない（何回かに分けて重ねて貼っても大丈夫）。
 
 ## 構成
 
@@ -94,7 +96,7 @@ LINE の Webhook URL は `https://golf-notes.<tailnet>.ts.net/api/line/webhook`�
 ```bash
 make reprocess KIND=lesson DRY_RUN=1   # 計測テキストをいまのパーサで読み直したときに変わるものを表示
 make reprocess KIND=lesson             # 置き換える (取り消した計測はそのまま)
-make reprocess KIND=raw                # data/raw/ にあって DB に無い原本を取り込む
+make reprocess KIND=raw                # data/raw/ にあって DB に無い原本を取り込み、やり直しのジョブを積む
 ```
 
 ### 死活監視

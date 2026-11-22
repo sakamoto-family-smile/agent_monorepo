@@ -37,7 +37,8 @@ async def test_metrics_mode_saves_shot_and_extends(env: Env):
     second = TODAY.replace("09:55", "10:20").replace("7アイアン", "PW")
     assert (await env.send_text(second)).startswith("⛳ PW 1 球を保存")
     env.clock.advance(minutes=25)
-    assert (await env.send_text(TODAY)).endswith("計測モード・11/22 のレッスン（仮）")
+    third = TODAY.replace("09:55", "10:40")
+    assert (await env.send_text(third)).endswith("計測モード・11/22 のレッスン（仮）")
 
 
 async def test_multiple_shots_in_one_message(env: Env):
@@ -147,3 +148,39 @@ async def test_image_in_metrics_mode_is_marked(env: Env):
     await env.post(env.media_event("image", "i1"))
     assert env.line.reply_texts()[-1].startswith("🖼 計測画像を受け付けました")
     assert await env.scalar("SELECT purpose FROM media") == "metrics"
+
+
+async def test_repasted_shots_are_skipped(env: Env):
+    await press(env, "action=mode&mode=metrics")
+    await env.send_text(TODAY)
+    assert (await env.send_text(TODAY)) == "📊 1 球ともすでに保存済みです（同じ日時・クラブ）。"
+    both = TODAY + "\n" + TODAY.replace("09:55", "09:58")
+    reply = await env.send_text(both)
+    assert reply.startswith("⛳ 7I 1 球を保存") and "保存済みの 1 球は飛ばしました" in reply
+    assert await env.scalar("SELECT count(*) FROM v_launch_metrics") == 2
+
+
+async def test_rejected_shots_can_be_pasted_again(env: Env):
+    await press(env, "action=mode&mode=metrics")
+    await env.send_text(TODAY.replace("飛距離: 149.9yd", "飛距離: 155.0yd"))
+    await press(env, "action=capture&id=1&status=rejected")
+    assert (await env.send_text(TODAY)).startswith("⛳ 7I 1 球を保存")
+
+
+async def test_old_buttons_do_not_change_settled_state(env: Env):
+    await press(env, "action=mode&mode=metrics")
+    await env.send_text(TODAY.replace("飛距離: 149.9yd", "飛距離: 155.0yd"))
+    await press(env, "action=capture&id=1&status=rejected")
+    assert await press(env, "action=capture&id=1&status=confirmed") == {}
+    assert await env.scalar("SELECT status FROM lesson_captures") == "rejected"
+
+    # 終わったラウンドのコースは古いボタンで変えない
+    await press(env, "action=session_start&kind=round")
+    await env.send_text("湘南CC")
+    await press(env, "action=session_end")
+    await press(env, "action=session_start&kind=round")
+    await env.send_text("箱根GC")
+    await press(env, "action=session_end")
+    first_round = await env.scalar("SELECT min(id) FROM sessions WHERE kind = 'round'")
+    assert await press(env, f"action=course&session={first_round}&course=2") == {}
+    assert await env.scalar("SELECT course_id FROM sessions WHERE id = :id", id=first_round) == 1

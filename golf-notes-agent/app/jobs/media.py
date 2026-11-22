@@ -5,7 +5,6 @@ LINE のコンテンツは保存期間が限られるので、受け付けたら
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from datetime import timedelta
@@ -35,14 +34,6 @@ EXTENSIONS = {
     "image/heic": ".heic",
     "image/webp": ".webp",
 }
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 async def run(deps: Deps, job: Job) -> None:
@@ -87,7 +78,7 @@ async def run(deps: Deps, job: Job) -> None:
             if e.status in GONE_STATUSES:
                 raise PermanentError(str(e)) from e
             raise
-        digest = _sha256(tmp)
+        digest = dl.sha256
         ext = EXTENSIONS.get(dl.content_type, ".mp4" if row.kind == "video" else ".bin")
         local = parse_iso(row.created_at).astimezone(deps.settings.tz)
         rel = Path("media") / f"{local:%Y}" / f"{local:%m}" / f"{digest}{ext}"

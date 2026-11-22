@@ -31,7 +31,10 @@ def _int(value: str | None) -> int | None:
 
 
 async def handle(ctx: Context) -> Messages:
-    data = dict(parse_qsl(ctx.ev.postback_data or "", max_num_fields=10))
+    try:
+        data = dict(parse_qsl(ctx.ev.postback_data or "", max_num_fields=10))
+    except ValueError:
+        return []
     action = data.get("action")
     handler = HANDLERS.get(action or "")
     return await handler(ctx, data) if handler else []
@@ -153,9 +156,10 @@ async def _course(ctx: Context, data: dict[str, str]) -> Messages:
     session_id, course_id = _int(data.get("session")), _int(data.get("course"))
     if session_id is None or course_id is None:
         return []
-    session = await sessions.get(ctx.conn, session_id)
+    # 古いボタンで終わったラウンドのコースを変えないよう、開いているラウンドだけに付ける
+    session = await sessions.open_session(ctx.conn, ctx.now)
     course = await courses.get(ctx.conn, course_id)
-    if session is None or course is None:
+    if session is None or session.id != session_id or session.kind != "round" or course is None:
         return []
     await sessions.set_course(ctx.conn, session.id, course.id)
     await modes.clear(ctx.conn, ctx.user_id)

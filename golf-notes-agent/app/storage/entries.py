@@ -31,7 +31,7 @@ class Entry:
     kind: str
     id: int
     label: str
-    created_at: str
+    raw_event_id: int
 
 
 async def add_memo(
@@ -119,16 +119,17 @@ async def latest(conn: AsyncConnection, user_id: str) -> Entry | None:
     for kind, (table, label) in UNDOABLE.items():
         row = (
             await conn.execute(
-                sa.select(table.c.id, table.c.created_at)
+                sa.select(table.c.id, table.c.raw_event_id)
                 .join(raw_events, raw_events.c.id == table.c.raw_event_id)
                 .where(raw_events.c.user_id == user_id, table.c.deleted_at.is_(None))
-                .order_by(table.c.created_at.desc(), table.c.id.desc())
+                .order_by(table.c.raw_event_id.desc(), table.c.id.desc())
                 .limit(1)
             )
         ).first()
         if row:
-            found.append(Entry(kind=kind, id=row.id, label=label, created_at=row.created_at))
-    return max(found, key=lambda e: (e.created_at, e.id)) if found else None
+            found.append(Entry(kind=kind, id=row.id, label=label, raw_event_id=row.raw_event_id))
+    # 届いた順 (raw_events.id) でいちばん新しいもの。created_at は秒単位なので同じ秒で並びが決まらない
+    return max(found, key=lambda e: (e.raw_event_id, e.id)) if found else None
 
 
 async def undo(conn: AsyncConnection, entry: Entry, now: datetime) -> None:

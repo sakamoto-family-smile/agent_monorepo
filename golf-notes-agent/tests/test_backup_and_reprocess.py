@@ -136,22 +136,24 @@ def test_reprocess_status_rules(old_status, old_flagged, new_flagged, expected):
     assert reprocess._next_status(old_status, old_flagged, new_flagged) == expected
 
 
-async def test_reprocess_raw_imports_events_missing_from_db(env: Env, monkeypatch, capsys):
-    from app.handlers import dispatch
+async def test_reprocess_raw_imports_and_redispatches(env: Env, capsys):
+    # DB を前の日のバックアップに戻した、などで原本だけが残っている状態を作る
+    await env.send_text("DB から消えたメモ")
+    await _sql(env, "DELETE FROM memos")
+    await _sql(env, "DELETE FROM jobs")
+    await _sql(env, "DELETE FROM raw_events")
+    (env.deps.settings.paths.raw / "2026" / "11" / "broken.json").write_text("{not json")
 
-    async def boom(_ctx):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(dispatch, "handle", boom)
-    await env.post(env.text_event("途中で失敗したメモ"))
-    monkeypatch.undo()
-    await env.send_text("保存できたメモ")
+    assert reprocess.main(["raw", "--dry-run"], settings=env.deps.settings, now=env.clock()) == 0
+    out = capsys.readouterr().out
+    assert "DB に無い原本 1 件・読めない原本 1 件 [dry-run]" in out and "broken: raw/2026/11/broken.json" in out
+    assert reprocess.main(["raw"], settings=env.deps.settings, now=env.clock()) == 0
     assert await env.scalar("SELECT count(*) FROM raw_events") == 1
+    assert await env.scalar("SELECT kind FROM jobs WHERE status = 'pending'") == "redispatch"
 
-    assert reprocess.main(["raw", "--dry-run"], settings=env.deps.settings) == 0
-    assert "DB に無い原本 1 件 [dry-run]" in capsys.readouterr().out
-    assert reprocess.main(["raw"], settings=env.deps.settings) == 0
-    assert await env.scalar("SELECT count(*) FROM raw_events") == 2
+    await env.run_jobs()
+    assert await env.scalar("SELECT text FROM memos") == "DB から消えたメモ"
+    assert "（やり直して保存しました）" in env.line.pushes[-1][1][0]["text"]
     assert reprocess.main(["raw"], settings=env.deps.settings) == 0
     assert "DB に無い原本 0 件" in capsys.readouterr().out
 
