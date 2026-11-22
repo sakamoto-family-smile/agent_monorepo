@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | In Review |
+| **Status** | Implementing |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-11-21 |
 | **Updated** | 2026-11-22 |
 | **Target** | golf-notes-agent (新規) |
-| **Related PRs** | #271 (設計) |
+| **Related PRs** | #271 (設計), Phase 1 PR1〜 |
 | **Supersedes** | — |
 | **Superseded by** | — |
 
@@ -427,7 +427,8 @@ LLM を使うフラグ（`ENABLE_CLASSIFY` / `ENABLE_LESSON_OCR` / `ENABLE_AGENT
 ### 5.1 Monitoring
 
 - analytics-platform（ローカル JSONL）に `memo_ingested` / `media_saved` / `job_failed` /
-  `lesson_metrics_saved` / `llm_call`（費用・トークン）を emit
+  `lesson_metrics_saved` / `llm_call`（費用・トークン）を emit（Phase 3 の週次レポートとあわせて入れる。
+  Phase 1 はアプリのログと `jobs.last_error`・`push_log` で見る）
 - Healthchecks.io への ping で死活監視（PROPOSAL-0013 と同じ）
 
 ### 5.2 Troubleshooting
@@ -442,8 +443,8 @@ LLM を使うフラグ（`ENABLE_CLASSIFY` / `ENABLE_LESSON_OCR` / `ENABLE_AGENT
 
 ### 5.3 Dependencies
 
-- Phase 1: Tailscale (Funnel)、LINE 公式アカウント（golf-notes 専用の新しいチャンネル）、line-bot-sdk v3、
-  analytics-platform (path dep)
+- Phase 1: Tailscale (Funnel)、LINE 公式アカウント（golf-notes 専用の新しいチャンネル）、Messaging API（httpx で直接呼ぶ。
+  届いた JSON をそのまま原本として残すため line-bot-sdk の型は使わない）
 - Phase 2 以降: llm-gateway（PROPOSAL-0014。golf-notes 用のバーチャルキーと予算上限）
 - Phase 3 以降: sqlite-vec、ローカル embedding モデル（多言語対応のもの。arm64 の CPU で動くもの）
 - Phase 4 以降: ffmpeg、MediaPipe（linux/arm64 のコンテナで動くことを着手前に確認）
@@ -509,6 +510,7 @@ gateway を通す。そのため Phase 1 は LLM を使わない範囲（保存�
 | 2026-11-21 | Draft | レッスン計測サンプル受領。`launch_metrics` の列・符号規約・検算を確定（§4.2.1） |
 | 2026-11-22 | In Review | PR #271 で設計レビュー開始 |
 | 2026-11-22 | In Review | レビューの反映: 重複の判定を `webhookEventId` に。golf.db をホストから開かない（MCP・再解析・バックアップはコンテナ内、ホストは `.backup` の出力だけをコピー）。計測は計測の日時でセッションを決める。reply と push の使い分けと push の上限（§4.3.2）。LINE のチャンネルと Funnel を専用にする。再解析は本番では CLI。日付の変更ではセッションを切らない。検算のしきい値、コース名のまとめ、`sql_readonly` の制限。LLM は Phase 2 から llm-gateway 経由（案 E） |
+| 2026-11-22 | Implementing | Phase 1 PR1: 受信と保存の土台（署名検証・許可リスト・原本の保存と webhookEventId での重複防止・メモ・動画と画像の取得ジョブ・取消・push の上限・compose と Funnel） |
 
 ### 実装フェーズ
 

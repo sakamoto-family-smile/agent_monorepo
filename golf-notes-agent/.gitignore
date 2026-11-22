@@ -1,0 +1,8 @@
+# 実データ (原本・DB・動画) はリポジトリに入れない
+data/
+# ローカル本番の設定 (秘密情報を含む)。雛形 (*.env.example) だけ追跡する
+config/*.env
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
