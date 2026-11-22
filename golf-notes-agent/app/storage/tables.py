@@ -129,3 +129,61 @@ score_texts = sa.Table(
     sa.Column("created_at", sa.Text, nullable=False),
     sa.Column("deleted_at", sa.Text),
 )
+
+
+lesson_captures = sa.Table(
+    "lesson_captures",
+    metadata,
+    sa.Column("id", sa.Integer, primary_key=True),
+    sa.Column("session_id", sa.Integer, sa.ForeignKey("sessions.id"), nullable=False),
+    sa.Column("source", sa.Text, nullable=False),  # text | image
+    sa.Column("raw_event_id", sa.Integer, sa.ForeignKey("raw_events.id"), nullable=False),
+    sa.Column("media_id", sa.Integer, sa.ForeignKey("media.id")),
+    sa.Column("parser_version", sa.Text, nullable=False),
+    sa.Column("ocr_model", sa.Text),
+    sa.Column("raw_text", sa.Text, nullable=False),
+    # confirmed (検算に引っかからない・人が確定した) | pending (確認待ち) | rejected
+    sa.Column("status", sa.Text, nullable=False),
+    sa.Column("created_at", sa.Text, nullable=False),
+    sa.Column("deleted_at", sa.Text),
+)
+
+launch_metrics = sa.Table(
+    "launch_metrics",
+    metadata,
+    sa.Column("id", sa.Integer, primary_key=True),
+    sa.Column("capture_id", sa.Integer, sa.ForeignKey("lesson_captures.id"), nullable=False),
+    sa.Column("shot_no", sa.Integer, nullable=False),
+    sa.Column("shot_at", sa.Text, nullable=False),
+    sa.Column("club", sa.Text),
+    sa.Column("total_yd", sa.Float),
+    sa.Column("carry_yd", sa.Float),
+    sa.Column("run_yd", sa.Float),
+    sa.Column("club_speed_mps", sa.Float),
+    sa.Column("ball_speed_mps", sa.Float),
+    sa.Column("smash_factor", sa.Float),
+    sa.Column("apex_m", sa.Float),
+    sa.Column("descent_angle_deg", sa.Float),
+    sa.Column("offline_yd", sa.Float),
+    sa.Column("launch_v_deg", sa.Float),
+    sa.Column("backspin_rpm", sa.Float),
+    sa.Column("launch_h_deg", sa.Float),
+    sa.Column("sidespin_rpm", sa.Float),
+    sa.Column("club_path_deg", sa.Float),
+    sa.Column("face_angle_deg", sa.Float),
+    sa.Column("labels_json", sa.Text, nullable=False),
+    sa.Column("extra_json", sa.Text, nullable=False),
+    sa.Column("confidence_json", sa.Text),
+    sa.Column("check_flags", sa.Text, nullable=False),  # JSON の配列 (検算に引っかかったコード)
+)
+
+metric_edits = sa.Table(
+    "metric_edits",
+    metadata,
+    sa.Column("id", sa.Integer, primary_key=True),
+    sa.Column("metric_id", sa.Integer, sa.ForeignKey("launch_metrics.id"), nullable=False),
+    sa.Column("field", sa.Text, nullable=False),
+    sa.Column("before", sa.Text),
+    sa.Column("after", sa.Text),
+    sa.Column("edited_at", sa.Text, nullable=False),
+)

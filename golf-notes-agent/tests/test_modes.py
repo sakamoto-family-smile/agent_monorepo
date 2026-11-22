@@ -49,7 +49,7 @@ async def test_session_start_and_end_with_summary(env: Env):
     msg = await press(env, "action=session")
     assert msg["text"].startswith("▶ 11/22 のレッスン中です") and "action=session_end" in quick_data(msg)
     msg = await press(env, "action=session_end")
-    assert msg["text"] == "⏹ 11/22 のレッスンを終了しました（メモ 1・動画/画像 0・スコア 0）。"
+    assert msg["text"] == "⏹ 11/22 のレッスンを終了しました（メモ 1・動画/画像 0・計測 0・スコア 0）。"
     row = (await env.rows("SELECT end_reason, ended_at FROM sessions WHERE kind = 'lesson'"))[0]
     assert row["end_reason"] == "manual" and row["ended_at"]
     assert (await env.send_text("終わったあと")).endswith("11/22 の練習（仮）")
@@ -150,6 +150,7 @@ async def test_video_without_mode_asks_angle_then_club(env: Env):
     assert quick_data(msg) == ["action=tag&media=1&angle=dtl", "action=tag&media=1&angle=face_on"]
     msg = await press(env, "action=tag&media=1&angle=face_on")
     assert "action=tag&media=1&club=SW" in quick_data(msg)
+    assert len(quick_data(msg)) <= 13
     await press(env, "action=tag&media=1&club=SW")
     assert (await env.rows("SELECT angle, club FROM media"))[0] == {"angle": "face_on", "club": "SW"}
 
@@ -173,8 +174,7 @@ async def test_tag_rejects_wrong_kind_and_bad_values(env: Env):
     assert await env.scalar("SELECT angle IS NULL AND purpose IS NULL FROM media") == 1
 
 
-async def test_ask_and_metrics_are_not_ready_yet(env: Env):
+async def test_ask_is_not_ready_yet(env: Env):
     assert "準備中" in (await press(env, "action=mode&mode=ask"))["text"]
-    assert "次の更新" in (await press(env, "action=mode&mode=metrics"))["text"]
     assert "準備中" in await env.send_text("? 最近のドライバーの課題は？")
     assert await env.scalar("SELECT count(*) FROM memos") == 0

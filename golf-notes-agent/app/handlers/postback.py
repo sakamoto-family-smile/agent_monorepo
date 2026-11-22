@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from urllib.parse import parse_qsl
 
+from app.handlers import lesson
 from app.handlers.common import (
     ANGLES,
     CLUBS,
@@ -43,7 +44,10 @@ async def _mode(ctx: Context, data: dict[str, str]) -> Messages:
         session = await sessions.open_session(ctx.conn, ctx.now)
         return [text(with_status("📝 メモモードです。テキストはメモとして保存します", session))]
     if name == "metrics":
-        return [text("📊 計測テキストの読み取りは次の更新で対応します。いまはメモとして保存されます。")]
+        mode = await modes.set_mode(ctx.conn, ctx.user_id, "metrics", ctx.now)
+        session = await sessions.open_session(ctx.conn, ctx.now)
+        body = "📊 計測テキストを貼ってください（何回かに分けても OK。画像は保存のみ。30 分有効）"
+        return [text(with_status(body, session, mode))]
     if name == "video":
         return [text("🎥 アングルは？", quick_reply=angle_items("action=video_angle"))]
     if name == "score":
@@ -167,7 +171,8 @@ async def end_session(ctx: Context, _data: dict[str, str] | None = None) -> Mess
     n = await entries.counts(ctx.conn, current.id)
     return [
         text(
-            f"⏹ {current.label}を終了しました（メモ {n['memo']}・動画/画像 {n['media']}・スコア {n['score']}）。"
+            f"⏹ {current.label}を終了しました（メモ {n['memo']}・動画/画像 {n['media']}・"
+            f"計測 {n['capture']}・スコア {n['score']}）。"
         )
     ]
 
@@ -186,4 +191,8 @@ HANDLERS = {
     "session_end": end_session,
     "course": _course,
     "noop": _noop,
+    "capture": lesson.confirm,
+    "reassign": lesson.reassign,
+    "reassign_to": lesson.reassign_to,
+    "memo_from": lesson.memo_from,
 }

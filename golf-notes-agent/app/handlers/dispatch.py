@@ -6,15 +6,17 @@ webhook の中で DB に書き終えてから返事を作る (返事に書いた
 いまの入力モードで扱いを変える:
   メモ (既定)  テキストはメモ。動画・画像は保存してから、アングル・クラブ / 計測画像かどうかを聞く
   動画モード   動画を選んだアングル・クラブ付きで保存する (テキストはメモ)
+  計測モード   テキストを計測として読み取る (ボタンなしでも計測の書式なら計測として保存する)
   スコアモード テキストをスコアの原文として保存する
   コース名     ラウンド開始の直後。テキストをそのラウンドのコース名にする
 """
 from __future__ import annotations
 
-from app.handlers import postback
+from app.handlers import lesson, postback
 from app.handlers.common import Context, Messages, angle_items, video_label, with_status
 from app.jobs import media as media_job
 from app.jobs import queue
+from app.lesson.parser import looks_like_metrics
 from app.line.api import postback_item, text
 from app.storage import courses, entries, modes, sessions
 from app.storage.modes import Mode
@@ -50,6 +52,12 @@ async def _text(ctx: Context, body: str, mode: Mode) -> Messages:
         return [text("🔍 振り返りは準備中です（送った質問は記録しています）。")]
     if mode.name == "course":
         return await _course(ctx, body, mode)
+    if mode.name == "metrics":
+        return await lesson.handle_text(ctx, body, mode, auto=False) or []
+    if mode.name != "score" and looks_like_metrics(body):
+        saved = await lesson.handle_text(ctx, body, mode, auto=True)
+        if saved is not None:
+            return saved
 
     session = await sessions.session_for_item(ctx.conn, ctx.now, ctx.deps.settings.tz)
     if mode.name == "score":
@@ -110,7 +118,7 @@ async def _media(ctx: Context, mode: Mode) -> Messages:
     if mode.name == "metrics":
         await entries.tag_media(ctx.conn, media_id, "image", purpose="metrics")
         await modes.extend(ctx.conn, ctx.user_id, ctx.now)
-        return [text(with_status("🖼 計測画像を受け付けました（読み取りは今後の更新で行います）", session, mode))]
+        return [text(with_status("🖼 計測画像を受け付けました（画像の読み取りは Phase 2 で行います）", session, mode))]
     prefix = f"action=tag&media={media_id}"
     return [
         text(

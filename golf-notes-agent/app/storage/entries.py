@@ -10,7 +10,7 @@ from datetime import datetime
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.storage.tables import media, memos, raw_events, score_texts
+from app.storage.tables import lesson_captures, media, memos, raw_events, score_texts
 from app.timeutil import iso
 
 # 取消の対象になるテーブルと、返信での呼び方
@@ -18,6 +18,7 @@ UNDOABLE: dict[str, tuple[sa.Table, str]] = {
     "memo": (memos, "メモ"),
     "media": (media, "動画・画像"),
     "score": (score_texts, "スコア"),
+    "capture": (lesson_captures, "計測"),
 }
 
 
@@ -42,6 +43,15 @@ async def add_memo(
         )
     )
     return int(res.inserted_primary_key[0])
+
+
+async def memo_exists(conn: AsyncConnection, raw_event_id: int) -> bool:
+    row = (
+        await conn.execute(
+            sa.select(memos.c.id).where(memos.c.raw_event_id == raw_event_id, memos.c.deleted_at.is_(None))
+        )
+    ).first()
+    return row is not None
 
 
 async def add_media(

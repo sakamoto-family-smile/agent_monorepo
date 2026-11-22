@@ -28,6 +28,7 @@ class SessionRef:
     kind: str
     date: str
     provisional: bool
+    started_at: str = ""
 
     @property
     def label(self) -> str:
@@ -37,7 +38,9 @@ class SessionRef:
 
 
 def _ref(row: sa.Row) -> SessionRef:
-    return SessionRef(id=row.id, kind=row.kind, date=row.date, provisional=bool(row.provisional))
+    return SessionRef(
+        id=row.id, kind=row.kind, date=row.date, provisional=bool(row.provisional), started_at=row.started_at
+    )
 
 
 async def end_idle(conn: AsyncConnection, now: datetime) -> int:
@@ -91,7 +94,9 @@ async def provisional_session(
             last_activity_at=iso(now),
         )
     )
-    return SessionRef(id=int(res.inserted_primary_key[0]), kind=kind, date=day.isoformat(), provisional=True)
+    return SessionRef(
+        id=int(res.inserted_primary_key[0]), kind=kind, date=day.isoformat(), provisional=True, started_at=iso(now)
+    )
 
 
 async def session_for_item(conn: AsyncConnection, now: datetime, tz: ZoneInfo) -> SessionRef:
@@ -101,6 +106,41 @@ async def session_for_item(conn: AsyncConnection, now: datetime, tz: ZoneInfo) -
         await touch(conn, current.id, now)
         return current
     return await provisional_session(conn, now.astimezone(tz).date(), "practice", now)
+
+
+async def session_for_shot(
+    conn: AsyncConnection, shot_at: datetime, now: datetime, tz: ZoneInfo
+) -> SessionRef:
+    """計測の入れ先 (計測の日時が基準。§4.3.1 のセッションの決め方)。
+
+    1. 開いているセッションの開始〜現在に計測の日時が入れば、そのセッション
+    2. 計測の日付のレッスンのセッションがあれば、そこ (ボタンで始めたものを優先)
+    3. どちらも無ければ、計測の日付で仮のレッスンのセッションを作る
+    """
+    current = await open_session(conn, now)
+    if current and current.started_at <= iso(shot_at) <= iso(now):
+        await touch(conn, current.id, now)
+        return current
+    day = shot_at.astimezone(tz).date()
+    row = (
+        await conn.execute(
+            sa.select(sessions)
+            .where(sessions.c.date == day.isoformat(), sessions.c.kind == "lesson")
+            .order_by(sessions.c.provisional, sessions.c.started_at.desc())
+            .limit(1)
+        )
+    ).first()
+    if row:
+        return _ref(row)
+    return await provisional_session(conn, day, "lesson", now)
+
+
+async def recent(conn: AsyncConnection, limit: int, exclude: int | None = None) -> list[SessionRef]:
+    """付け替え先の候補 (新しい順)。"""
+    query = sa.select(sessions).order_by(sessions.c.date.desc(), sessions.c.started_at.desc()).limit(limit)
+    if exclude is not None:
+        query = query.where(sessions.c.id != exclude)
+    return [_ref(r) for r in (await conn.execute(query)).all()]
 
 
 async def touch(conn: AsyncConnection, session_id: int, now: datetime) -> None:
@@ -127,7 +167,9 @@ async def start(conn: AsyncConnection, kind: str, now: datetime, tz: ZoneInfo) -
             kind=kind, date=day, provisional=False, started_at=iso(now), last_activity_at=iso(now)
         )
     )
-    return SessionRef(id=int(res.inserted_primary_key[0]), kind=kind, date=day, provisional=False)
+    return SessionRef(
+        id=int(res.inserted_primary_key[0]), kind=kind, date=day, provisional=False, started_at=iso(now)
+    )
 
 
 async def end(conn: AsyncConnection, session_id: int, now: datetime) -> None:

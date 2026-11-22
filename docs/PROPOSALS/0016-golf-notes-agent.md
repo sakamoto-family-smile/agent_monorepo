@@ -512,6 +512,7 @@ gateway を通す。そのため Phase 1 は LLM を使わない範囲（保存�
 | 2026-11-22 | In Review | レビューの反映: 重複の判定を `webhookEventId` に。golf.db をホストから開かない（MCP・再解析・バックアップはコンテナ内、ホストは `.backup` の出力だけをコピー）。計測は計測の日時でセッションを決める。reply と push の使い分けと push の上限（§4.3.2）。LINE のチャンネルと Funnel を専用にする。再解析は本番では CLI。日付の変更ではセッションを切らない。検算のしきい値、コース名のまとめ、`sql_readonly` の制限。LLM は Phase 2 から llm-gateway 経由（案 E） |
 | 2026-11-22 | Implementing | Phase 1 PR1: 受信と保存の土台（署名検証・許可リスト・原本の保存と webhookEventId での重複防止・メモ・動画と画像の取得ジョブ・取消・push の上限・compose と Funnel） |
 | 2026-11-22 | Implementing | Phase 1 PR2: リッチメニュー（定義・画像・登録スクリプト）・入力モード（30 分）・動画のアングルとクラブ・画像の用途・セッションの開始と終了・コース名（表記ゆれをまとめる）・スコアの原文。`input_modes` にはセッションを持たせず、開いているセッションは `sessions` から引く |
+| 2026-11-22 | Implementing | Phase 1 PR3: 計測テキストの読み取り（ルールベース、`parser_version` 1）と検算・計測の日時でのセッションの決め方・確認（確定 / 取消）・付け替え・読めないときのメモへの保存・ボタンなしの自動判定。確認は Flex ではなく Quick Reply にした。分析用にビュー `v_launch_metrics`（確定したものだけ、`face_to_path_deg` 付き）を追加 |
 
 ### 実装フェーズ
 
