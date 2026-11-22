@@ -11,13 +11,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 step 1 "事前確認"
 require_commands docker gcloud uv cloud-sql-proxy terraform curl
-require_env_file LINE_CHANNEL_SECRET LINE_CHANNEL_ACCESS_TOKEN CLAUDE_CODE_OAUTH_TOKEN PUBLIC_BASE_URL
+require_env_file LINE_CHANNEL_SECRET LINE_CHANNEL_ACCESS_TOKEN CLAUDE_CODE_OAUTH_TOKEN PUBLIC_BASE_URL LLM_GATEWAY_KEY
 PUBLIC_BASE_URL="$(env_value PUBLIC_BASE_URL)"
 remind_redelivery "有効"
 confirm "Webhook の再送を有効にしましたか?"
 
 step 2 "ローカルを起動して、Funnel 経由で届くか確認"
 run mkdir -p "$DATA_DIR"
+# backend は LLM gateway のネットワークに入るので、先に gateway を起動する (PROPOSAL-0014)
+run make -C "$PROJECT_DIR/../llm-gateway" up
+wait_http "http://127.0.0.1:4000/health/liveliness" 200
 run "${COMPOSE[@]}" --profile public up -d --build
 wait_http "http://127.0.0.1:${STOCK_LOCAL_PORT:-8001}/health" 200
 wait_http "$PUBLIC_BASE_URL/api/line/webhook" 405

@@ -18,8 +18,10 @@ from agents.technical_analysis import compute_indicators
 from agents.chart_generator import generate_chart
 from agents.forecast import MonteCarloForecaster, ForecastResult
 from agents.edinet_collector import EdinetFilingResult, collect_filings
+from agents import llm_options
+from agents.verdict import VERDICT_INSTRUCTION, parse_verdict
 from instrumentation import get_analytics_logger, get_content_router, get_tracer
-from services.database import save_report
+from services.database import ReportEvaluation, save_report
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -113,7 +115,8 @@ def _build_analysis_prompt(
 4. **総合評価**: 強気/中立/弱気の判断と、その根拠を明確に示してください
 5. **リスク要因**: 主要なダウンサイドリスクを列挙してください{edinet_instr}{forecast_instr}
 
-レポートは投資家が意思決定に使えるよう、具体的かつ客観的に記述してください。"""
+レポートは投資家が意思決定に使えるよう、具体的かつ客観的に記述してください。
+{VERDICT_INSTRUCTION}"""
 
 
 def _format_ohlcv_summary(ohlcv) -> str:
@@ -340,10 +343,13 @@ async def run_analysis(request: AnalysisRequest) -> AsyncIterator[dict]:
     tracer = get_tracer()
 
     session_id = f"analysis_{uuid.uuid4().hex[:16]}"
+    # gateway に送る ID。Langfuse の session ID になり、reports にも残して採点と突き合わせる
+    trace_id = llm_options.new_trace_id()
     query_hash = sha256_prefixed(request.query)
 
     with tracer.start_as_current_span("agent.run_analysis") as root_span:
         root_span.set_attribute("session.id", session_id)
+        root_span.set_attribute("llm.trace_id", trace_id)
         root_span.set_attribute("input.query_hash", query_hash)
 
         # 開始イベント
@@ -361,7 +367,7 @@ async def run_analysis(request: AnalysisRequest) -> AsyncIterator[dict]:
 
         try:
             async for event in _run_analysis_inner(
-                request, session_id=session_id, al=al, cr=cr, tracer=tracer
+                request, session_id=session_id, trace_id=trace_id, al=al, cr=cr, tracer=tracer
             ):
                 yield event
         except Exception as exc:
@@ -426,10 +432,32 @@ def _build_forecast(ticker: str, ohlcv) -> ForecastResult | None:
         return None
 
 
+def _build_evaluation(
+    report_text: str, forecast: ForecastResult | None, trace_id: str
+) -> ReportEvaluation:
+    """採点用に、分析時点の判断と予測帯を取り出す (PROPOSAL-0014)。"""
+    verdict = parse_verdict(report_text)
+    has_forecast = forecast is not None and bool(forecast.bands) and bool(forecast.dates)
+    return ReportEvaluation(
+        trace_id=trace_id,
+        llm_model=llm_options.model_label(settings),
+        stance=verdict.stance if verdict else None,
+        confidence=verdict.confidence if verdict else None,
+        base_date=forecast.last_date if has_forecast else None,
+        base_close=forecast.last_price if has_forecast else None,
+        forecast_horizon_days=forecast.horizon_days if has_forecast else None,
+        forecast_end_date=forecast.dates[-1] if has_forecast else None,
+        forecast_bands=(
+            {p: float(path[-1]) for p, path in forecast.bands.items()} if has_forecast else None
+        ),
+    )
+
+
 async def _run_analysis_inner(
     request: AnalysisRequest,
     *,
     session_id: str,
+    trace_id: str,
     al,
     cr,
     tracer,
@@ -520,23 +548,17 @@ async def _run_analysis_inner(
     )
 
     options = ClaudeAgentOptions(
-        model="claude-opus-4-6",
+        model=settings.llm_model,
         permission_mode="bypassPermissions",
         cwd=workspace_dir,
         system_prompt="あなたは日本の株式市場に精通したプロのアナリストです。データに基づいた客観的な分析を行い、日本語でレポートを作成してください。",
-        env={
-            # claude_agent_sdk は HOME を必要とする。docker / Cloud Run でも
-            # /tmp は書込可能なため恒常的にここを使う。本物のシークレット保存先
-            # ではないので bandit B108 を抑止する。
-            "HOME": "/tmp",  # nosec B108
-            "ANTHROPIC_API_KEY": "",
-            "CLAUDE_CODE_OAUTH_TOKEN": os.getenv("CLAUDE_CODE_OAUTH_TOKEN", ""),
-            "BRAVE_API_KEY": os.getenv("BRAVE_API_KEY", ""),
-        },
+        env=llm_options.claude_env(settings, trace_id),
+        settings=llm_options.claude_settings(settings),
         allowed_tools=[
             "Read", "Glob", "Grep",
             "mcp__brave-search__*",
         ],
+        disallowed_tools=list(llm_options.DISALLOWED_TOOLS),
     )
 
     _sentinel = object()
@@ -618,10 +640,14 @@ async def _run_analysis_inner(
 
     # Save report
     report.report_text = "\n".join(report_text_parts)
+    evaluation = _build_evaluation(report.report_text, forecast, trace_id)
+    if evaluation.stance is None:
+        logger.warning("総合判断を読み取れませんでした ticker=%s trace_id=%s", ticker, trace_id)
     report_id = await save_report(
         ticker=ticker,
         company_name=company_name,
         report_data=report.model_dump(mode="json"),
+        evaluation=evaluation,
     )
 
     al.emit(
@@ -637,6 +663,8 @@ async def _run_analysis_inner(
                 "ticker": ticker,
                 "company_name": company_name,
                 "report_text_chars": len(report.report_text or ""),
+                "trace_id": trace_id,
+                "stance": evaluation.stance,
             },
         },
         session_id=session_id,

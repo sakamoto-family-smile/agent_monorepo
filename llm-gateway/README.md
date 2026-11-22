@@ -1,11 +1,11 @@
 # llm-gateway
 
 エージェントの LLM 呼び出しを集める gateway 一式 (設計: [PROPOSAL-0014](../docs/PROPOSALS/0014-llm-gateway.md))。
-いまは P0 検証の雛形で、LiteLLM Proxy と Langfuse をローカルの docker compose で動かす。
+LiteLLM Proxy と Langfuse をローカルの docker compose で動かす (GCP 版は PROPOSAL-0014 の PR4)。
 
 | 部品 | 中身 | 公開先 |
 |---|---|---|
-| `litellm` | LiteLLM Proxy v1.108.3 (ダイジェスト固定)。別名 `stock-analysis` / `stock-analysis-next` | `127.0.0.1:4000` |
+| `litellm` | LiteLLM Proxy v1.108.3 (ダイジェスト固定)。別名 `stock-analysis` / `stock-analysis-next` | `127.0.0.1:4000` と、エージェント用のネットワーク `llm-gateway-agents` (`http://litellm:4000`) |
 | `litellm-db` | gateway 用の Postgres (バーチャルキー・予算・利用額) | compose 内のみ |
 | Langfuse | 公式 compose (`langfuse/upstream-docker-compose.yml`, v4.76.0) + `langfuse/override.yml` | 画面 `127.0.0.1:3000` |
 
@@ -18,7 +18,23 @@ make up
 make health
 ```
 
+## バーチャルキーの発行
+
+エージェントごとにキーを分け、使える別名・30 日あたりの上限 (API 料金換算の USD)・1 分あたりの回数を付ける。
+キーは `ENV_FILE` の `LLM_GATEWAY_KEY` に書き込まれ、画面には出ない。
+
+```bash
+make key ALIAS=stock-analysis-agent ENV_FILE=../stock-analysis-agent/config/local.env
+# 上限を変える: python3 scripts/issue_key.py stock-analysis-agent --budget 50 --rpm 20 --env-file ...
+```
+
+定額プランの間も、上限は LiteLLM が API 料金換算で数えるので、超えると呼び出しが断られる。
+
 ## エージェント側の設定 (Agent SDK / Claude Code)
+
+stock-analysis-agent は `LLM_GATEWAY_URL` / `LLM_GATEWAY_KEY` / `LLM_GATEWAY_MODEL` / `LLM_MODEL` を設定すると、
+下の環境変数と `modelOverrides` を自分で組み立てる (`app/agents/llm_options.py`)。
+ローカル本番の compose は `llm-gateway-agents` ネットワークに入るので、先にここで `make up` しておく。
 
 | 環境変数 | 値 |
 |---|---|

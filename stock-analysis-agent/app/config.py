@@ -9,6 +9,16 @@ class Settings:
     log_level: str = os.getenv("LOG_LEVEL", "info")
     claude_code_oauth_token: str = os.getenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
+    # ── LLM の呼び出し先 (PROPOSAL-0014) ──
+    # LLM_MODEL は Claude CLI が知っているモデル ID (コンテキスト長などの判断に使う)。
+    # LLM_GATEWAY_URL を設定すると gateway (LiteLLM) 経由にし、モデルは別名 LLM_GATEWAY_MODEL で頼む。
+    # 実際のモデルは gateway の設定が決めるので、別名の向き先を変えたら LLM_MODEL も合わせる。
+    # 空なら従来どおり Anthropic に直接つなぐ。
+    llm_model: str = os.getenv("LLM_MODEL", "claude-opus-4-6")
+    llm_gateway_url: str = os.getenv("LLM_GATEWAY_URL", "").rstrip("/")
+    llm_gateway_key: str = os.getenv("LLM_GATEWAY_KEY", "")
+    llm_gateway_model: str = os.getenv("LLM_GATEWAY_MODEL", "stock-analysis")
+
     # Database (PROPOSAL-0011 P2-B: SQLAlchemy async)
     # 優先度: DATABASE_URL > DB_HOST/DB_USER/DB_NAME(+DB_PASSWORD)組立 > db_path(sqlite)
     #   - dev/test: sqlite+aiosqlite:///{db_path}

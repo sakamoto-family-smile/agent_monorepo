@@ -154,7 +154,10 @@ async def test_run_analysis_emits_full_lifecycle(monkeypatch, sink, tmp_path: Pa
     async def _maybe_none(*a, **kw):
         return None
 
-    async def _fake_save_report(*, ticker, company_name, report_data):
+    saved: dict = {}
+
+    async def _fake_save_report(*, ticker, company_name, report_data, evaluation=None):
+        saved["evaluation"] = evaluation
         return 42
 
     def _fake_chart(ticker, ohlcv, charts_dir, forecast=None):
@@ -179,7 +182,7 @@ async def test_run_analysis_emits_full_lifecycle(monkeypatch, sink, tmp_path: Pa
             content=[ToolResultBlock(tool_use_id="tu_1", content="news result", is_error=False)]
         )
         yield AssistantMessage(
-            content=[TextBlock(text="トヨタの分析結果は以下の通りです...")],
+            content=[TextBlock(text="トヨタの分析結果は以下の通りです...\n\n総合判断: 強気 / 確信度: 中")],
             usage={"input_tokens": 1500, "output_tokens": 300},
         )
         yield ResultMessage()
@@ -230,6 +233,14 @@ async def test_run_analysis_emits_full_lifecycle(monkeypatch, sink, tmp_path: Pa
     session_ids = {e["session_id"] for e in _events(sink)}
     assert len(session_ids) == 1
 
+    # 10) 採点用の判断と trace ID が保存される (PROPOSAL-0014)
+    ev = saved["evaluation"]
+    assert ev.stance == "bullish"
+    assert ev.confidence == "medium"
+    assert len(ev.trace_id) == 32
+    saved_event = next(e for e in biz if e["action"] == "report_saved")
+    assert saved_event["attributes"]["trace_id"] == ev.trace_id
+
 
 async def test_run_analysis_emits_error_event_on_failure(monkeypatch, sink, tmp_path: Path):
     """orchestrator 内で例外が出たら error_event + conversation_event(aborted)。"""
@@ -277,7 +288,7 @@ async def test_failing_tool_emits_status_error(monkeypatch, sink, tmp_path: Path
     monkeypatch.setattr(orchestrator, "compute_indicators", lambda _o: None)
     monkeypatch.setattr(orchestrator, "generate_chart", lambda *a, **kw: None)
 
-    async def _fake_save(*, ticker, company_name, report_data):
+    async def _fake_save(*, ticker, company_name, report_data, evaluation=None):
         return 1
 
     monkeypatch.setattr(orchestrator, "save_report", _fake_save)

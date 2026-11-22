@@ -24,6 +24,10 @@ services:
       - ./litellm/config.yaml:/app/config.yaml:ro
     ports:
       - "127.0.0.1:4000:4000"
+    # エージェントはこのネットワークから http://litellm:4000 で呼ぶ (Langfuse や DB は見せない)
+    networks:
+      - default
+      - agents
     depends_on:
       litellm-db:
         condition: service_healthy
@@ -42,3 +46,7 @@ services:
       interval: 5s
       retries: 10
     restart: unless-stopped
+
+networks:
+  agents:
+    name: llm-gateway-agents

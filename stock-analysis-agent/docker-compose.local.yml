@@ -6,6 +6,7 @@
 #   make local-down / local-logs / local-ps
 #
 # 事前準備: cp config/local.env.example config/local.env (+ config/tailscale.env)。
+# LLM gateway (../llm-gateway) を先に make up しておく (backend はそのネットワークに入る)。
 #
 # - イメージは Cloud Run と同じ Dockerfile (GCP に戻すときも同じものを使う)
 # - 永続データはホストの ${STOCK_LOCAL_DATA_DIR:-./data/local} に置き、コンテナでは /app/var に見せる。
@@ -29,6 +30,11 @@ services:
       - "127.0.0.1:${STOCK_LOCAL_PORT:-8001}:8080"
     volumes:
       - ${STOCK_LOCAL_DATA_DIR:-./data/local}:/app/var
+    # LLM は llm-gateway の LiteLLM (http://litellm:4000) 経由で呼ぶ (PROPOSAL-0014)。
+    # このネットワークは llm-gateway 側の make up で作られるので、先に gateway を起動しておく
+    networks:
+      - default
+      - llm-gateway
     # 分析 2 件同時で最大 3GB 程度の見積もり (PROPOSAL-0013 §4.8)。security-platform と同居するため上限を置く
     mem_limit: 4g
     cpus: 4
@@ -62,6 +68,11 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+
+networks:
+  llm-gateway:
+    name: llm-gateway-agents
+    external: true
 
 volumes:
   tailscale_state:

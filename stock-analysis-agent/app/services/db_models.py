@@ -9,7 +9,7 @@ edinet_documents (PROPOSAL-0011 P3-B で shared Cloud SQL へ移行)。
 
 from __future__ import annotations
 
-from sqlalchemy import Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import Float, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -58,6 +58,19 @@ class Report(Base):
     company_name: Mapped[str | None] = mapped_column(String, nullable=True)
     report_data: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(String, server_default=_NOW)
+    # ── 評価用 (PROPOSAL-0014)。0004 より前のレポートは空 ──
+    # gateway に送った trace ID (= Langfuse の session ID)
+    trace_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    llm_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 総合判断 bullish / neutral / bearish と確信度 high / medium / low
+    stance: Mapped[str | None] = mapped_column(String, nullable=True)
+    confidence: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 予測帯: 基準日 (価格データの最終日) の終値と、horizon 営業日先の各パーセンタイル
+    base_date: Mapped[str | None] = mapped_column(String, nullable=True)  # YYYY-MM-DD
+    base_close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    forecast_horizon_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    forecast_end_date: Mapped[str | None] = mapped_column(String, nullable=True)  # YYYY-MM-DD
+    forecast_bands: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON {"10": 価格, ...}
 
 
 class Alert(Base):

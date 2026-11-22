@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -190,16 +191,49 @@ async def set_cached_price(ticker: str, period: str, data: Dict) -> None:
         await session.commit()
 
 
+@dataclass(frozen=True)
+class ReportEvaluation:
+    """後から採点するために残す、分析時点の判断と予測 (PROPOSAL-0014)。"""
+
+    trace_id: Optional[str] = None
+    llm_model: Optional[str] = None
+    stance: Optional[str] = None
+    confidence: Optional[str] = None
+    base_date: Optional[str] = None
+    base_close: Optional[float] = None
+    forecast_horizon_days: Optional[int] = None
+    forecast_end_date: Optional[str] = None
+    forecast_bands: Optional[Dict[int, float]] = None
+
+
 async def save_report(
-    ticker: str, company_name: Optional[str], report_data: Dict
+    ticker: str,
+    company_name: Optional[str],
+    report_data: Dict,
+    evaluation: Optional[ReportEvaluation] = None,
 ) -> int:
     """分析レポートを保存し report ID を返す。"""
+    ev = evaluation or ReportEvaluation()
+    bands = (
+        json.dumps({str(p): v for p, v in sorted(ev.forecast_bands.items())})
+        if ev.forecast_bands
+        else None
+    )
     sm = get_sessionmaker()
     async with sm() as session:
         report = Report(
             ticker=ticker,
             company_name=company_name,
             report_data=json.dumps(report_data, ensure_ascii=False),
+            trace_id=ev.trace_id,
+            llm_model=ev.llm_model,
+            stance=ev.stance,
+            confidence=ev.confidence,
+            base_date=ev.base_date,
+            base_close=ev.base_close,
+            forecast_horizon_days=ev.forecast_horizon_days,
+            forecast_end_date=ev.forecast_end_date,
+            forecast_bands=bands,
         )
         session.add(report)
         await session.commit()
