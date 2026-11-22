@@ -4,6 +4,8 @@
     python -m src.notify test     # LINE にテストメッセージを送る
     python -m src.notify digest   # 日次まとめを今すぐ送る (その日にまだ送っていなければ)
     python -m src.notify issues   # GitHub Issues を今すぐ同期する
+    python -m src.notify news     # 重大ニュースを今すぐ送る (その日にまだ送っていなければ。--dry-run で表示だけ)
+    python -m src.notify news-weekly  # 前の週の週次まとめの Issue を今すぐ作る (--dry-run で本文を表示だけ)
     python -m src.notify health   # 監視項目の今の状態を表示する (送らない)
 
 notify.db にだけ書く。detection.db・intel.db は読み取り専用。送り先の認証情報は
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
@@ -30,7 +33,17 @@ from ..config import settings
 from ..detection.triage import PRIORITIES
 from ..intel.schedule import schedule
 from .channels import GitHubIssues, LineChannel
-from .pipeline import JOB_DIGEST, JOB_EVENTS, JOB_HEALTH, JOB_ISSUES, NotifyPipeline, NotifySettings
+from .news import daily_message, load_news_config, previous_week, select_weekly, weekly_issue
+from .pipeline import (
+    JOB_DIGEST,
+    JOB_EVENTS,
+    JOB_HEALTH,
+    JOB_ISSUES,
+    JOB_NEWS,
+    JOB_NEWS_WEEKLY,
+    NotifyPipeline,
+    NotifySettings,
+)
 
 app = typer.Typer(add_completion=False, help="脆弱性対応の通知")
 
@@ -60,6 +73,10 @@ def build_pipeline() -> NotifyPipeline:
             timedelta(days=settings.image_sbom_max_age_days), schedule(),
             timedelta(hours=settings.host_inventory_max_age_hours),
             timedelta(minutes=settings.remediation_mirror_interval_minutes),
+            load_news_config(settings.news_path)
+            if settings.news_daily_enabled or settings.news_weekly_enabled else None,
+            settings.news_daily_limit,
+            settings.news_weekly_enabled,
         ),
         paths.sbom_hosts_dir,
         paths.llm_dir / "state",
@@ -104,6 +121,41 @@ def issues() -> None:
 
 
 @app.command()
+def news(dry_run: bool = typer.Option(False, "--dry-run", help="送らずに表示だけ (扱い済みにもしない)")) -> None:
+    p = build_pipeline()
+    if not dry_run:
+        locked(lambda: p.run_news(force=True))()
+        return
+    if p.cfg.news_config is None:  # 表示だけなら NEWS_DAILY_ENABLED が false でも見られるようにする
+        p.cfg = replace(p.cfg, news_config=load_news_config(settings.news_path))
+    now = utc_now()
+    selection = p.news_selection(now)
+    if selection is None:
+        typer.echo("intel.db がありません")
+    elif selection.empty:
+        typer.echo("載せるものがありません")
+    else:
+        typer.echo(daily_message(selection, now, p.cfg.timezone))
+
+
+@app.command("news-weekly")
+def news_weekly(dry_run: bool = typer.Option(False, "--dry-run", help="Issue を作らずに本文を表示だけ")) -> None:
+    p = build_pipeline()
+    if not dry_run:
+        p.cfg = replace(p.cfg, news_weekly=True,
+                        news_config=p.cfg.news_config or load_news_config(settings.news_path))
+        locked(lambda: p.run_news_weekly(force=True))()
+        return
+    intel = p._intel()
+    if intel is None:
+        typer.echo("intel.db がありません")
+        return
+    title, body = weekly_issue(select_weekly(intel, previous_week(utc_now(), p.cfg.timezone),
+                                             load_news_config(settings.news_path)))
+    typer.echo(f"{title}\n\n{body}")
+
+
+@app.command()
 def health() -> None:
     for c in build_pipeline().checks(utc_now()):
         typer.echo(f"{'OK   ' if c.ok else 'STALE'} {c.key:32} {c.detail}")
@@ -117,6 +169,8 @@ def serve() -> None:
         Job(JOB_HEALTH, timedelta(minutes=30), locked(p.run_health)),
         Job(JOB_DIGEST, timedelta(minutes=15), locked(p.run_digest)),
         Job(JOB_ISSUES, timedelta(minutes=30), locked(p.run_issues)),
+        Job(JOB_NEWS, timedelta(minutes=15), locked(p.run_news)),
+        Job(JOB_NEWS_WEEKLY, timedelta(minutes=30), locked(p.run_news_weekly)),
     ]
     pinger = make_pinger(make_client(), settings.healthcheck_ping_base)
     Scheduler(jobs, p.last_success, on_result=pinger).run_forever()

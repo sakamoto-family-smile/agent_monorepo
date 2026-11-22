@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | Implementing |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-11-22 |
 | **Updated** | 2026-11-22 |
 | **Target** | security-platform |
-| **Related PRs** | (本 PR: 設計) |
+| **Related PRs** | #266 (設計), PR1 (brief の抽出) |
 | **Supersedes** | — |
 | **Superseded by** | — |
 
@@ -179,15 +179,16 @@ Claude・MCP / Docker / macOS など) に関係するものを上に並べる。
 | `topics_json` | TEXT NULL | topics の配列 |
 | `brief_identifiers_json` | TEXT NULL | identifiers の配列 |
 
-`feeds` の設定 (`config/feeds.yaml`) に `brief_only: true` を足せるようにする。
-`brief_only` のフィード (報道系) の記事は `claims` を捨て、`report_claims` に入れない
-(照合・早期警告に使わない)。
+報道系のフィードは `config/feeds.yaml` で `trust: news` にする。`trust: news` の記事は `claims` を捨て、
+`report_claims` に入れない (照合・早期警告に使わない)。設定の項目は増やさない
+(当初は `brief_only` を足す案だったが、`news` の意味と同じなので trust で決める)。
 
 **notify.db** (migration `0002_news`)。
 
 | テーブル | 主な列 | 用途 |
 |---|---|---|
 | `notifications` (既存) | `dedupe_key` = `news:YYYY-MM-DD` / `news-weekly:YYYY-Www` | 二重送信を防ぐ (今と同じ仕組み) |
+| `news_items` (新規) | `item_key` (PK, `report:<id>` / `kev:<CVE>`), `dedupe_key`, `shown`, `handled_at` | 日次で扱った記事・KEV。翌日以降に重ねない |
 | `news_issues` (新規) | `week` (PK), `issue_number`, `state`, `body_hash`, `created_at`, `closed_at` | 週次 Issue の記録。翌週の Issue を立てたら前の週を閉じる |
 
 ### 4.4 主要モジュール / ファイル
@@ -195,9 +196,9 @@ Claude・MCP / Docker / macOS など) に関係するものを上に並べる。
 | ファイル | 変更 | 内容 |
 |---|---|---|
 | `src/llm/schema.py` | 変更 | `brief` の形・`TOPICS`・重大度の基準をプロンプトに追加。`PROMPT_VERSION` を上げる |
-| `src/intel/extraction.py` | 変更 | `brief` の検証と保存。`brief_only` のフィードは claims を捨てる。依頼の順を official → research → news、news は 1 日 30 件まで |
-| `src/intel/sources/feeds.py` | 変更 | `brief_only` の設定を読む |
-| `config/feeds.yaml` | 変更 | 報道系フィードを追加 (候補: BleepingComputer, The Hacker News, Security NEXT, piyolog。RSS が使えるかは実装時に確認) |
+| `src/intel/extraction.py` | 変更 | `brief` の検証と保存。`trust: news` の記事は claims を捨てる。依頼は official・research を先に、news は 1 日 30 件まで |
+| `config/feeds.yaml` | 変更 | 報道系フィードを追加 (BleepingComputer, The Hacker News, Security NEXT, piyolog) |
+| `src/llm/eval.py` / `eval_cases.json` | 変更 | 重大度の期待を足し、報道向けの評価用記事 (ゼロデイ・SaaS の侵害・誇張した見出し・要約へのインジェクションなど) を追加 |
 | `src/llm/config.py` | 変更 | `daily_limit` の既定を 80 に |
 | `src/notify/news.py` | 新規 | 日次・週次の対象を選ぶ規則と、LINE の文・Issue の本文を組み立てる |
 | `src/notify/pipeline.py` | 変更 | `run_digest` のあとに重大ニュースを送る。週次ジョブ `notify_news_weekly` を追加 |
@@ -214,7 +215,9 @@ Claude・MCP / Docker / macOS など) に関係するものを上に並べる。
    その中で official → research → news、最後に新しい順
 4. 上位 5 件を載せ、残りは「ほか n 件 (週次まとめに載ります)」とだけ書く
 5. KEV はすべて載せる (1 日 0〜6 件程度)。関係ある製品を上に並べ、7 件を超えたら残りは件数だけ
-6. 記事も KEV も 0 件なら送らない (日次まとめに「重大ニュース: なし」の 1 行を足す)
+6. 記事も KEV も 0 件なら送らない (その日は済んだものとして記録する)
+7. 送った記事・KEV と、載せきれなかったものは notify.db の `news_items` に記録し、翌日以降に重ねて送らない。
+   記事は要約が付いてから 7 日以内、KEV は追加日から 3 日以内のものだけを日次で扱う
 
 **LINE の文の例**
 
@@ -341,6 +344,10 @@ GitHub Issues はすでに使っていて、スマホからも読め、コメン
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-11-22 | Draft | 初稿 |
+| 2026-11-22 | Approved | #266 merged |
+| 2026-11-22 | PR3 | 週次の GitHub Issue (`notify_news_weekly` ジョブ・`make notify-news-weekly`)。記事の題名・要約は Markdown の記法とメンションを無効にして載せる。既定は無効 (`NEWS_WEEKLY_ENABLED`) |
+| 2026-11-22 | PR2 | 日次の重大ニュース (`notify_news` ジョブ・`make notify-news`・監視 `news:brief`)。既定は無効 (`NEWS_DAILY_ENABLED`) |
+| 2026-11-22 | PR1 | brief の抽出・保存、報道系フィード、LLM の上限 80 回。評価: Haiku で 14 件中 14 件が重大度の期待どおり (critical の見逃し 0) |
 
 予定している PR:
 

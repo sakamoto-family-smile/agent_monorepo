@@ -71,6 +71,8 @@ def eval_(case: str = typer.Option(None, help="この id の記事だけ")) -> N
     total = score(extractor, cases, typer.echo)
     typer.echo(f"\n{s.provider} ({s.model}): precision={total.precision:.2f} recall={total.recall:.2f} "
                f"ungrounded={total.ungrounded} errors={total.errors}")
+    typer.echo(f"brief: severity ok={total.severity_ok} diff={total.severity_diff} "
+               f"critical_missed={total.critical_missed} invalid={total.invalid_brief}")
     raise typer.Exit(1 if total.errors else 0)
 
 

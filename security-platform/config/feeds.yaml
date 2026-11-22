@@ -4,7 +4,7 @@
 #   url    : https のみ
 #   trust  : official (公的機関・公式の告知。一次情報として扱える)
 #            research (調査会社のブログ。ID 付きの報告は一次情報に準じる)
-#            news     (報道。確認が取れるまで unconfirmed)
+#            news     (報道。重大ニュース (PROPOSAL-0015) の要約だけに使い、主張は照合・早期警告に使わない)
 #   lang   : ja / en
 #
 # 取得は 1 時間ごと (intel の reports ジョブ)。追加・削除はこのファイルを直して make up
@@ -71,3 +71,21 @@ feeds:
     url: https://www.wiz.io/feed/rss.xml
     trust: research
     lang: en
+
+  # ── 報道 (重大ニュースの要約だけに使う。LLM に渡すのは 1 日 30 件まで) ──
+  - id: bleepingcomputer
+    url: https://www.bleepingcomputer.com/feed/
+    trust: news
+    lang: en
+  - id: the-hacker-news
+    url: https://feeds.feedburner.com/TheHackersNews
+    trust: news
+    lang: en
+  - id: security-next
+    url: https://www.security-next.com/feed
+    trust: news
+    lang: ja
+  - id: piyolog
+    url: https://piyolog.hatenadiary.jp/feed
+    trust: news
+    lang: ja
