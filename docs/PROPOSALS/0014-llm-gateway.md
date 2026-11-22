@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | In Review |
+| **Status** | Implementing |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-11-15 |
 | **Updated** | 2026-11-22 |
 | **Target** | llm-gateway (新規) + stock-analysis-agent |
-| **Related PRs** | 本 PR (設計) |
+| **Related PRs** | #265 (設計), P0 検証 (本 PR) |
 | **Supersedes** | — |
 | **Superseded by** | — |
 
@@ -38,7 +38,7 @@
 
 ### [必須] 2.1 Goals
 
-- [ ] stock-analysis-agent の LLM 呼び出しがすべて gateway 経由になり、分析 1 回が Langfuse の 1 トレースにまとまる
+- [ ] stock-analysis-agent の LLM 呼び出しがすべて gateway 経由になり、分析 1 回が Langfuse の 1 セッションにまとまる
 - [ ] エージェントは別名（`stock-analysis` / `stock-analysis-next`）だけを呼び、実際のモデルの切り替えが gateway の設定変更 1 つで済む
 - [ ] モデルの廃止日の 30 / 7 / 1 日前に LINE で通知される
 - [ ] 方向の的中・予測帯の的中・利用者の評価の 3 つが自動でスコアとして付き、レビューを経て評価データセットに登録される
@@ -63,7 +63,7 @@
 | --- | --- |
 | やる | LiteLLM Proxy と Langfuse の自前ホスト（ローカルの docker compose と GCP の両方） |
 | やる | stock-analysis-agent の LLM 呼び出しをすべて gateway 経由にし、プロバイダへの直接の権限を外す（S1） |
-| やる | 分析 1 回を 1 トレースにまとめ、session ID と trace ID を付ける（S2） |
+| やる | 分析 1 回を Langfuse の 1 セッションにまとめる（S2） |
 | やる | 評価データセットの候補抽出・レビュー・登録の仕組みと、状況を見るダッシュボード（P3 の一部） |
 | やる | ローカルから GCP へ、設定の切り替えだけで移れる手順と移行スクリプト |
 | やらない | 2.2 Non-Goals のとおり |
@@ -139,8 +139,8 @@ flowchart LR
   E -- 廃止通知 --> LINE
 ```
 
-分析 1 回は Agent SDK の中で複数回 LLM を呼ぶため、エージェントが分析ごとの trace ID を付け、
-Langfuse 上で 1 トレースにまとまるようにする。
+分析 1 回は Agent SDK の中で複数回 LLM を呼ぶため、エージェントが分析ごとに `x-litellm-trace-id` を付ける。
+LiteLLM はこれを Langfuse の session ID にするので（トレースは呼び出しごと）、分析 1 回 = Langfuse の 1 セッションとして扱う（P0 で確認）。
 
 | 部品 | 役割 | 置き場所 |
 | --- | --- | --- |
@@ -163,7 +163,7 @@ Langfuse 上で 1 トレースにまとまるようにする。
 | gateway → Vertex AI の認証 | Vertex AI の利用権限だけを持つ SA のキー。gateway のコンテナにだけマウント | gateway の SA そのもの（キーなし） |
 | バーチャルキー・マスターキー | `config/*.env`（git 管理外） | Secret Manager |
 
-- **Langfuse を Cloud Run に載せない**: Langfuse v3 は ClickHouse という状態を持つ DB が必須で、Cloud Run には向かない。VM に同じ compose を置けばローカルと構成が一致する。VM の大きさは P0 で実測して決める。
+- **Langfuse を Cloud Run に載せない**: Langfuse v4 は ClickHouse という状態を持つ DB が必須で、Cloud Run には向かない。VM に同じ compose を置けばローカルと構成が一致する。VM の大きさは P0 で実測して決める。
 - **バーチャルキーを両方に同じ値で登録する**: LiteLLM はキー発行時に値を指定できる。両環境で同じキーが通るので、切り替え時にキーを配り直さなくてよい。
 - **GCP では gateway を内部公開にする**: gateway の認証ヘッダは Cloud Run の IAM 用トークンと並べにくい。gateway は内部からの通信だけを受け、エージェントの Cloud Run に VPC 経由の送信を足す。いま VPC の設定は無いので、ここが GCP 側でいちばん新しい作業になる（P0 で疎通を確かめる）。
 
@@ -227,7 +227,7 @@ stock-analysis-agent の LLM 呼び出しは `app/agents/orchestrator.py` の `q
 | 変更 | いま | 変更後 |
 | --- | --- | --- |
 | 接続先と認証 | `CLAUDE_CODE_OAUTH_TOKEN`（定額プラン）で直接 | `ANTHROPIC_BASE_URL` = gateway、`ANTHROPIC_CUSTOM_HEADERS` = `x-litellm-api-key: <バーチャルキー>`。`CLAUDE_CODE_OAUTH_TOKEN` は定額プランの間は残し、`ANTHROPIC_AUTH_TOKEN` は設定しない（設定すると定額プランのトークンの代わりに送られる）。Vertex AI に移ったら OAuth トークンを Secret Manager から消す |
-| モデル | `claude-opus-4-6` をコードに直書き | 設定 `LLM_MODEL` で別名 `stock-analysis` を指定 |
+| モデル | `claude-opus-4-6` をコードに直書き | 設定 `LLM_MODEL` で別名 `stock-analysis` を指定。Claude Code の設定 `modelOverrides` で別名を既知のモデルに対応付ける（ないと CLI が未知のモデルとして扱い、毎回 1 本目が 400 になる。P0 で確認） |
 | トレース | OTel の span と analytics-platform のイベントのみ | 分析ごとに trace ID を発行し、ヘッダで gateway に渡す。Agent SDK は分析ごとに CLI を起動するため、環境変数で分析単位のヘッダを付けられる |
 | 判断の構造化 | 強気・中立・弱気は本文中の文章だけ。`sentiment` は空のまま | レポート末尾に判断と確信度を決まった形式で出させ、読み取って保存する |
 | 予測の保存 | モンテカルロの予測帯は保存していない | `reports` に保存（4.2） |
@@ -241,7 +241,7 @@ P0 の検証のあと、ローカルで一巡させてから GCP に広げる。
 
 | 順 | 内容 | 完了の確認 |
 | --- | --- | --- |
-| P0 検証 | 手元で LiteLLM と Langfuse を立て、Agent SDK → gateway → Claude が、ストリーミング・ツール呼び出し・MCP 込みで動くかを確かめる。定額プランのトークンの受け渡し（#29190）、キャッシュの効き、廃止アラート、ヘッダの Langfuse への反映、ClickHouse のバックアップと復元の所要時間も確かめる | 既存の分析 1 件が gateway 経由で同じ形のレポートを返し、Langfuse に 1 トレースとして載る |
+| P0 検証 | 手元で LiteLLM と Langfuse を立て、Agent SDK → gateway → Claude が、ストリーミング・ツール呼び出し・MCP 込みで動くかを確かめる。定額プランのトークンの受け渡し（#29190）、キャッシュの効き、廃止アラート、ヘッダの Langfuse への反映、ClickHouse のバックアップと復元の所要時間も確かめる | 既存の分析 1 件が gateway 経由で同じ形のレポートを返し、Langfuse に 1 セッションとして載る |
 | PR1 gateway 一式（ローカル） | `llm-gateway/` を新設。LiteLLM の設定、compose、キー発行スクリプト、`make up` など。イメージはダイジェストで固定し、security-platform の検査対象に登録する | `make up` だけで起動し、試験呼び出しが通る |
 | PR2 エージェントの接続 | 接続先・キー・モデルの別名を設定に出す。trace ID の付与、判断の構造化、予測帯の保存（Alembic の移行） | Mac mini の本番が gateway 経由で動き、新しい分析に判断と予測帯が保存される |
 | PR3 評価サービス | 自動採点、候補抽出とキュー投入、採用分の自動登録、フィードバック API、評価ダッシュボード、廃止通知。エージェントに LINE の評価ボタンを足す | 過去の分析で採点が通り、レビューから登録までが 1 件通る |
@@ -251,7 +251,7 @@ P0 の検証のあと、ローカルで一巡させてから GCP に広げる。
 ### [必須] 4.5 Test Plan
 
 - **Unit**: 自動採点（方向・予測帯・中立の幅）、判断の読み取り、候補抽出の条件、廃止日の通知タイミング（30 / 7 / 1 日前）
-- **Integration**: compose で gateway 一式を立て、試験呼び出しが Langfuse に 1 トレースとして載ること。許可外のモデル名が断られること。フィードバック API がスコアを付けること
+- **Integration**: compose で gateway 一式を立て、試験呼び出しが Langfuse に 1 セッションとして載ること。許可外のモデル名が断られること。フィードバック API がスコアを付けること
 - **Manual / E2E**:
   - [ ] 既存の分析 1 件が gateway 経由で同じ形のレポートを返す（定額プランの経路）
   - [ ] プロンプトキャッシュの読み出し量が切り替え前と同程度
@@ -293,7 +293,7 @@ P0 の検証のあと、ローカルで一巡させてから GCP に広げる。
 
 ### 5.3 Dependencies
 
-- LiteLLM Proxy、Langfuse v3（Postgres、ClickHouse、Redis、MinIO / GCS）
+- LiteLLM Proxy、Langfuse v4（Postgres、ClickHouse、Redis、MinIO / GCS）。v4 はトレースを OpenTelemetry だけで受けるため、LiteLLM の callback は `langfuse_otel` を使う
 - Anthropic（定額プランの間）、Vertex AI（最終形）
 - LINE Messaging API（評価ボタン、廃止通知）
 - security-platform（イメージの検査、MCP プロキシ）
@@ -341,4 +341,5 @@ P0 の検証のあと、ローカルで一巡させてから GCP に広げる。
 |---|---|---|
 | 2026-11-15 | Draft | 初稿。Langfuse の置き場所と中立の幅を決定 |
 | 2026-11-21 | Draft | Vertex AI のクォータ申請が自動却下された経緯を追記 |
-| 2026-11-22 | In Review | 課金方式を決定（最終形は Vertex AI、当面は定額プランを gateway に通す）。本 PR |
+| 2026-11-22 | In Review | 課金方式を決定（最終形は Vertex AI、当面は定額プランを gateway に通す）。#265 |
+| 2026-11-22 | P0 | 検証結果を [notes/proposal-0014-p0-2026-11-22.md](notes/proposal-0014-p0-2026-11-22.md) に記録。Langfuse は v4（OpenTelemetry）、分析単位は Langfuse のセッション、別名は Claude Code の `modelOverrides` で既知のモデルに対応付ける。`llm-gateway/` の雛形を追加 |

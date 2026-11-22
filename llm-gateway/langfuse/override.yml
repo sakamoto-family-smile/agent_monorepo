@@ -1,0 +1,23 @@
+# 公式の compose (upstream-docker-compose.yml, v4.76.0 から取得) への上書き。
+# - イメージをダイジェストで固定する
+# - 画面 (3000) と MinIO (9090) だけを 127.0.0.1 に出し、他は compose 内だけにする
+# - v4 の ai-gateway は使わない
+services:
+  langfuse-worker:
+    image: docker.langfuse.com/langfuse/langfuse-worker@sha256:27e8b49d619a013bca38ed9b0853456e19f5667a23e8e26e3a10d4e28485f49c
+    ports: !reset []
+  langfuse-web:
+    image: docker.langfuse.com/langfuse/langfuse@sha256:59abb54faacf45b63d09f4076d45683dae26a6661974d497836543d350b16575
+    ports: !override
+      - 127.0.0.1:3000:3000
+  langfuse-ai-gateway:
+    profiles: ["disabled"]
+  clickhouse:
+    ports: !reset []
+  minio:
+    ports: !override
+      - 127.0.0.1:9090:9000
+  redis:
+    ports: !reset []
+  postgres:
+    ports: !reset []

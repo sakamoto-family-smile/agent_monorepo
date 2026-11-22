@@ -1,0 +1,44 @@
+# LLM gateway 一式 (PROPOSAL-0014)。イメージはダイジェストで固定し、更新は手で上げる。
+name: llm-gateway
+
+include:
+  - path:
+      - langfuse/upstream-docker-compose.yml
+      - langfuse/override.yml
+    env_file: config/langfuse.env
+
+services:
+  litellm:
+    # v1.108.3 (LTS)
+    image: ghcr.io/berriai/litellm-database@sha256:aecfcc459b5af208f04b8e916c9912cc3001798e013b4874be1831c20e4a2c26
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    env_file:
+      - path: config/gateway.env
+        required: true
+    environment:
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD}@litellm-db:5432/litellm
+      LANGFUSE_HOST: http://langfuse-web:3000
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY}
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    ports:
+      - "127.0.0.1:4000:4000"
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  litellm-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_DB: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD}
+    volumes:
+      - ./data/litellm-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
