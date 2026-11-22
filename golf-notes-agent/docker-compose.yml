@@ -1,0 +1,60 @@
+# golf-notes-agent のローカル本番 (Mac mini 常駐) 用 compose (PROPOSAL-0016)。
+#
+#   make up           # backend + Funnel (LINE から届く) で起動
+#   make up-private   # backend のみ (Funnel なし。手元からの動作確認用)
+#   make down / logs / ps
+#
+# 事前準備: cp config/local.env.example config/local.env と config/tailscale.env.example config/tailscale.env
+#
+# - データ (golf.db・原本・動画) はホストの ${GOLF_DATA_DIR:-./data} に置き、コンテナでは /data に見せる
+# - golf.db に書くのは backend の 1 プロセスだけ。ホストの macOS から golf.db を直接開かない
+#   (外部 SSD へのコピーは data/backup/ の .backup の出力と raw/・media/ だけを対象にする)
+# - 秘密情報はそれを使うサービスにだけ渡す (backend: local.env / tailscale: tailscale.env)
+
+services:
+  backend:
+    build: .
+    image: golf-notes-agent:local
+    env_file:
+      - path: config/local.env
+        required: true
+    # ./data の所有者と揃える (make が HOST_UID/HOST_GID を渡す)
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    # 手元からの確認用に localhost にだけ出す (LAN には出さない)。外部公開は tailscale が担う
+    ports:
+      - "127.0.0.1:${GOLF_LOCAL_PORT:-8002}:8080"
+    volumes:
+      - ${GOLF_DATA_DIR:-./data}:/data
+    mem_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  # LINE Webhook のため /api/line 配下だけを Tailscale Funnel で公開する (config/tailscale-serve.json)。
+  # stock-analysis-agent とは別のノード (別ホスト名) にする。profile `public` を付けたときだけ起動する
+  tailscale:
+    image: tailscale/tailscale:v1.90.6
+    profiles: ["public"]
+    hostname: ${TS_HOSTNAME:-golf-notes}
+    env_file:
+      - path: config/tailscale.env
+        required: true
+    environment:
+      TS_HOSTNAME: ${TS_HOSTNAME:-golf-notes}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "true"
+      TS_AUTH_ONCE: "true"
+    volumes:
+      - tailscale_state:/var/lib/tailscale
+      - ./config/tailscale-serve.json:/config/serve.json:ro
+    mem_limit: 128m
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+volumes:
+  tailscale_state:
