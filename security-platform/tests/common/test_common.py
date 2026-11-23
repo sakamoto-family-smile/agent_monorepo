@@ -1,6 +1,7 @@
 """common/ (DB 接続・マイグレーション・イベント・生データ・スケジューラ) のテスト。"""
 from __future__ import annotations
 
+import os
 import stat
 from datetime import UTC, datetime, timedelta
 
@@ -88,11 +89,12 @@ def test_raw_store_writes_read_only_and_refuses_overwrite(tmp_path):
 
 def test_raw_store_prune_keeps_newest(tmp_path):
     store = RawStore(tmp_path / "raw")
-    for day, run in [("2026-10-01", "a"), ("2026-10-02", "b"), ("2026-10-03", "c")]:
+    for i, (day, run) in enumerate([("2026-10-01", "a"), ("2026-10-02", "b"), ("2026-10-03", "c")]):
         p = store.path_for("osv", f"full-{run}/PyPI.zip", day=day)
         p.parent.mkdir(parents=True)
         p.write_bytes(b"z")
         p.chmod(0o444)
+        os.utime(p.parent, (1_700_000_000 + i, 1_700_000_000 + i))  # 続けて書くと更新時刻が同じになり、順が揺れる
     removed = store.prune_dirs("osv", "full-", keep=2)
     assert [r.name for r in removed] == ["full-a"]
     assert len(list((tmp_path / "raw/osv").glob("dt=*/full-*"))) == 2

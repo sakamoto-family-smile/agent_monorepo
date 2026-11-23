@@ -77,6 +77,21 @@ def test_queue_prefilters_and_skips_initial(env):
     assert (again.queued, again.skipped) == (0, 0) and len(exchange.list_ids(dirs.in_dir)) == 3
 
 
+@pytest.mark.parametrize("body, matched", [
+    ("Researchers Demonstrate Ghostscript Sandbox-Escape RCE via Crafted File Uploads", True),
+    ("Critical authentication bypass in Example Server", True),
+    ("SQL injection in the admin panel lets attackers read the database", True),
+    ("Arbitrary code execution through crafted archives", True),
+    ("任意のコードを実行される恐れ", True),
+    ("権限昇格の問題を修正しました", True),
+    ("AI agent security: why prompt injection isn't the right term", False),
+    ("CodeQL 2.27.4 improves accuracy and query metadata", False),
+    ("Finding Software Flaws Early in the Development Process Provides Clear ROI", False),
+])
+def test_prefilter_words(body, matched):
+    assert (extraction.PREFILTER.search(body) is not None) is matched
+
+
 def test_ingest_grounds_claims(env):
     p, dirs = env
     rid = add_report(p, 1, MALWARE)
@@ -241,3 +256,30 @@ def test_extractor_health(env):
     [c] = extractor_checks(p.engine, dirs.state_dir, now)
     assert not c.ok and "抽出待ち 1 件" in c.detail and "CLAUDE_CODE_OAUTH_TOKEN" in c.detail
     assert json.loads(dirs.usage_path.read_text())  # 読むだけ
+
+
+def test_migration_rejudges_prefilter_skips(tmp_path):
+    from alembic import command
+
+    from src.common.migrate import alembic_config, upgrade
+
+    paths = DataPaths(tmp_path / "data")
+    paths.ensure()
+    command.upgrade(alembic_config("intel", paths), "0009")
+    p = IntelPipeline(
+        make_engine(paths.sqlite_path("intel")), paths, None, lambda _: b"",  # type: ignore[arg-type]
+        kev_url="", epss_url="", epss_delta=0.1, incremental_max_per_ecosystem=1, full_snapshots_kept=1,
+    )
+    rce = add_report(p, 1, "Ghostscript sandbox escape leads to RCE", trust="news")
+    plain = add_report(p, 2, "We shipped a faster dashboard.")
+    with p.engine.begin() as conn:  # 語を足す前の絞り込みで外れた
+        for rid in (rce, plain):
+            conn.execute(text("""
+                INSERT INTO report_extractions (report_id, content_hash, status, reason, attempts, updated_at)
+                VALUES (:r, 'a', 'skipped', 'prefilter', 0, '2026-11-22T06:23:49Z')
+            """), {"r": rid})
+    upgrade("intel", paths)
+    r = p.run_extract()
+    assert (r.queued, r.skipped) == (1, 1)
+    assert rows(p, "SELECT report_id, status FROM report_extractions ORDER BY report_id") == [
+        (rce, "queued"), (plain, "skipped")]

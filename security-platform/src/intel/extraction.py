@@ -41,7 +41,10 @@ PREFILTER = re.compile(
     r"malicious|malware|compromis|backdoor|typosquat|supply[- ]?chain|vulnerab|exploit|cve-\d{4}-\d+|ghsa-"
     r"|security (?:advisory|update|release|fix|bulletin)|credential|stealer|\bworm\b|hijack|takeover|trojan"
     r"|breach|ransomware|zero[- ]?day|0-day|leak|hack"
-    r"|脆弱性|不正|マルウェア|侵害|悪性|悪意|注意喚起|攻撃|乗っ取|漏えい|漏洩|流出|ランサム|ゼロデイ",
+    r"|\brce\b|remote code execution|arbitrary code execution|sandbox[- ]?escape|privilege escalation"
+    r"|auth(?:entication)? bypass|(?:sql|command|code|os) injection"  # injection だけでは prompt injection の解説も拾う
+    r"|脆弱性|不正|マルウェア|侵害|悪性|悪意|注意喚起|攻撃|乗っ取|漏えい|漏洩|流出|ランサム|ゼロデイ"
+    r"|リモートコード実行|任意のコード|任意コード|権限昇格|認証回避|認証バイパス",
     re.IGNORECASE,
 )
 
