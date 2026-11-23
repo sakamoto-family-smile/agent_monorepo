@@ -94,7 +94,7 @@ def test_raw_store_prune_keeps_newest(tmp_path):
         p.parent.mkdir(parents=True)
         p.write_bytes(b"z")
         p.chmod(0o444)
-        os.utime(p, (1_700_000_000 + i, 1_700_000_000 + i))  # 続けて書くと更新時刻が同じになり、順が揺れる
+        os.utime(p.parent, (1_700_000_000 + i, 1_700_000_000 + i))  # 続けて書くと更新時刻が同じになり、順が揺れる
     removed = store.prune_dirs("osv", "full-", keep=2)
     assert [r.name for r in removed] == ["full-a"]
     assert len(list((tmp_path / "raw/osv").glob("dt=*/full-*"))) == 2
