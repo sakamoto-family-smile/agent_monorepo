@@ -117,6 +117,19 @@ def test_grouping_and_order(env):
     assert groups[2].relevant == ("github-actions",)
 
 
+def test_kev_listed_article_is_raised_to_high(env):
+    intel, *_ = env
+    add_kev(intel, "CVE-2026-131914", "Idunno", "AntiCsrf", "2026-11-22")
+    add_article(intel, 1, "medium", trust="news", ids=("CVE-2026-131914",))  # 悪用済み (KEV) なのに中
+    add_article(intel, 2, "low", ids=("CVE-2026-9", "CVE-2026-131914"))
+    add_article(intel, 3, "medium", ids=("CVE-2026-9",))  # KEV に無い
+    add_article(intel, 4, "none", ids=("CVE-2026-131914",))  # セキュリティの出来事ではない
+    add_article(intel, 5, "critical", ids=("CVE-2026-131914",))  # 下げない
+
+    got = {a.report_id[-1]: a.severity for a in news.load_articles(intel, NOW - news.ARTICLE_WINDOW)}
+    assert got == {"1": "high", "2": "high", "5": "critical"}
+
+
 def test_kev_order_and_relevance():
     kevs = [news.Kev("CVE-2026-3", "Fortinet", "FortiOS", None, "2026-11-22", None),
             news.Kev("CVE-2026-4", "Google", "Chromium V8", None, "2026-11-20", "Known"),

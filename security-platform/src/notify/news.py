@@ -128,14 +128,22 @@ class Selection:
 
 
 # ── 読み込み ──────────────────────────────────────────────────────────────
+# 記事の CVE が KEV (悪用が確認された脆弱性) に載っていれば、LLM の判定が中・低でも高として扱う。
+# 読むときに判定するので、記事のあとで KEV に載った場合も上がる
+_SEVERITY_SQL = (
+    "CASE WHEN e.severity IN ('medium', 'low') AND EXISTS (SELECT 1 FROM json_each(e.brief_identifiers_json) j "
+    "JOIN kev_entries k ON k.cve = j.value) THEN 'high' ELSE e.severity END"
+)
+
+
 def load_articles(intel: Engine, since: datetime, until: datetime | None = None,
                   severities: tuple[str, ...] = NEWS_SEVERITIES) -> list[Article]:
     """since 以降 (until より前) に brief が付いた記事。intel.db が PROPOSAL-0015 より前なら空。"""
     marks = ", ".join(f":s{i}" for i in range(len(severities)))
-    sql = ("SELECT r.report_id, r.feed_id, r.trust, r.title, r.url, e.severity, e.summary_ja, e.topics_json, "
-           "e.brief_identifiers_json, e.finished_at FROM report_extractions e "
+    sql = (f"SELECT r.report_id, r.feed_id, r.trust, r.title, r.url, {_SEVERITY_SQL} AS sev, e.summary_ja, "
+           "e.topics_json, e.brief_identifiers_json, e.finished_at FROM report_extractions e "
            "JOIN reports r ON r.report_id = e.report_id AND r.content_hash = e.content_hash "
-           f"WHERE e.status = 'done' AND e.severity IN ({marks}) AND e.finished_at >= :since "  # nosec B608  固定の条件
+           f"WHERE e.status = 'done' AND sev IN ({marks}) AND e.finished_at >= :since "  # nosec B608  固定の条件
            + ("AND e.finished_at < :until " if until else "")
            + "ORDER BY e.finished_at, r.report_id")
     params: dict[str, Any] = {"since": to_iso(since), **{f"s{i}": v for i, v in enumerate(severities)}}
