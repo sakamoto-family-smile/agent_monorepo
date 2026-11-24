@@ -5,9 +5,9 @@
 | **Status** | Implementing |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-11-23 |
-| **Updated** | 2026-11-24 |
+| **Updated** | 2026-11-25 |
 | **Target** | video-understanding（新規 cross-agent ツール） |
-| **Related PRs** | #287 (設計) |
+| **Related PRs** | #287 (設計), #288 (PR1) |
 | **Supersedes** | — |
 | **Superseded by** | — |
 
@@ -183,8 +183,8 @@ video-understanding/
 │ ├ frames.py           extract(times) / sample(interval) / scenes(threshold) と contact_sheet(frames, cols, max_px)
 │ ├ cache.py            キャッシュのパス・最終利用時刻・gc
 │ ├ config.py           環境変数（許可ディレクトリ・TTL・上限値・whisper のモデル）
-│ └ cli.py
-├ server.py             fastmcp のツール定義（cli と同じ関数を呼ぶ）
+│ ├ cli.py
+│ └ server.py           fastmcp のツール定義（cli と同じ関数を呼ぶ。エントリポイント video-understanding-mcp）
 └ tests/
 ```
 
@@ -307,6 +307,7 @@ video-understanding/
 |---|---|---|
 | 2026-11-23 | Draft | 初稿 |
 | 2026-11-24 | Implementing | 設計を PR #287 でマージ。PR1 の確認結果を反映（imageio-ffmpeg の arm64 版・ffprobe 無し、縦長動画の画質、YouTube の JS 実行環境と字幕の 429、自動字幕の翻訳の扱い、自動の間隔） |
+| 2026-11-25 | Implementing | PR1 (#288) をマージ。PR2: MCP サーバ。server.py はパッケージの中に置き、`video-understanding-mcp` で起動する。字幕の 429 は日をまたいでも続いたため、内容を確実に取るのは PR3 の文字起こしが前提になる |
 
 ### 実装フェーズ
 

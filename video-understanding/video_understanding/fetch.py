@@ -137,12 +137,13 @@ def fetch_youtube(
     cache_dir: Path,
     lang: str,
     max_duration_sec: int,
-    ydl_factory: YdlFactory = _default_factory,
+    ydl_factory: YdlFactory | None = None,
 ) -> Fetched:
     """情報・字幕・動画を取得する。そろっていればキャッシュから返す。"""
     cached = _load_cached(cache_dir, lang)
     if cached is not None:
         return cached
+    ydl_factory = ydl_factory or _default_factory  # 呼ぶたびに引く (テストで差し替えられるように)
     errors = _download_errors()
     try:
         with ydl_factory(_base_opts()) as ydl:

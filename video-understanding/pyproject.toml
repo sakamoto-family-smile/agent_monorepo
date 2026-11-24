@@ -7,10 +7,12 @@ dependencies = [
     "yt-dlp>=2026.10.26",
     "imageio-ffmpeg>=0.8.1",
     "pillow>=11.0",
+    "fastmcp>=4.2",
 ]
 
 [project.scripts]
 video-understanding = "video_understanding.cli:main"
+video-understanding-mcp = "video_understanding.server:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -11,13 +11,14 @@ from typing import Any
 from . import frames as fr
 from .cache import Cache
 from .config import Config
-from .fetch import YdlFactory, _default_factory, fetch_youtube
+from .fetch import YdlFactory, fetch_youtube
 from .source import Source, parse_source
 from .transcript import Segment, format_segments, format_timestamp, parse_json3, parse_vtt
 
 LANG_RE = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$")
 DESCRIPTION_MAX_CHARS = 1500
 TRANSCRIPT_MAX_CHARS = 12000
+FULL_TRANSCRIPT_MAX_CHARS = 100000
 UNTRUSTED_TAG = "untrusted_video_text"
 
 
@@ -63,7 +64,7 @@ def _parse_caption(ext: str, body: str) -> list[Segment]:
 
 
 def prepare(
-    raw_source: str, cfg: Config, lang: str = "ja", ydl_factory: YdlFactory = _default_factory
+    raw_source: str, cfg: Config, lang: str = "ja", ydl_factory: YdlFactory | None = None
 ) -> Prepared:
     if not LANG_RE.match(lang):
         raise InputError(f"lang は ja / en のような言語コードで指定してください: {lang!r}")
@@ -103,7 +104,7 @@ def overview(
     cfg: Config,
     interval: float | None = None,
     lang: str = "ja",
-    ydl_factory: YdlFactory = _default_factory,
+    ydl_factory: YdlFactory | None = None,
 ) -> OverviewResult:
     prepared = prepare(raw_source, cfg, lang, ydl_factory)
     step = interval if interval is not None else fr.auto_interval(prepared.meta.duration)
@@ -123,7 +124,7 @@ def frames(
     end: float,
     fps: float = 10,
     crop: str | None = None,
-    ydl_factory: YdlFactory = _default_factory,
+    ydl_factory: YdlFactory | None = None,
 ) -> FramesResult:
     prepared = prepare(raw_source, cfg, ydl_factory=ydl_factory)
     crop_box = fr.Crop.parse(crop) if crop else None
@@ -135,6 +136,13 @@ def frames(
         for n, group in enumerate(fr.chunk(extracted), start=1)
     ]
     return FramesResult(prepared, [f.t for f in extracted], sheets)
+
+
+def transcript(
+    raw_source: str, cfg: Config, lang: str = "ja", ydl_factory: YdlFactory | None = None
+) -> Prepared:
+    """字幕だけが欲しいとき。コマは抜かない。"""
+    return prepare(raw_source, cfg, lang, ydl_factory)
 
 
 # ---- 表示 --------------------------------------------------------------------------------
@@ -206,3 +214,8 @@ def render_frames(r: FramesResult) -> str:
     ]
     lines += [f"  {s}" for s in r.sheets]
     return "\n".join(lines)
+
+
+def render_transcript(p: Prepared, max_chars: int = FULL_TRANSCRIPT_MAX_CHARS) -> str:
+    head = f"動画: {p.info.get('webpage_url') or p.info.get('path')}"
+    return "\n".join([head, *_render_transcript(p, max_chars)])
