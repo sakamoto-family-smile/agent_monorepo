@@ -80,7 +80,7 @@ docs/PROPOSALS/NNNN-short-kebab-title.md
 | [0014](0014-llm-gateway.md) | LLM Gateway（LiteLLM + Langfuse + 評価データセット）を stock-analysis-agent から導入 | llm-gateway (新規) + stock-analysis-agent | Implementing |
 | [0015](0015-security-news-briefing.md) | security-platform に重大インシデント・ニュースの通知を足す (LINE 日次 + GitHub Issue 週次) | security-platform | Implementing |
 | [0016](0016-golf-notes-agent.md) | ゴルフメモ・スイング動画・レッスン計測データを LINE で貯めて分析する golf-notes-agent | golf-notes-agent (新規) | Implementing |
-| [0017](0017-video-understanding-mcp.md) | YouTube などの動画を Claude Code が「見て・聞いて」理解するための video-understanding（CLI + MCP） | video-understanding (新規 cross-agent ツール) | Draft |
+| [0017](0017-video-understanding-mcp.md) | YouTube などの動画を Claude Code が「見て・聞いて」理解するための video-understanding（CLI + MCP） | video-understanding (新規 cross-agent ツール) | Implementing |
 
 新しい提案を作るたびに上記表に 1 行追加する (forget-me-not)。
 

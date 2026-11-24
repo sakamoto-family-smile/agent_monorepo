@@ -19,6 +19,7 @@
 | [`security-platform`](./security-platform/) | 基盤 | ⬜ ローカル | 全エージェント共通のセキュリティ基盤（MCP Proxy / CVE 監視 / DLP / Red Team） | — (基盤側) |
 | [`analytics-platform`](./analytics-platform/) | 基盤 | 🟡 配備可 (TF整備済・現状ローカル) | 全エージェント横断の分析基盤（OTel + Phoenix + JSONL + DuckDB + dbt） | — (基盤側、Phase 1-4 完了 / Phase 5+ 未着手) |
 | [`llm-client`](./llm-client/) | 基盤 | — (ライブラリ) | 薄い Anthropic Claude API ラッパ (prompt caching / 複数ターン / on_call フック)。モノレポ横断で再利用 | — (基盤側) |
+| [`video-understanding`](./video-understanding/) | 基盤 | — (ホストの CLI) | YouTube / ローカルの動画を、時刻入りのコマ一覧画像と字幕にして Claude Code から見られるようにする（proposal 0017、PR1: CLI） | — |
 | [`edinet-client`](./edinet-client/) | 基盤 | — (ライブラリ) | 金融庁 EDINET API v2 の薄いラッパ（提出書類取得 / XBRL 解析、proposal 0006）。`stock-analysis-agent` から path dep で利用 | — (基盤側) |
 | [`fujisawa-platform`](./fujisawa-platform/) | 基盤 | ✅ 稼働中 (ETL Jobs + Cloud SQL) | 藤沢市 HP / PDF を一次ソースとする共通基盤ライブラリ（クロール / PDF 解析 / pgvector ベクトル検索 / 出典 Skill / 表記ゆれ吸収 / ETL）。ETL は Cloud Run Jobs として配備済、`fujisawa-info-bot` 等が path dep で参照 | — (基盤側) |
 | [`llm-security-lab`](./llm-security-lab/) | 学習ラボ | ⬜ ローカル | OWASP LLM Top 10 体験学習ラボ（proposal 0008、Phase 0a scaffold） | — |

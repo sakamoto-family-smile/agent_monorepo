@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | Implementing |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-11-23 |
-| **Updated** | 2026-11-23 |
+| **Updated** | 2026-11-24 |
 | **Target** | video-understanding（新規 cross-agent ツール） |
-| **Related PRs** | (none yet) |
+| **Related PRs** | #287 (設計) |
 | **Supersedes** | — |
 | **Superseded by** | — |
 
@@ -70,7 +70,7 @@ Claude Code が YouTube などの動画の中身を、人が見るのに近い�
 ### [推奨] 3.2 Notes / Constraints / Caveats
 
 - **利用規約**: YouTube の利用規約は、公式機能以外でのダウンロードを原則禁止している。
-  本ツールは「自分が見て内容を理解する」用途に限り、取得するのは低画質（既定 480p 以下）の動画と字幕だけにする。
+  本ツールは「自分が見て内容を理解する」用途に限り、取得するのは低画質（既定 短辺 480 以下）の動画と字幕だけにする。
   キャッシュは手元にだけ置き、一定期間で消す（§4.2）。再配布はしない。
 - **yt-dlp は YouTube 側の変更で動かなくなることがある**。依存のバージョンを固定せず、`uv lock --upgrade-package yt-dlp` で更新できるようにしておく。
 - **画像は Claude の読み取り量（トークン）を多く使う**。一覧画像は 1 枚に最大 20 コマ、長辺 1568px 以下にまとめる。
@@ -78,7 +78,15 @@ Claude Code が YouTube などの動画の中身を、人が見るのに近い�
 - **文字起こし（mlx-whisper）は Apple Silicon でしか速く動かない**。ホストの Mac で動かす前提で、Docker には載せない。
   モデル（whisper-large-v3-turbo、約 1.6GB）は初回に Hugging Face から取得する。
 - **ffmpeg は Homebrew ではなく `imageio-ffmpeg`（ffmpeg の実行ファイルを同梱した Python パッケージ）で入れる**。
-  `uv sync` だけで環境がそろい、ほかのマシンでも同じ版になる。macOS arm64 版が入ることを PR1 で確かめる。
+  `uv sync` だけで環境がそろい、ほかのマシンでも同じ版になる。
+  PR1 で確認済み（2026-11-24）: macOS arm64 版の ffmpeg 9.0 が入っており、コマ抜き・yt-dlp の映像と音声の結合・AV1 の読み込み・16kHz への変換が動く。
+  ffprobe は入っていないため、長さ・大きさは ffmpeg の読み込みの先頭（`imageio_ffmpeg.read_frames` のメタ情報）から取る。
+- **yt-dlp は YouTube から取るときに JavaScript の実行環境（deno）を求めるようになっている**（2026-11 時点）。
+  無くても短辺 480 以下の形式は取れることを確認した（「一部の形式が取れないかもしれない」という注意は出る）。
+  PyPI の `deno` を入れて試すと、今の組み合わせではかえって失敗したため、PR1 では入れない。
+- **YouTube は字幕の取得を `HTTP Error 429` で断ることがある**（短時間に何度も取ったとき等）。yt-dlp 自身の字幕取得でも同じだった。
+  ブラウザのふりをして制限を避ける方法（curl_cffi による偽装）は、相手の制限をかいくぐることになるので採らない。
+  字幕が取れなくてもコマ画像は返し、理由を表示して次の呼び出しで取り直す。確実に内容を取るのは PR3 の文字起こしで補う。
 
 ### [必須] 3.3 Risks and Mitigations
 
@@ -87,7 +95,7 @@ Claude Code が YouTube などの動画の中身を、人が見るのに近い�
 | 字幕・説明文に、Claude への指示のような文が仕込まれている（プロンプトインジェクション） | High | ツールの戻り値で、字幕・説明文を「外部の動画から取ったデータ」と明示した枠に入れる（`<untrusted_video_text>` で囲む）。ツールは読み取りだけで、ファイルの書き込みはキャッシュディレクトリだけにする |
 | 任意の URL・パスを渡され、意図しないサイトへのアクセスやファイルの読み出しが起きる | High | URL は `youtube.com` / `youtu.be` / `m.youtube.com` のみ許可。ローカルパスは `VIDEO_UNDERSTANDING_ALLOWED_DIRS` に入っているディレクトリの下だけ許可（`realpath` で解決してから判定し、シンボリックリンクでの抜け道を防ぐ）。どちらもテストで確かめる |
 | 利用規約に反する使い方（大量取得・再配布） | Medium | 取得は 1 回の呼び出しで 1 本だけ。プレイリスト・チャンネル単位の取得は受け付けない。キャッシュの動画本体は既定 14 日で消す |
-| 長い動画でディスク・時間を使いすぎる | Medium | 既定で 30 分を超える動画は全体処理を断り、区間指定を求める。動画は 480p 以下・音声は 16kHz モノラルで持つ |
+| 長い動画でディスク・時間を使いすぎる | Medium | 既定で 30 分を超える動画は断る（区間だけを取る機能は必要になったら足す）。動画は短辺 480 以下・音声は 16kHz モノラルで持つ |
 | yt-dlp が壊れて取得できない | Low | エラーを「yt-dlp の更新が必要かもしれない」と分かる文で返す。ローカルファイルの処理は影響を受けない |
 | 文字起こしの誤り（ゴルフ用語の聞き間違い） | Low | 文字起こしであることと、使ったモデルを戻り値に必ず書く。用語の一覧を `initial_prompt` に渡して精度を上げる（設定で変えられるようにする） |
 
@@ -107,7 +115,7 @@ Claude Code / Claude Desktop
 │   └──────────────┬──────────────────────────────────────────────────┘
 │                  ▼
 │  source.py     入力の判定（YouTube URL / 許可ディレクトリ内のファイル）
-│  fetch.py      yt-dlp（Python API）で情報・字幕・480p 以下の動画を取得
+│  fetch.py      yt-dlp（Python API）で情報・字幕・短辺 480 以下の動画を取得
 │  transcript.py 字幕の読み取り（json3 / vtt）→ 無ければ音声を mlx-whisper で文字起こし
 │  frames.py     imageio-ffmpeg でコマ抜き（一定間隔 or 場面転換）→ Pillow で時刻入りの一覧画像
 │  cache.py      動画 ID（ローカルは sha256）ごとのキャッシュと期限切れの削除
@@ -115,7 +123,7 @@ Claude Code / Claude Desktop
                   │
                   ▼
    ~/.cache/video-understanding/<key>/
-       info.json  video.mp4  audio.wav  captions.<lang>.json3
+       info.json  video.mp4  audio.wav  caption-<lang>.json  captions.<kind>.<lang>.json3
        transcript.json  frames/<t>.jpg  sheets/<spec>.jpg
 ```
 
@@ -129,8 +137,9 @@ DB は持たない。キャッシュディレクトリだけで管理する。
 | ファイル | 内容 | 消すタイミング |
 |---|---|---|
 | `info.json` | 動画の情報（タイトル・投稿者・長さ・説明・チャプター・取得日時・取得元 URL） | 消さない（小さい） |
-| `video.mp4` | 480p 以下の動画本体 | 最終利用から 14 日（`VIDEO_UNDERSTANDING_VIDEO_TTL_DAYS`） |
+| `video.mp4` | 短辺 480 以下の動画本体 | 最終利用から 14 日（`VIDEO_UNDERSTANDING_VIDEO_TTL_DAYS`） |
 | `captions.*.json3` | YouTube の字幕（手動 > 自動の順で 1 本） | 消さない |
+| `caption-<lang>.json` | 指定の言語で選んだ字幕と、自動翻訳かどうか（無ければ「無し」と記録。取得に失敗したときは書かず、次に取り直す） | 消さない |
 | `transcript.json` | 正規化した時刻つきテキスト（`source`: `captions_manual` / `captions_auto` / `whisper:<model>`） | 消さない |
 | `frames/`・`sheets/` | 抜き出したコマ・一覧画像 | 動画本体と同じ |
 
@@ -142,7 +151,7 @@ DB は持たない。キャッシュディレクトリだけで管理する。
 
 | ツール | 引数 | 返すもの |
 |---|---|---|
-| `video_overview` | `source`（URL かパス）, `interval_sec`（省略時は長さから自動: 60 秒以下なら 1 秒）, `lang`（既定 `ja`） | 情報（テキスト）＋字幕か文字起こし（時刻つき、長いときは先頭から上限まで）＋一覧画像（最大 2 枚、1 枚 20 コマまで） |
+| `video_overview` | `source`（URL かパス）, `interval_sec`（省略時は長さから自動: 40 コマ以内になる、きりのよい間隔。36 秒なら 1 秒、60 秒なら 2 秒）, `lang`（既定 `ja`） | 情報（テキスト）＋字幕か文字起こし（時刻つき、長いときは先頭から上限まで）＋一覧画像（最大 2 枚、1 枚 20 コマまで） |
 | `video_frames` | `source`, `start`, `end`, `fps`（既定 10、最大 30）, `crop`（任意: `x,y,w,h` を比率で） | 区間のコマの一覧画像（最大 30 コマ）＋各コマの時刻 |
 | `video_transcript` | `source`, `lang`, `force_whisper`（字幕があっても文字起こしする） | 時刻つきテキスト全文と、その出どころ |
 
@@ -168,7 +177,8 @@ video-understanding/
 ├ README.md             使い方・MCP の登録手順・利用上の注意
 ├ video_understanding/
 │ ├ source.py           Source（kind: youtube | local, key, url/path）。許可判定はここだけ
-│ ├ fetch.py            yt-dlp の呼び出し（format: "bv*[height<=480]+ba/b[height<=480]"、字幕は json3）
+│ ├ fetch.py            yt-dlp の呼び出し（format: "bv*[height<=854][width<=854]+ba/b[height<=854][width<=854]"、字幕は json3）
+│ ├ api.py              CLI と MCP が呼ぶ処理（prepare / overview / frames と表示）
 │ ├ transcript.py       json3 / vtt の読み取り・重複行の除去・Segment(start, end, text) への正規化、whisper の呼び出し
 │ ├ frames.py           extract(times) / sample(interval) / scenes(threshold) と contact_sheet(frames, cols, max_px)
 │ ├ cache.py            キャッシュのパス・最終利用時刻・gc
@@ -296,6 +306,7 @@ video-understanding/
 | 日付 | 種別 | 内容 |
 |---|---|---|
 | 2026-11-23 | Draft | 初稿 |
+| 2026-11-24 | Implementing | 設計を PR #287 でマージ。PR1 の確認結果を反映（imageio-ffmpeg の arm64 版・ffprobe 無し、縦長動画の画質、YouTube の JS 実行環境と字幕の 429、自動字幕の翻訳の扱い、自動の間隔） |
 
 ### 実装フェーズ
 
