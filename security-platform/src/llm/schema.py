@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-PROMPT_VERSION = "2026-11-25.1"
+PROMPT_VERSION = "2026-11-25.2"
 MAX_INPUT_CHARS = 12_000  # 記事の本文はこの長さで切る (長い記事は冒頭に要点がある)
 MAX_CLAIMS = 20
 MAX_QUOTE = 500
@@ -109,7 +109,9 @@ Also give a brief of the article for a daily security news digest, whether or no
   - none: not about a security event
   Judge from what the article reports, not from how urgent it sounds. A vulnerability the article says
   is being exploited (in the wild, in attacks, or added to CISA KEV) is at least high, even in a less
-  widely used product.
+  widely used product. A vulnerability whose only impact is denial of service is at most medium unless it
+  is being exploited. A provider bulletin saying the issue is already fixed on the provider side and users
+  need not act is low.
 - summary_ja: one or two plain Japanese sentences (at most {MAX_SUMMARY_JA} characters, no line breaks,
   no URLs) saying what happened and who is affected. Only state what the article says
 - topics: up to {MAX_TOPICS} of {", ".join(TOPICS)}

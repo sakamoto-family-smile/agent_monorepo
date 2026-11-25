@@ -204,7 +204,7 @@ Claude・MCP / Docker / macOS など) に関係するものを上に並べる。
 | `src/notify/pipeline.py` | 変更 | `run_digest` のあとに重大ニュースを送る。週次ジョブ `notify_news_weekly` を追加 |
 | `src/notify/channels.py` | 変更 | GitHub Issues に「作成して URL を返す」「閉じる」を足す (既存のクライアントを使う) |
 | `config/news.yaml` | 新規 | 使っている技術 (`stack` = `TOPICS` の部分集合) と、KEV で関係ありとみなす製品名 |
-| `src/config.py` | 変更 | `NEWS_DAILY_ENABLED` / `NEWS_WEEKLY_ENABLED` / `NEWS_DAILY_LIMIT` (既定 5) / `NEWS_WEEKLY_WEEKDAY` (既定 月曜) |
+| `src/config.py` | 変更 | `NEWS_DAILY_ENABLED` / `NEWS_WEEKLY_ENABLED` / `NEWS_DAILY_LIMIT` (既定 8) / `NEWS_WEEKLY_WEEKDAY` (既定 月曜) |
 
 **日次の選び方** (`news.py`)
 
@@ -269,7 +269,7 @@ Claude・MCP / Docker / macOS など) に関係するものを上に並べる。
 |---|---|---|
 | `NEWS_DAILY_ENABLED` | false → 動作確認後に true | 日次の重大ニュースを送る |
 | `NEWS_WEEKLY_ENABLED` | false → 1 週分たまってから true | 週次の Issue を作る |
-| `NEWS_DAILY_LIMIT` | 5 | 日次に載せる記事の数 |
+| `NEWS_DAILY_LIMIT` | 8 | 日次に載せる記事の数 |
 | `LLM_DAILY_LIMIT` | 80 | LLM の 1 日の呼び出し上限 (今は 50) |
 | `LLM_NEWS_DAILY_LIMIT` | 30 | そのうち報道系に使ってよい回数 |
 | (将来) 昼の処理枠 | なし | 遅れが気になるときに extractor の処理時間帯を 1 つ足す |

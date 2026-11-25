@@ -153,5 +153,37 @@
       "low",
       "high"
     ]
+  },
+  {
+    "id": "exploited-niche-library",
+    "title": "Hackers exploit critical flaw in legacy ASP.NET anti-CSRF library",
+    "text": "Attackers are exploiting a critical deserialization flaw in Idunno.AntiCsrf, a legacy anti-CSRF library for ASP.NET, to run code on servers without authentication. The flaw is tracked as CVE-2026-131914. The library is no longer maintained, and users are advised to remove it.",
+    "expected": [
+      "Idunno.AntiCsrf"
+    ],
+    "severity": [
+      "critical",
+      "high"
+    ]
+  },
+  {
+    "id": "provider-fixed-no-action",
+    "title": "GCP-2026-084",
+    "text": "A path traversal vulnerability (CVE-2026-126054) was found in Dataform, BigQuery Studio and Colab Enterprise. Google fixed the issue on October 10, 2026. No customer action is required.",
+    "expected": [],
+    "severity": [
+      "low",
+      "medium"
+    ]
+  },
+  {
+    "id": "kernel-dos",
+    "title": "GCP-2026-088",
+    "text": "A vulnerability in the Linux kernel TCP implementation (CVE-2026-99288) can cause a kernel panic, leading to denial of service. GKE nodes running Container-Optimized OS and Ubuntu are affected. Upgrade your node pools to a patched version.",
+    "expected": [],
+    "severity": [
+      "medium",
+      "low"
+    ]
   }
 ]
