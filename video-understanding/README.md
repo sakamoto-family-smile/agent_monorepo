@@ -1,11 +1,35 @@
 # video-understanding
 
-YouTube の動画や手元の動画を、Claude が見られる形（時刻入りのコマ一覧画像と、時刻つきの字幕）にする CLI です。
+YouTube の動画や手元の動画を、Claude が見られる形（時刻入りのコマ一覧画像と、時刻つきの字幕）にする CLI と MCP サーバです。
 設計は [PROPOSAL-0017](../docs/PROPOSALS/0017-video-understanding-mcp.md) を参照してください。
 
-> 状態: PR1（CLI の `overview` / `frames`）。MCP サーバは PR2、字幕の無い動画の文字起こしと `gc` は PR3 で足します。
+> 状態: PR2（CLI と MCP サーバ）。字幕の無い動画の文字起こしと `gc` は PR3 で足します。
 
-## 使い方
+## Claude Code から使う（MCP）
+
+```bash
+claude mcp add --scope user video-understanding \
+  -e VIDEO_UNDERSTANDING_ALLOWED_DIRS="$HOME/development/golf_data" \
+  -- uv run --quiet --directory "$HOME/development/agent_monorepo/video-understanding" video-understanding-mcp
+```
+
+`--scope user` なので、どのディレクトリで開いた Claude Code からも使えます。登録後は「この動画を見て」と URL を渡すだけで使われます。
+
+| ツール | 使いどころ | 返すもの |
+|---|---|---|
+| `video_overview(source, interval_sec?, lang?)` | 最初に全体を見る | 情報・字幕・全体のコマ一覧画像（最大 2 枚） |
+| `video_frames(source, start, end, fps?, crop?)` | 動きの細部を見る | 区間のコマ一覧画像（30 コマ・30fps まで） |
+| `video_transcript(source, lang?)` | 話の中身だけ欲しい | 時刻つきの字幕の全文と、その出どころ |
+
+- 画像は MCP の画像として返すので、Claude がファイルを経由せずそのまま見られます。
+- ログ（取得元・処理時間・断った理由）は stderr に出ます。stdout は MCP のやりとりに使います。
+- 許可ディレクトリを変えたときは `claude mcp remove --scope user video-understanding` してから登録し直してください。
+- 外すとき: `claude mcp remove --scope user video-understanding` と `rm -rf ~/.cache/video-understanding`
+
+Claude Desktop では `claude_desktop_config.json` の `mcpServers` に同じコマンドを書きます
+（`"command": "uv"`, `"args": ["run", "--quiet", "--directory", "<このディレクトリの絶対パス>", "video-understanding-mcp"]`, `"env": {...}`）。
+
+## CLI から使う
 
 ```bash
 cd video-understanding
@@ -37,7 +61,7 @@ Claude Code からは、表示されたパスを Read で開けば見られま�
 
 ## 字幕が取れないとき
 
-- YouTube は字幕の取得を `HTTP Error 429` で断ることがあります（短時間に何度も取ったとき等）。その場合もコマ画像は返し、
+- YouTube は字幕の取得を `HTTP Error 429` で断ることがあります（2026-11 時点では、日をまたいでも断られ続けることがありました）。その場合もコマ画像は返し、
   「字幕: なし — 字幕を取得できませんでした (...)」と理由を表示します。次の呼び出しで取り直します。
 - 字幕の無い動画やローカルの動画は、今は字幕なしです（PR3 で mlx-whisper による文字起こしを足します）。
 - 自動字幕が YouTube の自動翻訳のときは「ko から ja への YouTube の自動翻訳」のように表示します。話し言葉の言語を YouTube が取り違えることがあるためです。
