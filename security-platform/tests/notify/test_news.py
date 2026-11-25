@@ -217,10 +217,10 @@ def test_message_fits_line_limit(env):
         add_article(intel, n, "critical", summary="あ" * 140, url="https://ex.test/" + "x" * 200)
     for n in range(1, 20):
         add_kev(intel, f"CVE-2026-{n}", "Vendor" * 5, "Product" * 5, "2026-11-22")
-    p = make()
+    p = make(limit=NotifySettings.news_daily_limit)  # 既定の件数で、要約・URL・KEV が最も長くても 1 通に収まる
     p.run_news(NOW, force=True)
     [body] = apis.texts()
-    assert len(body) < 4900 and "ほか 12 件" in body and "ほか 24 件は週次まとめに載ります" in body
+    assert len(body) < 4900 and "ほか 12 件" in body and "ほか 21 件は週次まとめに載ります" in body
 
 
 # ── 監視 ──────────────────────────────────────────────────────────────────

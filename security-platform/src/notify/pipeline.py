@@ -67,7 +67,7 @@ class NotifySettings:
     host_max_age: timedelta = timedelta(hours=48)
     mirror_interval: timedelta = timedelta(minutes=10)
     news_config: news.NewsConfig | None = None  # None なら重大ニュースを送らない
-    news_daily_limit: int = 5
+    news_daily_limit: int = 8
     news_weekly: bool = False  # 週次の Issue を作るか (news_config も要る)
 
 
