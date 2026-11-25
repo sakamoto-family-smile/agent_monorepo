@@ -11,6 +11,13 @@ ENV_PREFIX = "VIDEO_UNDERSTANDING_"
 DEFAULT_CACHE_DIR = Path("~/.cache/video-understanding")
 DEFAULT_VIDEO_TTL_DAYS = 14
 DEFAULT_MAX_DURATION_SEC = 1800
+DEFAULT_WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
+# 文字起こしの用語ヒント (whisper の initial_prompt)。ゴルフのレッスン動画で崩れやすい言葉を並べる
+DEFAULT_WHISPER_PROMPT = (
+    "ゴルフスイングのレッスン動画です。アドレス、テークバック、トップ、切り返し、ダウンスイング、"
+    "インパクト、フォロースルー、フィニッシュ、体重移動、左足、右足、骨盤、股関節、捻転、"
+    "ハンドファースト、フェース、シャフト、クラブ、ドライバー、アイアン、ウェッジ、ヘッドスピード。"
+)
 
 
 class ConfigError(ValueError):
@@ -23,6 +30,8 @@ class Config:
     allowed_dirs: tuple[Path, ...]
     video_ttl_days: int
     max_duration_sec: int
+    whisper_model: str = DEFAULT_WHISPER_MODEL
+    whisper_prompt: str = DEFAULT_WHISPER_PROMPT
 
 
 def _positive_int(env: Mapping[str, str], name: str, default: int) -> int:
@@ -52,4 +61,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         allowed_dirs=allowed,
         video_ttl_days=_positive_int(env, "VIDEO_TTL_DAYS", DEFAULT_VIDEO_TTL_DAYS),
         max_duration_sec=_positive_int(env, "MAX_DURATION_SEC", DEFAULT_MAX_DURATION_SEC),
+        whisper_model=env.get(ENV_PREFIX + "WHISPER_MODEL", "").strip() or DEFAULT_WHISPER_MODEL,
+        # 空文字を明示すればヒント無しにできる
+        whisper_prompt=env.get(ENV_PREFIX + "WHISPER_PROMPT", DEFAULT_WHISPER_PROMPT).strip(),
     )

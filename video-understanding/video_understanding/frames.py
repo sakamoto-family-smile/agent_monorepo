@@ -20,6 +20,7 @@ INTERVAL_STEPS = (0.25, 0.5, 1, 2, 3, 5, 10, 15, 20, 30, 60, 120, 300, 600)
 JPEG_QUALITY = 85
 FFMPEG_TIMEOUT_SEC = 60
 LABEL_PAD = 3
+NO_FRAME_MARKER = "Nothing was written into output file"
 
 
 class FramesError(ValueError):
@@ -146,11 +147,15 @@ def extract(
             if crop:
                 cmd += ["-vf", crop.ffmpeg_filter()]
             tmp = dest.with_name(dest.stem + ".part.jpg")
-            subprocess.run(
-                [*cmd, "-y", str(tmp)], check=True, capture_output=True, timeout=FFMPEG_TIMEOUT_SEC
+            proc = subprocess.run(
+                [*cmd, "-y", str(tmp)], capture_output=True, timeout=FFMPEG_TIMEOUT_SEC
             )
-            if not tmp.exists():  # 終端付近で読めるコマが無かった
-                continue
+            if not tmp.exists():
+                err = proc.stderr.decode("utf-8", "replace")
+                # 終端付近で読めるコマが無かった (音声のほうが映像より長い動画で起きる)
+                if proc.returncode == 0 or NO_FRAME_MARKER in err:
+                    continue
+                raise FramesError(f"{t:.3f} 秒のコマを取り出せませんでした: {err.strip()[-300:]}")
             tmp.rename(dest)
         frames.append(Frame(t, dest))
     return frames

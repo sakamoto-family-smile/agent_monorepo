@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | Implementing |
+| **Status** | Implemented |
 | **Author** | @sakamoto-family-smile |
 | **Created** | 2026-11-23 |
 | **Updated** | 2026-11-25 |
 | **Target** | video-understanding（新規 cross-agent ツール） |
-| **Related PRs** | #287 (設計), #288 (PR1) |
+| **Related PRs** | #287 (設計), #288 (PR1), #290 (PR2), PR3 |
 | **Supersedes** | — |
 | **Superseded by** | — |
 
@@ -36,10 +36,10 @@ Claude Code が YouTube などの動画の中身を、人が見るのに近い�
 
 ### [必須] 2.1 Goals
 
-- [ ] YouTube の URL（通常の動画・ショート）を渡すと、1 回の呼び出しで「動画の情報＋字幕（または文字起こし）＋時刻入りのコマ一覧画像」が返る
-- [ ] 指定した区間（例: 3.0〜5.0 秒）のコマを細かく（最大 30fps）取り出し、画像として返せる
-- [ ] 字幕の無い動画でも、Mac 上の文字起こし（mlx-whisper）で日本語の音声を時刻つきテキストにできる
-- [ ] ローカルの動画ファイル（許可したディレクトリ内）にも同じツールが使える
+- [x] YouTube の URL（通常の動画・ショート）を渡すと、1 回の呼び出しで「動画の情報＋字幕（または文字起こし）＋時刻入りのコマ一覧画像」が返る
+- [x] 指定した区間（例: 3.0〜5.0 秒）のコマを細かく（最大 30fps）取り出し、画像として返せる
+- [x] 字幕の無い動画でも、Mac 上の文字起こし（mlx-whisper）で日本語の音声を時刻つきテキストにできる
+- [x] ローカルの動画ファイル（許可したディレクトリ内）にも同じツールが使える
 - [ ] 同じ動画を 2 回目に調べるときは、キャッシュから数秒で返る
 
 ### [必須] 2.2 Non-Goals
@@ -124,7 +124,7 @@ Claude Code / Claude Desktop
                   ▼
    ~/.cache/video-understanding/<key>/
        info.json  video.mp4  audio.wav  caption-<lang>.json  captions.<kind>.<lang>.json3
-       transcript.json  frames/<t>.jpg  sheets/<spec>.jpg
+       whisper-*.json   frames/<t>.jpg  sheets/<spec>.jpg
 ```
 
 - MCP は CLI と同じ関数を呼ぶだけの薄い窓口にする。処理の本体はテストしやすい純粋な Python 関数に寄せる。
@@ -140,7 +140,7 @@ DB は持たない。キャッシュディレクトリだけで管理する。
 | `video.mp4` | 短辺 480 以下の動画本体 | 最終利用から 14 日（`VIDEO_UNDERSTANDING_VIDEO_TTL_DAYS`） |
 | `captions.*.json3` | YouTube の字幕（手動 > 自動の順で 1 本） | 消さない |
 | `caption-<lang>.json` | 指定の言語で選んだ字幕と、自動翻訳かどうか（無ければ「無し」と記録。取得に失敗したときは書かず、次に取り直す） | 消さない |
-| `transcript.json` | 正規化した時刻つきテキスト（`source`: `captions_manual` / `captions_auto` / `whisper:<model>`） | 消さない |
+| `whisper-<lang>-<hash>.json` | 文字起こしの結果（モデル・時刻つきテキスト）。hash はモデルと用語ヒントから作る | 消さない |
 | `frames/`・`sheets/` | 抜き出したコマ・一覧画像 | 動画本体と同じ |
 
 キャッシュのキー: YouTube は動画 ID、ローカルファイルは中身の sha256（パスが変わっても同じ動画と分かる）。
@@ -210,8 +210,8 @@ video-understanding/
 - **Manual / E2E**
   - [ ] `claude mcp add --scope user` で登録し、別のディレクトリで開いた Claude Code から `video_overview` が呼べる
   - [ ] 2026-11-23 の比嘉兄弟のショートで、人の補足なしに「左足に乗ってから回す」という内容が読み取れる
-  - [ ] `golf_data/<shot>/Side.mp4`（許可ディレクトリに追加して）の切り返し区間を `video_frames` で取り出せる
-  - [ ] 2 回目の呼び出しがキャッシュから数秒で返る
+  - [x] `golf_data/<shot>/Side.mp4`（許可ディレクトリに追加して）の切り返し区間を `video_frames` で取り出せる
+  - [x] 2 回目の呼び出しがキャッシュから数秒で返る
 
 ### [推奨] 4.6 Migration / Rollback
 
@@ -307,6 +307,7 @@ video-understanding/
 |---|---|---|
 | 2026-11-23 | Draft | 初稿 |
 | 2026-11-24 | Implementing | 設計を PR #287 でマージ。PR1 の確認結果を反映（imageio-ffmpeg の arm64 版・ffprobe 無し、縦長動画の画質、YouTube の JS 実行環境と字幕の 429、自動字幕の翻訳の扱い、自動の間隔） |
+| 2026-11-25 | Implemented | PR2 (#290) をマージ。PR3: 文字起こし（`speech.py`）と `gc`。mlx-whisper は torch を必須の依存にしていて .venv が約 1.3GB になるため optional extra のままにした。音声が無い・無音の動画は文字起こしせず理由を返す（無音を渡すと whisper が文を作り出すため）。比嘉兄弟のショートは BGM の歌だけでナレーションが無く、内容はテロップ（コマ画像）から読むものだった。音声のほうが映像より長い動画で、終端のコマ抜きが失敗していた不具合も直した |
 | 2026-11-25 | Implementing | PR1 (#288) をマージ。PR2: MCP サーバ。server.py はパッケージの中に置き、`video-understanding-mcp` で起動する。字幕の 429 は日をまたいでも続いたため、内容を確実に取るのは PR3 の文字起こしが前提になる |
 
 ### 実装フェーズ
