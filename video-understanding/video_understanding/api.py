@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from . import frames as fr
+from . import speech
 from .cache import Cache
 from .config import Config
 from .fetch import YdlFactory, fetch_youtube
 from .source import Source, parse_source
 from .transcript import Segment, format_segments, format_timestamp, parse_json3, parse_vtt
+
+log = logging.getLogger(__name__)
 
 LANG_RE = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$")
 DESCRIPTION_MAX_CHARS = 1500
@@ -28,7 +33,7 @@ class InputError(ValueError):
 
 @dataclass(frozen=True)
 class Transcript:
-    source: str  # captions_manual / captions_auto
+    source: str  # captions_manual / captions_auto / whisper:<model>
     lang: str
     segments: list[Segment]
     translated_from: str | None = None
@@ -84,19 +89,53 @@ def prepare(
             source.path,
             work_dir,
             meta,
-            transcript_note="ローカルの動画には字幕がありません (文字起こしは未対応)",
+            transcript_note="ローカルの動画には字幕がありません",
         )
     assert source.url is not None
     fetched = fetch_youtube(source.url, work_dir, lang, cfg.max_duration_sec, ydl_factory)
     meta = fr.probe(fetched.video)
     track, body = fetched.caption, fetched.caption_body
     if track is None or body is None:
-        note = fetched.caption_error or "この動画には字幕がありません (文字起こしは未対応)"
+        note = fetched.caption_error or "この動画には字幕がありません"
         return Prepared(source, fetched.info, fetched.video, work_dir, meta, transcript_note=note)
     transcript = Transcript(
         track.kind, track.lang, _parse_caption(track.ext, body), track.translated_from
     )
     return Prepared(source, fetched.info, fetched.video, work_dir, meta, transcript)
+
+
+def _join(*notes: str | None) -> str:
+    return "。".join(n for n in notes if n)
+
+
+def with_speech(
+    p: Prepared,
+    cfg: Config,
+    lang: str,
+    force_whisper: bool = False,
+    transcribe_fn: speech.TranscribeFn | None = None,
+) -> Prepared:
+    """字幕が無ければ (force_whisper なら字幕があっても) 音声を文字起こしする。
+
+    文字起こしができないときは、字幕 (あれば) のまま理由を note に足して返す。
+    """
+    if p.transcript is not None and not force_whisper:
+        return p
+    try:
+        segments = speech.transcribe(
+            p.video, p.work_dir, cfg.whisper_model, cfg.whisper_prompt, lang, transcribe_fn
+        )
+    except speech.SpeechUnavailable as e:
+        return dataclasses.replace(p, transcript_note=_join(p.transcript_note, str(e)))
+    except Exception as e:  # noqa: BLE001 - 文字起こしが失敗してもコマ画像は返したい
+        log.exception("文字起こしに失敗しました")
+        note = _join(p.transcript_note, f"文字起こしに失敗しました ({e})")
+        return dataclasses.replace(p, transcript_note=note)
+    if not segments:
+        note = _join(p.transcript_note, "文字起こしで言葉が見つかりませんでした")
+        return dataclasses.replace(p, transcript_note=note)
+    t = Transcript(f"whisper:{cfg.whisper_model}", speech.whisper_lang(lang), segments)
+    return dataclasses.replace(p, transcript=t, transcript_note=None)
 
 
 def overview(
@@ -105,8 +144,11 @@ def overview(
     interval: float | None = None,
     lang: str = "ja",
     ydl_factory: YdlFactory | None = None,
+    transcribe_fn: speech.TranscribeFn | None = None,
 ) -> OverviewResult:
-    prepared = prepare(raw_source, cfg, lang, ydl_factory)
+    prepared = with_speech(
+        prepare(raw_source, cfg, lang, ydl_factory), cfg, lang, transcribe_fn=transcribe_fn
+    )
     step = interval if interval is not None else fr.auto_interval(prepared.meta.duration)
     times = fr.sample_times(prepared.meta.duration, step)
     frames = fr.extract(prepared.video, times, prepared.work_dir / "frames")
@@ -139,10 +181,16 @@ def frames(
 
 
 def transcript(
-    raw_source: str, cfg: Config, lang: str = "ja", ydl_factory: YdlFactory | None = None
+    raw_source: str,
+    cfg: Config,
+    lang: str = "ja",
+    force_whisper: bool = False,
+    ydl_factory: YdlFactory | None = None,
+    transcribe_fn: speech.TranscribeFn | None = None,
 ) -> Prepared:
-    """字幕だけが欲しいとき。コマは抜かない。"""
-    return prepare(raw_source, cfg, lang, ydl_factory)
+    """字幕か文字起こしだけが欲しいとき。コマは抜かない。"""
+    prepared = prepare(raw_source, cfg, lang, ydl_factory)
+    return with_speech(prepared, cfg, lang, force_whisper, transcribe_fn)
 
 
 # ---- 表示 --------------------------------------------------------------------------------
@@ -157,6 +205,11 @@ def wrap_untrusted(text: str, source: str) -> str:
 
 
 def _source_label(t: Transcript) -> str:
+    if t.source.startswith("whisper:"):
+        model = t.source.removeprefix("whisper:")
+        return (
+            f"文字起こし (mlx-whisper {model}, {t.lang}。固有名詞や専門用語は誤りがある可能性あり)"
+        )
     kind = "手動字幕" if t.source == "captions_manual" else "自動字幕"
     if t.translated_from:
         return f"{kind} ({t.translated_from} から {t.lang} への YouTube の自動翻訳。誤りが多い可能性あり)"
@@ -191,9 +244,12 @@ def _render_transcript(p: Prepared, max_chars: int) -> list[str]:
     if p.transcript is None:
         return [f"字幕: なし — {p.transcript_note}"]
     text, truncated = format_segments(p.transcript.segments, max_chars)
-    lines = [f"字幕: {_source_label(p.transcript)}", wrap_untrusted(text, "captions")]
+    kind = "transcription" if p.transcript.source.startswith("whisper:") else "captions"
+    lines = [f"字幕: {_source_label(p.transcript)}", wrap_untrusted(text, kind)]
     if truncated:
         lines.append(f"(字幕は {max_chars} 文字で打ち切りました)")
+    if p.transcript_note:
+        lines.append(f"(注: {p.transcript_note})")
     return lines
 
 

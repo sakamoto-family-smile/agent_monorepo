@@ -89,3 +89,46 @@ def test_contact_sheet_limits(tmp_path):
 def test_chunk():
     items = [fr.Frame(i, None) for i in range(45)]
     assert [len(c) for c in fr.chunk(items)] == [20, 20, 5]
+
+
+def test_extract_skips_times_past_the_last_video_frame(tmp_path):
+    """音声のほうが長いと、コンテナの長さの終わり近くには映像のコマが無い。"""
+    import subprocess
+
+    import imageio_ffmpeg
+
+    video = tmp_path / "long_audio.mp4"
+    subprocess.run(
+        [
+            imageio_ffmpeg.get_ffmpeg_exe(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=1:size=160x120:rate=10",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=duration=3",
+            "-c:a",
+            "aac",
+            "-pix_fmt",
+            "yuv420p",
+            "-y",
+            str(video),
+        ],
+        check=True,
+    )
+    meta = fr.probe(video)
+    assert meta.duration > 2.5
+    got = fr.extract(video, [0.5, 2.5], tmp_path / "frames")
+    assert [f.t for f in got] == [0.5]
+
+
+def test_extract_reports_other_ffmpeg_errors(tmp_path):
+    broken = tmp_path / "broken.mp4"
+    broken.write_bytes(b"not a video")
+    with pytest.raises(fr.FramesError, match="コマを取り出せませんでした"):
+        fr.extract(broken, [0.0], tmp_path / "frames")

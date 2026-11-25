@@ -85,3 +85,9 @@ def test_user_errors_become_tool_errors(env):
 def test_argument_validation(env):
     with pytest.raises(ToolError):
         call("video_frames", {"source": URL, "start": 0, "end": 1, "fps": 60})
+
+
+def test_transcript_force_whisper(env, video_with_audio, no_real_whisper):
+    res = call("video_transcript", {"source": str(video_with_audio), "force_whisper": True})
+    assert "文字起こし (mlx-whisper" in res.content[0].text
+    assert len(no_real_whisper.calls) == 1
