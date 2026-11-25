@@ -18,8 +18,11 @@ uv sync --extra whisper   # 文字起こしも使う (Apple Silicon の Mac の�
 ```bash
 claude mcp add --scope user video-understanding \
   -e VIDEO_UNDERSTANDING_ALLOWED_DIRS="$HOME/development/golf_data" \
-  -- uv run --quiet --directory "$HOME/development/agent_monorepo/video-understanding" video-understanding-mcp
+  -- uv run --quiet --extra whisper --directory "$HOME/development/agent_monorepo/video-understanding" video-understanding-mcp
 ```
+
+`--extra whisper` を付けておくと、開発中に `uv sync`（extra なし）で mlx-whisper が外れても、起動のたびに入れ直されます。
+文字起こしを使わないときは外してください。
 
 `--scope user` なので、どのディレクトリで開いた Claude Code からも使えます。登録後は「この動画を見て」と URL を渡すだけで使われます。
 
@@ -35,7 +38,7 @@ claude mcp add --scope user video-understanding \
 - 外すとき: `claude mcp remove --scope user video-understanding` と `rm -rf ~/.cache/video-understanding`
 
 Claude Desktop では `claude_desktop_config.json` の `mcpServers` に同じコマンドを書きます
-（`"command": "uv"`, `"args": ["run", "--quiet", "--directory", "<このディレクトリの絶対パス>", "video-understanding-mcp"]`, `"env": {...}`）。
+（`"command": "uv"`, `"args": ["run", "--quiet", "--extra", "whisper", "--directory", "<このディレクトリの絶対パス>", "video-understanding-mcp"]`, `"env": {...}`）。
 
 ## CLI から使う
 
