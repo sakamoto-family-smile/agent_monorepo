@@ -123,7 +123,7 @@ Claude Code / Claude Desktop
                   │
                   ▼
    ~/.cache/video-understanding/<key>/
-       info.json  video.mp4  audio.wav  caption-<lang>.json  captions.<kind>.<lang>.json3
+       info.json  video.mp4  caption-<lang>.json  captions.<kind>.<lang>.json3
        whisper-*.json   frames/<t>.jpg  sheets/<spec>.jpg
 ```
 
